@@ -62,6 +62,8 @@ def search_youtube(query: str) -> list[dict]:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(f"ytsearch5:{query}", download=False)
 
+    if not info:
+        return []
     results = []
     for entry in (info.get("entries") or []):
         if not entry:

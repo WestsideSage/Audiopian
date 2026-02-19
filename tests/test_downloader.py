@@ -1,5 +1,5 @@
-from unittest.mock import patch, MagicMock
-from downloader import extract_metadata, download_audio, parse_title_artist
+from unittest.mock import patch
+from downloader import extract_metadata, download_audio, parse_title_artist, search_youtube
 
 
 def test_extract_metadata_returns_title_and_artist():
@@ -57,3 +57,60 @@ def test_extract_metadata_uses_dash_split_when_no_artist_field():
         result = extract_metadata("https://youtube.com/watch?v=fake")
     assert result["artist"] == "Black Moon"
     assert result["title"] == "Who Got Da Props"
+
+
+def test_search_youtube_returns_results():
+    mock_info = {
+        "entries": [
+            {
+                "id": "abc123",
+                "title": "Song One",
+                "uploader": "Artist A",
+                "duration": 200,
+            },
+            {
+                "id": "def456",
+                "title": "Song Two",
+                "uploader": "Artist B",
+                "duration": 180,
+            },
+        ]
+    }
+    with patch("downloader.yt_dlp.YoutubeDL") as MockYDL:
+        instance = MockYDL.return_value.__enter__.return_value
+        instance.extract_info.return_value = mock_info
+        results = search_youtube("some query")
+    assert len(results) == 2
+    assert results[0]["id"] == "abc123"
+    assert results[0]["title"] == "Song One"
+    assert results[0]["uploader"] == "Artist A"
+    assert results[0]["duration"] == 200
+    assert results[0]["url"] == "https://www.youtube.com/watch?v=abc123"
+    assert results[1]["id"] == "def456"
+
+
+def test_search_youtube_returns_empty_on_none_info():
+    with patch("downloader.yt_dlp.YoutubeDL") as MockYDL:
+        instance = MockYDL.return_value.__enter__.return_value
+        instance.extract_info.return_value = None
+        results = search_youtube("some query")
+    assert results == []
+
+
+def test_search_youtube_falls_back_channel_when_no_uploader():
+    mock_info = {
+        "entries": [
+            {
+                "id": "ghi789",
+                "title": "Song Three",
+                "channel": "Channel C",
+                "duration": 210,
+            },
+        ]
+    }
+    with patch("downloader.yt_dlp.YoutubeDL") as MockYDL:
+        instance = MockYDL.return_value.__enter__.return_value
+        instance.extract_info.return_value = mock_info
+        results = search_youtube("some query")
+    assert len(results) == 1
+    assert results[0]["uploader"] == "Channel C"
