@@ -16,7 +16,7 @@ if (!songData) {
 }
 
 document.getElementById('song-title').textContent =
-    ;
+    `${songData.artist} — ${songData.title}`;
 
 lyrics = songData.lyrics || [];
 
@@ -64,7 +64,7 @@ function updateLyrics() {
         const lineTop = activeLine.offsetTop;
         const lineHeight = activeLine.offsetHeight;
         lyricsScroll.style.transform =
-            ;
+            `translateY(${containerHeight / 2 - lineTop - lineHeight / 2}px)`;
     }
 }
 
@@ -90,7 +90,7 @@ function skipFwd() { audio.currentTime = Math.min(audio.duration || 0, audio.cur
 audio.addEventListener('timeupdate', () => {
     if (!audio.duration) return;
     seekBar.value = (audio.currentTime / audio.duration) * 100;
-    timeDisplay.textContent = ;
+    timeDisplay.textContent = `${fmt(audio.currentTime)} / ${fmt(audio.duration)}`;
 });
 
 seekBar.addEventListener('input', () => {
@@ -106,7 +106,7 @@ volumeBar.addEventListener('input', () => { audio.volume = volumeBar.value; });
 function fmt(s) {
     const m = Math.floor(s / 60);
     const sec = Math.floor(s % 60).toString().padStart(2, '0');
-    return ;
+    return `${m}:${sec}`;
 }
 
 // Auto-play when audio is ready
