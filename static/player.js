@@ -50,6 +50,7 @@ function updateLyrics() {
     if (idx === currentLineIndex) return;
     currentLineIndex = idx;
 
+    const container = document.getElementById('lyrics-container');
     const lines = lyricsScroll.querySelectorAll('.lyric-line');
     lines.forEach((el, i) => {
         el.classList.remove('active', 'upcoming');
@@ -57,14 +58,13 @@ function updateLyrics() {
         else if (i > idx && i <= idx + 2) el.classList.add('upcoming');
     });
 
-    // Scroll active line to center
+    // Scroll active line to vertical center of container
     if (idx >= 0) {
         const activeLine = lines[idx];
-        const containerHeight = document.getElementById('lyrics-container').offsetHeight;
+        const containerHeight = container.offsetHeight;
         const lineTop = activeLine.offsetTop;
         const lineHeight = activeLine.offsetHeight;
-        lyricsScroll.style.transform =
-            `translateY(${containerHeight / 2 - lineTop - lineHeight / 2}px)`;
+        container.scrollTop = lineTop - containerHeight / 2 + lineHeight / 2;
     }
 }
 
