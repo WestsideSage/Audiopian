@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Karaokee</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="card">
+        <h1>🎤 Karaokee</h1>
+
+        <label for="url">YouTube URL</label>
+        <input type="text" id="url" placeholder="https://youtube.com/watch?v=..." />
+
+        <label for="artist">Artist <span style="color:#666">(auto-filled)</span></label>
+        <input type="text" id="artist" placeholder="Artist name" />
+
+        <label for="title">Title <span style="color:#666">(auto-filled)</span></label>
+        <input type="text" id="title" placeholder="Song title" />
+
+        <button id="loadBtn" onclick="loadSong()">Load Song</button>
+        <div id="status"></div>
+        <button id="retryBtn" onclick="retryLyrics()" style="display:none;margin-top:10px;background:#334;">
+            Retry with edited title/artist
+        </button>
+    </div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const loadBtn = document.getElementById('loadBtn');
+
+        async function loadSong() {
+            const url = document.getElementById('url').value.trim();
+            if (!url) { setStatus('Please enter a YouTube URL.', 'error'); return; }
+
+            loadBtn.disabled = true;
+            setStatus('Fetching metadata...', '');
+
+            const metaResp = await fetch('/load', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+
+            if (!metaResp.ok) {
+                const err = await metaResp.json();
+                setStatus(err.error || 'Failed to load song.', 'error');
+                loadBtn.disabled = false;
+                return;
+            }
+
+            const data = await metaResp.json();
+
+            if (!document.getElementById('artist').value) {
+                document.getElementById('artist').value = data.artist;
+            }
+            if (!document.getElementById('title').value) {
+                document.getElementById('title').value = data.title;
+            }
+
+            if (data.lyricsError) {
+                setStatus(data.lyricsError, 'error');
+                document.getElementById('retryBtn').style.display = 'block';
+                loadBtn.disabled = false;
+                return;
+            }
+
+            setStatus('Ready! Loading player...', 'success');
+            sessionStorage.setItem('songData', JSON.stringify(data));
+            window.location.href = '/player';
+        }
+
+        async function retryLyrics() {
+            const title = document.getElementById('title').value.trim();
+            const artist = document.getElementById('artist').value.trim();
+            setStatus('Searching for lyrics...', '');
+            const resp = await fetch('/retry-lyrics', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, artist })
+            });
+            const data = await resp.json();
+            if (data.lyricsError) {
+                setStatus(data.lyricsError, 'error');
+                return;
+            }
+            const existing = JSON.parse(sessionStorage.getItem('songData') || '{}');
+            existing.lyrics = data.lyrics;
+            existing.title = title;
+            existing.artist = artist;
+            sessionStorage.setItem('songData', JSON.stringify(existing));
+            setStatus('Lyrics found! Loading player...', 'success');
+            window.location.href = '/player';
+        }
+
+        function setStatus(msg, type) {
+            statusEl.textContent = msg;
+            statusEl.className = type;
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Enter') loadSong();
+        });
+    </script>
+</body>
+</html>
