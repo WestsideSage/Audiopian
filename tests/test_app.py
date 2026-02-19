@@ -47,3 +47,17 @@ def test_load_no_lyrics(client):
     data = json.loads(resp.data)
     assert data["lyrics"] == []
     assert "lyricsError" in data
+
+
+def test_retry_lyrics_success(client):
+    with patch("app.fetch_lyrics") as mock_lyrics:
+        mock_lyrics.return_value = [{"time": 1.0, "text": "Line one"}]
+        resp = client.post("/retry-lyrics", json={"title": "My Song", "artist": "Me"})
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["lyrics"] == [{"time": 1.0, "text": "Line one"}]
+
+
+def test_retry_lyrics_missing_params(client):
+    resp = client.post("/retry-lyrics", json={})
+    assert resp.status_code == 400

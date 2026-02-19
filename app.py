@@ -57,5 +57,18 @@ def audio():
     return send_file(AUDIO_PATH, mimetype="audio/webm")
 
 
+
+@app.route("/retry-lyrics", methods=["POST"])
+def retry_lyrics():
+    data = request.get_json()
+    title = (data or {}).get("title", "").strip()
+    artist = (data or {}).get("artist", "").strip()
+    if not title or not artist:
+        return jsonify({"error": "Title and artist required"}), 400
+    lyrics = fetch_lyrics(title, artist)
+    if not lyrics:
+        return jsonify({"lyrics": [], "lyricsError": "Still no lyrics found."}), 200
+    return jsonify({"lyrics": lyrics})
+
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
