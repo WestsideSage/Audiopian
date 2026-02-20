@@ -15,6 +15,10 @@ if (!songData) {
     window.location.href = '/';
 }
 
+// Cache-bust audio src so the browser re-fetches on every page load
+audio.src = '/audio?t=' + Date.now();
+audio.load();
+
 document.getElementById('song-title').textContent =
     `${songData.artist} — ${songData.title}`;
 
