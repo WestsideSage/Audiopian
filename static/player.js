@@ -117,3 +117,70 @@ function fmt(s) {
 audio.addEventListener('canplay', () => {
     audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
 });
+
+// Vocal removal toggle
+let instrumentalReady = false;
+let usingInstrumental = false;
+const vocalBtn = document.getElementById('vocalBtn');
+
+function toggleVocals() {
+    if (usingInstrumental) {
+        // Switch back to full mix
+        const pos = audio.currentTime;
+        audio.src = '/audio?t=' + Date.now();
+        audio.load();
+        audio.addEventListener('canplay', () => {
+            audio.currentTime = pos;
+            audio.play().catch(() => {});
+        }, { once: true });
+        usingInstrumental = false;
+        vocalBtn.textContent = '🎤 Remove Vocals';
+        return;
+    }
+
+    if (instrumentalReady) {
+        // Already processed — just switch
+        switchToInstrumental();
+        return;
+    }
+
+    // Start processing
+    vocalBtn.textContent = '⏳ Processing...';
+    vocalBtn.disabled = true;
+
+    fetch('/separate', { method: 'POST' })
+        .then(() => pollSeparation())
+        .catch(() => {
+            vocalBtn.textContent = '🎤 Remove Vocals';
+            vocalBtn.disabled = false;
+        });
+}
+
+function pollSeparation() {
+    fetch('/separate-status')
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'done') {
+                instrumentalReady = true;
+                switchToInstrumental();
+            } else if (data.status === 'error') {
+                vocalBtn.textContent = '❌ Failed';
+                vocalBtn.disabled = false;
+            } else {
+                setTimeout(pollSeparation, 2000);
+            }
+        });
+}
+
+function switchToInstrumental() {
+    const pos = audio.currentTime;
+    audio.src = '/instrumental?t=' + Date.now();
+    audio.load();
+    audio.addEventListener('canplay', () => {
+        audio.currentTime = pos;
+        audio.play().catch(() => {});
+    }, { once: true });
+    usingInstrumental = true;
+    vocalBtn.textContent = '🎵 Full Mix';
+    vocalBtn.disabled = false;
+}
