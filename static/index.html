@@ -9,6 +9,15 @@
     <div class="card">
         <h1>🎤 Karaokee</h1>
 
+        <div class="search-row">
+            <input type="text" id="searchQ" placeholder="Search for a song..." />
+            <button onclick="searchSongs()">🔍</button>
+        </div>
+
+        <div class="search-results" id="searchResults"></div>
+
+        <div class="search-divider">or paste a URL directly</div>
+
         <label for="url">YouTube URL</label>
         <input type="text" id="url" placeholder="https://youtube.com/watch?v=..." />
 
@@ -29,6 +38,67 @@
         const statusEl = document.getElementById('status');
         const loadBtn = document.getElementById('loadBtn');
 
+        // --- Search ---
+        async function searchSongs() {
+            const q = document.getElementById('searchQ').value.trim();
+            if (!q) return;
+            setStatus('Searching...', '');
+            const resp = await fetch('/search?q=' + encodeURIComponent(q));
+            if (!resp.ok) { setStatus('Search failed.', 'error'); return; }
+            const results = await resp.json();
+            renderResults(results);
+            setStatus('', '');
+        }
+
+        function renderResults(results) {
+            const container = document.getElementById('searchResults');
+            if (!results.length) {
+                container.style.display = 'block';
+                container.innerHTML = '<div class="search-result-item"><div class="search-result-title" style="color:#666">No results found</div></div>';
+                return;
+            }
+            container.style.display = 'block';
+            container.innerHTML = results.map((r, i) =>
+                `<div class="search-result-item" onclick="selectResult(${i})">
+                    <div class="search-result-title">${escHtml(r.title)}</div>
+                    <div class="search-result-meta">${escHtml(r.uploader)} &middot; ${fmtDuration(r.duration)}</div>
+                </div>`
+            ).join('');
+            container._results = results;
+        }
+
+        function selectResult(i) {
+            const results = document.getElementById('searchResults')._results;
+            const r = results[i];
+            document.getElementById('url').value = r.url;
+            // Parse title/artist using same dash-split logic as backend
+            const [artist, title] = parseTitleArtist(r.title, r.uploader);
+            document.getElementById('artist').value = artist;
+            document.getElementById('title').value = title;
+            document.getElementById('searchResults').style.display = 'none';
+            loadSong();
+        }
+
+        function parseTitleArtist(title, uploader) {
+            if (title.includes(' - ')) {
+                const idx = title.indexOf(' - ');
+                return [title.slice(0, idx).trim(), title.slice(idx + 3).trim()];
+            }
+            return [uploader, title];
+        }
+
+        function escHtml(s) {
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function fmtDuration(s) {
+            if (!s) return '';
+            const m = Math.floor(s / 60);
+            const sec = Math.floor(s % 60).toString().padStart(2, '0');
+            return `${m}:${sec}`;
+        }
+
+        // --- Load Song ---
         async function loadSong() {
             const url = document.getElementById('url').value.trim();
             if (!url) { setStatus('Please enter a YouTube URL.', 'error'); return; }
@@ -39,7 +109,11 @@
             const metaResp = await fetch('/load', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
+                body: JSON.stringify({
+                    url,
+                    artist: document.getElementById('artist').value.trim() || undefined,
+                    title: document.getElementById('title').value.trim() || undefined,
+                })
             });
 
             if (!metaResp.ok) {
@@ -99,7 +173,13 @@
         }
 
         document.addEventListener('keydown', e => {
-            if (e.key === 'Enter') loadSong();
+            if (e.key === 'Enter') {
+                if (document.activeElement === document.getElementById('searchQ')) {
+                    searchSongs();
+                } else {
+                    loadSong();
+                }
+            }
         });
     </script>
 </body>
