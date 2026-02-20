@@ -1,10 +1,13 @@
 import os
+import threading
 from flask import Flask, request, jsonify, send_file, send_from_directory
-
-from downloader import extract_metadata, download_audio, AUDIO_PATH
+from downloader import extract_metadata, download_audio, AUDIO_PATH, search_youtube
 from lyrics import fetch_lyrics
+from vocal_remover import separate, INSTRUMENTAL_PATH
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+
+separation_state = {"status": "idle"}
 
 
 @app.route("/")
@@ -69,6 +72,49 @@ def retry_lyrics():
     if not lyrics:
         return jsonify({"lyrics": [], "lyricsError": "Still no lyrics found."}), 200
     return jsonify({"lyrics": lyrics})
+
+@app.route("/separate", methods=["POST"])
+def start_separate():
+    separation_state["status"] = "processing"
+
+    def run():
+        try:
+            separate(AUDIO_PATH)
+            separation_state["status"] = "done"
+        except Exception as e:
+            separation_state["status"] = "error"
+            separation_state["error"] = str(e)
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({"status": "processing"})
+
+
+@app.route("/separate-status")
+def separate_status():
+    status = separation_state.get("status", "idle")
+    resp = {"status": status}
+    if status == "done":
+        resp["audioUrl"] = "/instrumental"
+    if status == "error":
+        resp["error"] = separation_state.get("error", "Unknown error")
+    return jsonify(resp)
+
+
+@app.route("/instrumental")
+def instrumental():
+    if not os.path.exists(INSTRUMENTAL_PATH):
+        return jsonify({"error": "No instrumental available"}), 404
+    return send_file(INSTRUMENTAL_PATH, mimetype="audio/wav")
+
+
+@app.route("/search")
+def search():
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"error": "Query required"}), 400
+    results = search_youtube(q)
+    return jsonify(results)
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

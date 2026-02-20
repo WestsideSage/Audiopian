@@ -61,3 +61,42 @@ def test_retry_lyrics_success(client):
 def test_retry_lyrics_missing_params(client):
     resp = client.post("/retry-lyrics", json={})
     assert resp.status_code == 400
+
+
+def test_separate_starts_processing(client):
+    with patch("app.separate") as mock_sep:
+        mock_sep.return_value = "/fake/instrumental.wav"
+        resp = client.post("/separate")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["status"] == "processing"
+
+
+def test_separate_status_returns_state(client):
+    import app as app_module
+    app_module.separation_state["status"] = "done"
+    resp = client.get("/separate-status")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["status"] == "done"
+    assert data["audioUrl"] == "/instrumental"
+    # Reset
+    app_module.separation_state["status"] = "idle"
+
+
+def test_search_returns_results(client):
+    with patch("app.search_youtube") as mock_search:
+        mock_search.return_value = [
+            {"id": "abc", "title": "Test Song", "uploader": "TestChannel",
+             "duration": 200, "url": "https://youtube.com/watch?v=abc"}
+        ]
+        resp = client.get("/search?q=test+song")
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert len(data) == 1
+    assert data[0]["title"] == "Test Song"
+
+
+def test_search_missing_query(client):
+    resp = client.get("/search")
+    assert resp.status_code == 400
