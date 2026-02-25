@@ -9,7 +9,7 @@ def test_separate_returns_instrumental_path():
          patch("vocal_remover.shutil.copy2") as mock_copy, \
          patch("vocal_remover.glob.glob") as mock_glob:
         mock_run.return_value = MagicMock(returncode=0)
-        mock_glob.return_value = ["temp/demucs_out/htdemucs/audio/no_vocals.wav"]
+        mock_glob.return_value = ["temp/demucs_out/htdemucs_ft/audio/no_vocals.wav"]
         result = separate("temp/audio.webm")
     assert result == INSTRUMENTAL_PATH
     assert mock_copy.called

@@ -19,7 +19,7 @@ def separate(input_path: str) -> str:
         [
             "python", "-m", "demucs",
             "--two-stems=vocals",
-            "--name", "htdemucs",
+            "--name", "htdemucs_ft",
             "--out", DEMUCS_OUT_DIR,
             input_path,
         ],
@@ -31,7 +31,7 @@ def separate(input_path: str) -> str:
         raise RuntimeError(f"demucs failed: {result.stderr}")
 
     # demucs outputs to: <out>/<model>/<stem_name>/no_vocals.wav
-    pattern = os.path.join(DEMUCS_OUT_DIR, "htdemucs", "*", "no_vocals.wav")
+    pattern = os.path.join(DEMUCS_OUT_DIR, "htdemucs_ft", "*", "no_vocals.wav")
     matches = glob.glob(pattern)
     if not matches:
         raise RuntimeError(f"demucs output not found at {pattern}")
