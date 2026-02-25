@@ -432,6 +432,7 @@ function fmt(s) {
 
 // Suppress autoplay while loading overlay is active
 let overlayDismissed = false;
+let prepTimer = null;
 
 // Auto-play when audio is ready (only after overlay dismisses)
 audio.addEventListener('canplay', () => {
@@ -458,6 +459,14 @@ function initPrepOverlay() {
         document.getElementById('prepSongTitle').textContent =
             sd.artist + ' \u2014 ' + sd.title;
     }
+    var startTime = Date.now();
+    prepTimer = setInterval(function() {
+        var elapsed = Math.floor((Date.now() - startTime) / 1000);
+        var m = Math.floor(elapsed / 60);
+        var s = (elapsed % 60).toString().padStart(2, '0');
+        var el = document.getElementById('prepStatus');
+        if (el) el.textContent = 'Preparing audio\u2026 (' + m + ':' + s + ')';
+    }, 1000);
     pollPrep();
 }
 
@@ -477,6 +486,7 @@ function pollPrep() {
 }
 
 function finishPrep(success) {
+    clearInterval(prepTimer);
     if (success) {
         instrumentalReady = true;
     }
@@ -490,6 +500,7 @@ function finishPrep(success) {
 }
 
 function skipPrep() {
+    clearInterval(prepTimer);
     overlayDismissed = true;
     document.getElementById('prepOverlay').style.display = 'none';
     audio.play().then(function() { playBtn.textContent = '\u23F8'; }).catch(function() {});
