@@ -117,6 +117,7 @@
     <div class="player-header">
         <button class="back-btn ctrl-btn" onclick="window.location.href='/'">&#8592; Back</button>
         <div class="song-title" id="song-title">Loading...</div>
+        <div class="score-display" id="score-display" style="display:none">Score: <span id="score-pct">0%</span></div>
     </div>
 
     <div id="lyrics-container">
@@ -125,6 +126,7 @@
     </div>
 
     <div class="controls">
+        <button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">🎮 Game</button>
         <button class="ctrl-btn" id="vocalBtn" onclick="toggleVocals()">🎤 Remove Vocals</button>
         <button class="ctrl-btn" id="skipBackBtn" onclick="skipBack()">⏮</button>
         <button class="ctrl-btn" id="playBtn" onclick="togglePlay()">▶</button>
@@ -136,6 +138,22 @@
     </div>
 
     <audio id="audio"></audio>
+
+    <div class="game-modal" id="gameModal" style="display:none">
+        <div class="game-modal-box">
+            <div class="game-modal-title">🎤 Final Score</div>
+            <div class="game-modal-score" id="modalScore">0%</div>
+            <div class="game-modal-stats">
+                <div>Words correct: <span id="modalWords">0/0</span></div>
+                <div>Lines perfect: <span id="modalLines">0/0</span></div>
+                <div>Best streak: <span id="modalStreak">0</span> lines</div>
+            </div>
+            <div class="game-modal-actions">
+                <button class="ctrl-btn" onclick="replayGame()">Play Again</button>
+                <button class="ctrl-btn" onclick="window.location.href='/'">Back</button>
+            </div>
+        </div>
+    </div>
 
     <script src="/static/player.js"></script>
 </body>
