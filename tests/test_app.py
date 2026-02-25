@@ -1,6 +1,6 @@
 import json
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from app import app
 
 
@@ -124,4 +124,46 @@ def test_load_triggers_separation_automatically(client):
     assert mock_thread.called, "Thread should have been started for separation"
     assert app_module.separation_state["status"] == "processing"
     # Reset for other tests
+    app_module.separation_state["status"] = "idle"
+
+
+def test_stale_separation_thread_does_not_overwrite_new_song_status(client):
+    """When a second song is loaded, the first song's separation thread completing
+    should NOT set separation_state to 'done' (stale generation must be ignored)."""
+    import app as app_module
+
+    run_fns = []
+
+    def fake_thread(target=None, daemon=None):
+        run_fns.append(target)
+        return MagicMock()
+
+    # Load Song A
+    with patch("app.extract_metadata") as meta, \
+         patch("app.download_audio"), \
+         patch("app.fetch_lyrics") as lyrics, \
+         patch("threading.Thread", side_effect=fake_thread):
+        meta.return_value = {"title": "Song A", "artist": "Artist A"}
+        lyrics.return_value = []
+        client.post("/load", json={"url": "https://youtube.com/watch?v=a"})
+
+    # Load Song B (should increment generation counter)
+    with patch("app.extract_metadata") as meta, \
+         patch("app.download_audio"), \
+         patch("app.fetch_lyrics") as lyrics, \
+         patch("threading.Thread", side_effect=fake_thread):
+        meta.return_value = {"title": "Song B", "artist": "Artist B"}
+        lyrics.return_value = []
+        client.post("/load", json={"url": "https://youtube.com/watch?v=b"})
+
+    assert len(run_fns) == 2, "Two threads should have been created"
+
+    # Song A's thread completes (stale) — must NOT set status to 'done'
+    with patch("app.separate"):
+        run_fns[0]()
+
+    assert app_module.separation_state["status"] == "processing", \
+        "Stale thread should not have set status='done' after a newer song was loaded"
+
+    # Cleanup
     app_module.separation_state["status"] = "idle"
