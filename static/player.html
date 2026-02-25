@@ -111,6 +111,97 @@
             min-width: 90px;
             text-align: center;
         }
+
+        /* Game mode word spans */
+        .word-span {
+            display: inline-block;
+            color: #555;
+            transition: color 0.15s;
+            cursor: default;
+        }
+
+        .word-span.matched {
+            color: #00e676;
+        }
+
+        .word-span.missed {
+            color: #ff5252;
+        }
+
+        /* Game button active state */
+        .game-btn.active {
+            background: #7c4dff;
+            box-shadow: 0 0 8px #7c4dff88;
+        }
+
+        /* Running score in header */
+        .score-display {
+            margin-left: auto;
+            font-size: 1rem;
+            color: #00e676;
+            font-weight: 600;
+        }
+
+        /* Per-line score flash */
+        .line-score-flash {
+            position: absolute;
+            right: 24px;
+            font-size: 0.85rem;
+            color: #00e676;
+            pointer-events: none;
+            animation: fadeOut 1.2s ease forwards;
+        }
+
+        @keyframes fadeOut {
+            0%   { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-16px); }
+        }
+
+        /* End-of-song modal */
+        .game-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.75);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .game-modal-box {
+            background: #1a1a2e;
+            border: 1px solid #2a2a4a;
+            border-radius: 12px;
+            padding: 40px;
+            text-align: center;
+            min-width: 280px;
+        }
+
+        .game-modal-title {
+            font-size: 1.3rem;
+            color: #e040fb;
+            margin-bottom: 16px;
+        }
+
+        .game-modal-score {
+            font-size: 3rem;
+            font-weight: 700;
+            color: #00e676;
+            margin-bottom: 20px;
+        }
+
+        .game-modal-stats {
+            color: #aaa;
+            font-size: 0.95rem;
+            line-height: 2;
+            margin-bottom: 28px;
+        }
+
+        .game-modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
     </style>
 </head>
 <body>
