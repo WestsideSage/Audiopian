@@ -62,6 +62,7 @@ class GameMode {
         this.matchedSet        = new Set(); // indices of matched words in lineWords
         this.transcript        = '';      // accumulated final transcript (never reset)
         this.lineStartWordCount = 0;      // word count in transcript when current line started
+        this.latestInterim     = '';      // most recent interim, used to anchor fast-song lines
 
         // Scoring
         this.totalWords   = 0;
@@ -80,6 +81,7 @@ class GameMode {
         this.matchedSet = new Set();
         this.transcript = '';
         this.lineStartWordCount = 0;
+        this.latestInterim = '';
         this.totalWords = 0;
         this.matchedWords = 0;
         this.linesScored = 0;
@@ -134,6 +136,7 @@ class GameMode {
                 }
             }
             if (finalText) self.transcript += finalText;
+            self.latestInterim = interim;
 
             // Match primary transcript
             var unionSet = new Set();
@@ -174,7 +177,7 @@ class GameMode {
         // Don't reset transcript — late-arriving finals from previous segments
         // must remain accessible. Instead, record where this line starts in the
         // word stream so _collectMatches can skip past earlier lines.
-        this.lineStartWordCount = normalizeWords(this.transcript).length;
+        this.lineStartWordCount = normalizeWords(this.transcript + this.latestInterim).length;
         this.matchedSet = new Set();
 
         if (lineIdx < 0 || lineIdx >= lyrics.length) {
