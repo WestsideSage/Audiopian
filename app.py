@@ -40,6 +40,20 @@ def load():
     except Exception as e:
         return jsonify({"error": f"Could not download audio: {str(e)}"}), 400
 
+    # Always reset and auto-kick separation for the new song
+    separation_state["status"] = "processing"
+    separation_state.pop("error", None)
+
+    def run():
+        try:
+            separate(AUDIO_PATH)
+            separation_state["status"] = "done"
+        except Exception as e:
+            separation_state["status"] = "error"
+            separation_state["error"] = str(e)
+
+    threading.Thread(target=run, daemon=True).start()
+
     lyrics = fetch_lyrics(title, artist)
     response = {
         "title": title,

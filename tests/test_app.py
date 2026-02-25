@@ -24,7 +24,10 @@ def test_load_missing_url(client):
 
 
 def test_load_success(client):
-    with patch("app.extract_metadata") as mock_meta,          patch("app.download_audio") as mock_dl,          patch("app.fetch_lyrics") as mock_lyrics:
+    with patch("app.extract_metadata") as mock_meta, \
+         patch("app.download_audio") as mock_dl, \
+         patch("app.fetch_lyrics") as mock_lyrics, \
+         patch("threading.Thread"):          # prevent real thread
         mock_meta.return_value = {"title": "Test Song", "artist": "Test Artist"}
         mock_dl.return_value = "/fake/path/audio.webm"
         mock_lyrics.return_value = [{"time": 1.0, "text": "Hello"}]
@@ -38,7 +41,10 @@ def test_load_success(client):
 
 
 def test_load_no_lyrics(client):
-    with patch("app.extract_metadata") as mock_meta,          patch("app.download_audio") as mock_dl,          patch("app.fetch_lyrics") as mock_lyrics:
+    with patch("app.extract_metadata") as mock_meta, \
+         patch("app.download_audio") as mock_dl, \
+         patch("app.fetch_lyrics") as mock_lyrics, \
+         patch("threading.Thread"):          # prevent real thread
         mock_meta.return_value = {"title": "Obscure Song", "artist": "Nobody"}
         mock_dl.return_value = "/fake/path/audio.webm"
         mock_lyrics.return_value = []
@@ -100,3 +106,22 @@ def test_search_returns_results(client):
 def test_search_missing_query(client):
     resp = client.get("/search")
     assert resp.status_code == 400
+
+
+def test_load_triggers_separation_automatically(client):
+    """POST /load should auto-start vocal separation in the background."""
+    import app as app_module
+    app_module.separation_state["status"] = "idle"
+    with patch("app.extract_metadata") as mock_meta, \
+         patch("app.download_audio") as mock_dl, \
+         patch("app.fetch_lyrics") as mock_lyrics, \
+         patch("threading.Thread") as mock_thread:
+        mock_meta.return_value = {"title": "Test", "artist": "Artist"}
+        mock_dl.return_value = "/fake/path"
+        mock_lyrics.return_value = []
+        resp = client.post("/load", json={"url": "https://youtube.com/watch?v=fake"})
+    assert resp.status_code == 200
+    assert mock_thread.called, "Thread should have been started for separation"
+    assert app_module.separation_state["status"] == "processing"
+    # Reset for other tests
+    app_module.separation_state["status"] = "idle"
