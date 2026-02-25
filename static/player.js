@@ -412,9 +412,14 @@ function fmt(s) {
     return `${m}:${sec}`;
 }
 
-// Auto-play when audio is ready
+// Suppress autoplay while loading overlay is active
+let overlayDismissed = false;
+
+// Auto-play when audio is ready (only after overlay dismisses)
 audio.addEventListener('canplay', () => {
-    audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
+    if (overlayDismissed) {
+        audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
+    }
 });
 
 audio.addEventListener('ended', () => {
@@ -426,6 +431,53 @@ audio.addEventListener('ended', () => {
         setTimeout(() => gameMode.showEndModal(), 600);
     }
 });
+
+// --- Loading overlay ---
+
+function initPrepOverlay() {
+    var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
+    if (sd) {
+        document.getElementById('prepSongTitle').textContent =
+            sd.artist + ' \u2014 ' + sd.title;
+    }
+    pollPrep();
+}
+
+function pollPrep() {
+    fetch('/separate-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.status === 'done') {
+                finishPrep(true);
+            } else if (data.status === 'error') {
+                finishPrep(false);
+            } else {
+                setTimeout(pollPrep, 2000);
+            }
+        })
+        .catch(function() { setTimeout(pollPrep, 2000); });
+}
+
+function finishPrep(success) {
+    if (success) {
+        instrumentalReady = true;
+    }
+    overlayDismissed = true;
+    var overlay = document.getElementById('prepOverlay');
+    overlay.style.opacity = '0';
+    setTimeout(function() {
+        overlay.style.display = 'none';
+        audio.play().then(function() { playBtn.textContent = '\u23F8'; }).catch(function() {});
+    }, 400);
+}
+
+function skipPrep() {
+    overlayDismissed = true;
+    document.getElementById('prepOverlay').style.display = 'none';
+    audio.play().then(function() { playBtn.textContent = '\u23F8'; }).catch(function() {});
+}
+
+initPrepOverlay();
 
 // Vocal removal toggle
 let instrumentalReady = false;
@@ -496,13 +548,16 @@ function switchToInstrumental() {
 
 function toggleGameMode() {
     if (lyrics.length === 0) {
-        alert('No lyrics available for this song — game mode requires synced lyrics.');
+        alert('No lyrics available for this song \u2014 game mode requires synced lyrics.');
+        return;
+    }
+    if (!instrumentalReady) {
+        alert('Vocal separation is still processing. Please wait or click Skip to use karaoke-only mode.');
         return;
     }
     if (gameMode.active) {
         gameMode.stop();
     } else {
-        // Auto-enable vocal removal for cleaner mic input
         if (!usingInstrumental) {
             toggleVocals();
         }
