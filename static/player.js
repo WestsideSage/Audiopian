@@ -58,9 +58,10 @@ class GameMode {
         this.activeLineIdx = -1;
 
         // Current line tracking
-        this.lineWords    = [];   // normalized words for active line
-        this.matchedSet   = new Set(); // indices of matched words in lineWords
-        this.transcript   = '';   // accumulated transcript for current line
+        this.lineWords         = [];      // normalized words for active line
+        this.matchedSet        = new Set(); // indices of matched words in lineWords
+        this.transcript        = '';      // accumulated final transcript (never reset)
+        this.lineStartWordCount = 0;      // word count in transcript when current line started
 
         // Scoring
         this.totalWords   = 0;
@@ -78,6 +79,7 @@ class GameMode {
         this.lineWords = [];
         this.matchedSet = new Set();
         this.transcript = '';
+        this.lineStartWordCount = 0;
         this.totalWords = 0;
         this.matchedWords = 0;
         this.linesScored = 0;
@@ -169,7 +171,10 @@ class GameMode {
         }
 
         this.activeLineIdx = lineIdx;
-        this.transcript = '';
+        // Don't reset transcript — late-arriving finals from previous segments
+        // must remain accessible. Instead, record where this line starts in the
+        // word stream so _collectMatches can skip past earlier lines.
+        this.lineStartWordCount = normalizeWords(this.transcript).length;
         this.matchedSet = new Set();
 
         if (lineIdx < 0 || lineIdx >= lyrics.length) {
@@ -199,10 +204,14 @@ class GameMode {
     _collectMatches(transcript, resultSet) {
         if (this.lineWords.length === 0) return;
         var spoken = normalizeWords(transcript);
-        var spokenIdx = 0;
+        // Start near the word position where the current line began.
+        // The -4 buffer absorbs recognition latency: finals that committed
+        // just before setActiveLine fired may still contain the line's words.
+        var startOffset = Math.max(0, this.lineStartWordCount - 4);
+        var spokenIdx = startOffset;
         for (var li = 0; li < this.lineWords.length; li++) {
             var target = this.lineWords[li];
-            var driftWindow = 6;
+            var driftWindow = 12;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (spoken[si] === target) {
                     resultSet.add(li);
