@@ -51,6 +51,237 @@ function expandContractions(words) {
     return out;
 }
 
+class GameMode {
+    constructor() {
+        this.active       = false;
+        this.recognition  = null;
+        this.activeLineIdx = -1;
+
+        // Current line tracking
+        this.lineWords    = [];   // normalized words for active line
+        this.matchedSet   = new Set(); // indices of matched words in lineWords
+        this.transcript   = '';   // accumulated transcript for current line
+
+        // Scoring
+        this.totalWords   = 0;
+        this.matchedWords = 0;
+        this.linesScored  = 0;
+        this.perfectLines = 0;
+        this.currentStreak = 0;
+        this.bestStreak   = 0;
+    }
+
+    start() {
+        if (this.active) return;
+        this.active = true;
+        this.activeLineIdx = -1;
+        this.lineWords = [];
+        this.matchedSet = new Set();
+        this.transcript = '';
+        this.totalWords = 0;
+        this.matchedWords = 0;
+        this.linesScored = 0;
+        this.perfectLines = 0;
+        this.currentStreak = 0;
+        this.bestStreak = 0;
+
+        renderLyricsGameMode();
+        this._setupRecognition();
+
+        document.getElementById('score-display').style.display = 'flex';
+        document.getElementById('score-pct').textContent = '0%';
+        document.getElementById('gameBtn').classList.add('active');
+    }
+
+    stop() {
+        if (!this.active) return;
+        this.active = false;
+        if (this.recognition) {
+            this.recognition.onend = null;
+            this.recognition.stop();
+            this.recognition = null;
+        }
+        renderLyrics(); // restore normal lyric rendering
+        document.getElementById('score-display').style.display = 'none';
+        document.getElementById('gameBtn').classList.remove('active');
+    }
+
+    _setupRecognition() {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) {
+            alert('Speech recognition is not supported in this browser. Use Chrome.');
+            this.stop();
+            return;
+        }
+
+        this.recognition = new SR();
+        this.recognition.continuous = true;
+        this.recognition.interimResults = true;
+        this.recognition.lang = 'en-US';
+
+        this.recognition.onresult = (e) => {
+            let interim = '';
+            let final = '';
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                if (e.results[i].isFinal) {
+                    final += e.results[i][0].transcript + ' ';
+                } else {
+                    interim += e.results[i][0].transcript + ' ';
+                }
+            }
+            if (final) this.transcript += final;
+            this._matchTranscript(this.transcript + interim);
+        };
+
+        // Auto-restart so recognition doesn't stop on silence
+        this.recognition.onend = () => {
+            if (this.active) this.recognition.start();
+        };
+
+        this.recognition.onerror = (e) => {
+            if (e.error === 'not-allowed') {
+                alert('Microphone access denied. Enable mic permission and try again.');
+                this.stop();
+            }
+        };
+
+        this.recognition.start();
+    }
+
+    setActiveLine(lineIdx) {
+        // Score the outgoing line before switching
+        if (this.activeLineIdx >= 0 && this.lineWords.length > 0) {
+            this._scoreLine();
+        }
+
+        this.activeLineIdx = lineIdx;
+        this.transcript = '';
+        this.matchedSet = new Set();
+
+        if (lineIdx < 0 || lineIdx >= lyrics.length) {
+            this.lineWords = [];
+            return;
+        }
+
+        const lineText = lyrics[lineIdx].text.trim();
+        // Skip empty lines and music notation lines
+        if (!lineText || lineText === '♪' || lineText === '♫') {
+            this.lineWords = [];
+            return;
+        }
+
+        const rawWords = lineText.split(' ');
+        this.lineWords = rawWords.map(w => {
+            const nw = normalizeWord(w);
+            return expandContractions([nw]).join(' ');
+        });
+
+        // Reset spans to grey for new active line
+        const lines = lyricsScroll.querySelectorAll('.lyric-line');
+        if (lines[lineIdx]) {
+            lines[lineIdx].querySelectorAll('.word-span').forEach(s => {
+                s.classList.remove('matched', 'missed');
+            });
+        }
+    }
+
+    _matchTranscript(transcript) {
+        if (this.lineWords.length === 0) return;
+
+        const spokenRaw = normalizeWords(transcript);
+        const spoken = expandContractions(spokenRaw);
+
+        const newMatched = new Set();
+        let spokenIdx = 0;
+
+        for (let li = 0; li < this.lineWords.length; li++) {
+            const target = this.lineWords[li];
+            // Look ahead up to 3 positions for cadence drift
+            const window = 3;
+            for (let si = spokenIdx; si < Math.min(spokenIdx + window, spoken.length); si++) {
+                if (spoken[si] === target) {
+                    newMatched.add(li);
+                    spokenIdx = si + 1;
+                    break;
+                }
+            }
+        }
+
+        this.matchedSet = newMatched;
+        this._updateWordSpans();
+    }
+
+    _updateWordSpans() {
+        const lines = lyricsScroll.querySelectorAll('.lyric-line');
+        const lineEl = lines[this.activeLineIdx];
+        if (!lineEl) return;
+
+        const spans = lineEl.querySelectorAll('.word-span');
+        spans.forEach((span, wi) => {
+            span.classList.remove('matched', 'missed');
+            if (this.matchedSet.has(wi)) {
+                span.classList.add('matched');
+            }
+        });
+    }
+
+    _scoreLine() {
+        const total = this.lineWords.length;
+        if (total === 0) return;
+
+        const matched = this.matchedSet.size;
+
+        // Mark unmatched spans as red
+        const lines = lyricsScroll.querySelectorAll('.lyric-line');
+        const lineEl = lines[this.activeLineIdx];
+        if (lineEl) {
+            lineEl.querySelectorAll('.word-span').forEach((span, wi) => {
+                if (!this.matchedSet.has(wi)) span.classList.add('missed');
+            });
+
+            // Flash per-line score
+            const flash = document.createElement('div');
+            flash.className = 'line-score-flash';
+            flash.textContent = `+${matched}/${total}`;
+            flash.style.top = lineEl.offsetTop + 'px';
+            document.getElementById('lyrics-container').appendChild(flash);
+            setTimeout(() => flash.remove(), 1300);
+        }
+
+        this.totalWords   += total;
+        this.matchedWords += matched;
+        this.linesScored++;
+
+        if (matched === total) {
+            this.perfectLines++;
+            this.currentStreak++;
+            if (this.currentStreak > this.bestStreak) this.bestStreak = this.currentStreak;
+        } else {
+            this.currentStreak = 0;
+        }
+
+        this._updateRunningScore();
+    }
+
+    _updateRunningScore() {
+        if (this.totalWords === 0) return;
+        const pct = Math.round((this.matchedWords / this.totalWords) * 100);
+        document.getElementById('score-pct').textContent = pct + '%';
+    }
+
+    showEndModal() {
+        if (!this.active || this.totalWords === 0) return;
+        const pct = Math.round((this.matchedWords / this.totalWords) * 100);
+        document.getElementById('modalScore').textContent = pct + '%';
+        document.getElementById('modalWords').textContent = `${this.matchedWords}/${this.totalWords}`;
+        document.getElementById('modalLines').textContent = `${this.perfectLines}/${this.linesScored}`;
+        document.getElementById('modalStreak').textContent = this.bestStreak;
+        document.getElementById('gameModal').style.display = 'flex';
+    }
+}
+
+const gameMode = new GameMode();
+
 // Load song data from session storage
 const songData = JSON.parse(sessionStorage.getItem('songData') || 'null');
 if (!songData) {
@@ -83,6 +314,27 @@ function renderLyrics() {
     });
 }
 
+function renderLyricsGameMode() {
+    lyricsScroll.innerHTML = '';
+    lyrics.forEach((line, i) => {
+        const el = document.createElement('div');
+        el.className = 'lyric-line';
+        el.dataset.index = i;
+
+        const words = line.text.split(' ');
+        words.forEach((word, wi) => {
+            const span = document.createElement('span');
+            span.className = 'word-span';
+            span.dataset.wordIndex = wi;
+            span.textContent = word;
+            el.appendChild(span);
+            if (wi < words.length - 1) el.appendChild(document.createTextNode(' '));
+        });
+
+        lyricsScroll.appendChild(el);
+    });
+}
+
 function updateLyrics() {
     if (lyrics.length === 0) return;
 
@@ -95,6 +347,11 @@ function updateLyrics() {
 
     if (idx === currentLineIndex) return;
     currentLineIndex = idx;
+
+    // Notify game mode of line change
+    if (gameMode.active) {
+        gameMode.setActiveLine(idx);
+    }
 
     const container = document.getElementById('lyrics-container');
     const lines = lyricsScroll.querySelectorAll('.lyric-line');
@@ -158,6 +415,16 @@ function fmt(s) {
 // Auto-play when audio is ready
 audio.addEventListener('canplay', () => {
     audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
+});
+
+audio.addEventListener('ended', () => {
+    if (gameMode.active) {
+        // Score the final line
+        if (gameMode.activeLineIdx >= 0 && gameMode.lineWords.length > 0) {
+            gameMode._scoreLine();
+        }
+        setTimeout(() => gameMode.showEndModal(), 600);
+    }
 });
 
 // Vocal removal toggle
@@ -225,4 +492,27 @@ function switchToInstrumental() {
     usingInstrumental = true;
     vocalBtn.textContent = '🎵 Full Mix';
     vocalBtn.disabled = false;
+}
+
+function toggleGameMode() {
+    if (lyrics.length === 0) {
+        alert('No lyrics available for this song — game mode requires synced lyrics.');
+        return;
+    }
+    if (gameMode.active) {
+        gameMode.stop();
+    } else {
+        // Auto-enable vocal removal for cleaner mic input
+        if (!usingInstrumental) {
+            toggleVocals();
+        }
+        gameMode.start();
+    }
+}
+
+function replayGame() {
+    document.getElementById('gameModal').style.display = 'none';
+    audio.currentTime = 0;
+    audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
+    gameMode.start();
 }
