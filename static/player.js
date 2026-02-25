@@ -9,6 +9,48 @@ const noLyricsEl = document.getElementById('no-lyrics');
 let lyrics = [];
 let currentLineIndex = -1;
 
+// --- Game mode utilities ---
+
+const CONTRACTION_MAP = {
+    'gonna':   'going to',
+    'wanna':   'want to',
+    'gotta':   'got to',
+    'kinda':   'kind of',
+    'sorta':   'sort of',
+    'coulda':  'could have',
+    'shoulda': 'should have',
+    'woulda':  'would have',
+    'ima':     'i am going to',
+    'tryna':   'trying to',
+    'dunno':   'do not know',
+    'ain\'t':  'is not',
+    'ain':     'is not',
+    'y\'all':  'you all',
+    'yall':    'you all',
+};
+
+function normalizeWord(w) {
+    return w.toLowerCase().replace(/[''`,.!?;:\-"]/g, '').trim();
+}
+
+function normalizeWords(text) {
+    return text.split(/\s+/)
+        .map(normalizeWord)
+        .filter(w => w.length > 0);
+}
+
+function expandContractions(words) {
+    const out = [];
+    for (const w of words) {
+        if (CONTRACTION_MAP[w]) {
+            out.push(...CONTRACTION_MAP[w].split(' '));
+        } else {
+            out.push(w);
+        }
+    }
+    return out;
+}
+
 // Load song data from session storage
 const songData = JSON.parse(sessionStorage.getItem('songData') || 'null');
 if (!songData) {
