@@ -107,6 +107,7 @@ class GameMode {
     }
 
     _setupRecognition() {
+        var self = this;
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (!SR) {
             alert('Speech recognition is not supported in this browser. Use Chrome.');
@@ -118,19 +119,32 @@ class GameMode {
         this.recognition.continuous = true;
         this.recognition.interimResults = true;
         this.recognition.lang = 'en-US';
+        this.recognition.maxAlternatives = 3;
 
-        this.recognition.onresult = (e) => {
-            let interim = '';
-            let final = '';
-            for (let i = e.resultIndex; i < e.results.length; i++) {
+        this.recognition.onresult = function(e) {
+            var interim = '';
+            var finalText = '';
+            for (var i = e.resultIndex; i < e.results.length; i++) {
                 if (e.results[i].isFinal) {
-                    final += e.results[i][0].transcript + ' ';
+                    finalText += e.results[i][0].transcript + ' ';
                 } else {
                     interim += e.results[i][0].transcript + ' ';
                 }
             }
-            if (final) this.transcript += final;
-            this._matchTranscript(this.transcript + interim);
+            if (finalText) self.transcript += finalText;
+
+            // Match primary transcript
+            var unionSet = new Set();
+            self._collectMatches(self.transcript + interim, unionSet);
+
+            // Union with alternative transcripts from latest result
+            var latest = e.results[e.results.length - 1];
+            for (var a = 1; a < latest.length; a++) {
+                self._collectMatches(self.transcript + latest[a].transcript, unionSet);
+            }
+
+            self.matchedSet = unionSet;
+            self._updateWordSpans();
         };
 
         // Auto-restart so recognition doesn't stop on silence
@@ -171,10 +185,7 @@ class GameMode {
         }
 
         const rawWords = lineText.split(' ');
-        this.lineWords = rawWords.map(w => {
-            const nw = normalizeWord(w);
-            return expandContractions([nw]).join(' ');
-        });
+        this.lineWords = rawWords.map(w => normalizeWord(w));
 
         // Reset spans to grey for new active line
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
@@ -185,29 +196,27 @@ class GameMode {
         }
     }
 
-    _matchTranscript(transcript) {
+    _collectMatches(transcript, resultSet) {
         if (this.lineWords.length === 0) return;
-
-        const spokenRaw = normalizeWords(transcript);
-        const spoken = expandContractions(spokenRaw);
-
-        const newMatched = new Set();
-        let spokenIdx = 0;
-
-        for (let li = 0; li < this.lineWords.length; li++) {
-            const target = this.lineWords[li];
-            // Look ahead up to 3 positions for cadence drift
-            const window = 3;
-            for (let si = spokenIdx; si < Math.min(spokenIdx + window, spoken.length); si++) {
+        var spoken = normalizeWords(transcript);
+        var spokenIdx = 0;
+        for (var li = 0; li < this.lineWords.length; li++) {
+            var target = this.lineWords[li];
+            var driftWindow = 6;
+            for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (spoken[si] === target) {
-                    newMatched.add(li);
+                    resultSet.add(li);
                     spokenIdx = si + 1;
                     break;
                 }
             }
         }
+    }
 
-        this.matchedSet = newMatched;
+    _matchTranscript(transcript) {
+        var unionSet = new Set();
+        this._collectMatches(transcript, unionSet);
+        this.matchedSet = unionSet;
         this._updateWordSpans();
     }
 
