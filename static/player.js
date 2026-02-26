@@ -221,6 +221,9 @@ class GameMode {
         this.perfectLines = 0;
         this.currentStreak = 0;
         this.bestStreak   = 0;
+
+        // Diagnostic
+        this._dbBuf = [];
     }
 
     start() {
@@ -300,6 +303,23 @@ class GameMode {
 
             self.matchedSet = unionSet;
             self._updateWordSpans();
+
+            // Diagnostic: log what the recognition heard and what matched
+            if (window._kDebug) {
+                const spokenFull = normalizeWords(self.transcript + interim);
+                const scanFrom   = Math.max(0, self.lineStartWordCount - 4);
+                self._debugLog('RESULT', {
+                    lineIdx:   self.activeLineIdx,
+                    finalText: finalText || null,
+                    interim:   interim   || null,
+                });
+                self._debugLog('MATCH', {
+                    lineIdx:     self.activeLineIdx,
+                    targets:     self.lineWords.slice(),
+                    spokenWindow: spokenFull.slice(scanFrom, scanFrom + 20),
+                    matchedIdxs: [...unionSet],
+                });
+            }
         };
 
         // Auto-restart so recognition doesn't stop on silence
@@ -318,9 +338,31 @@ class GameMode {
     }
 
     setActiveLine(lineIdx) {
+        // Capture outgoing state for diagnostics BEFORE anything changes
+        const _dbgFromIdx  = this.activeLineIdx;
+        const _dbgFromText = (_dbgFromIdx >= 0 && lyrics[_dbgFromIdx]) ? lyrics[_dbgFromIdx].text : '—';
+
         // Score the outgoing line before switching
         if (this.activeLineIdx >= 0 && this.lineWords.length > 0) {
             this._scoreLine();
+        }
+
+        // Diagnostic: log transition with score + transcript state at the exact moment of line change.
+        // This is the KEY evidence for the last-word problem:
+        //  - If interim contains the last word but matchedSet doesn't → _collectMatches missed it
+        //  - If both are empty → recognition hadn't fired for that word yet (timing race)
+        if (window._kDebug && _dbgFromIdx >= 0 && this.lineWords.length > 0) {
+            this._debugLog('LINE', {
+                fromIdx:       _dbgFromIdx,
+                fromText:      _dbgFromText,
+                toIdx:         lineIdx,
+                toText:        (lineIdx >= 0 && lyrics[lineIdx]) ? lyrics[lineIdx].text : '—',
+                matched:       this.matchedSet.size,
+                total:         this.lineWords.length,
+                missedWords:   this.lineWords.filter((w, i) => !this.matchedSet.has(i)).join(', '),
+                transcriptTail: normalizeWords(this.transcript).slice(-8).join(' '),
+                interim:       this.latestInterim,
+            });
         }
 
         this.activeLineIdx = lineIdx;
@@ -438,6 +480,89 @@ class GameMode {
         if (this.totalWords === 0) return;
         const pct = Math.round((this.matchedWords / this.totalWords) * 100);
         document.getElementById('score-pct').textContent = pct + '%';
+    }
+
+    // ── Diagnostics ───────────────────────────────────────────────────
+
+    /**
+     * Log a debug event to the ring buffer, console, and HUD.
+     * Only active when window._kDebug === true (press D to toggle).
+     * @param {'LINE'|'RESULT'|'MATCH'} type
+     * @param {object} data
+     */
+    _debugLog(type, data) {
+        if (!window._kDebug) return;
+        const ts = (performance.now() / 1000).toFixed(2);
+        this._dbBuf.unshift({ ts, type, data });
+        if (this._dbBuf.length > 20) this._dbBuf.length = 20;
+
+        // Console output
+        const lbl = `[GAME ${ts}s] ${type}`;
+        if (type === 'LINE') {
+            console.group(lbl);
+            console.log('FROM line ' + data.fromIdx + ':', data.fromText);
+            console.log('score at transition:', data.matched + '/' + data.total,
+                        '| missed:', data.missedWords || '(none)');
+            console.log('transcript tail:', '"' + data.transcriptTail + '"');
+            console.log('interim at transition:', '"' + (data.interim || '') + '"');
+            console.log('TO line ' + data.toIdx + ':', data.toText);
+            console.groupEnd();
+        } else if (type === 'RESULT') {
+            const f = data.finalText ? 'FINAL:"' + data.finalText.trim() + '"' : '';
+            const i = data.interim   ? 'INTERIM:"' + data.interim.trim() + '"' : '';
+            console.log(lbl, '| line:' + data.lineIdx, f, i);
+        } else if (type === 'MATCH') {
+            console.log(lbl, '| line:' + data.lineIdx,
+                        '| spoken:', data.spokenWindow,
+                        '| targets:', data.targets,
+                        '| matched indices:', data.matchedIdxs);
+        }
+        this._renderDebugHud();
+    }
+
+    /** Re-render the floating debug panel with current GameMode state. */
+    _renderDebugHud() {
+        const hud = document.getElementById('debug-hud');
+        if (!hud || !window._kDebug) return;
+
+        const lineNum  = this.activeLineIdx;
+        const lineText = (lineNum >= 0 && lyrics[lineNum]) ? lyrics[lineNum].text : '—';
+        const wordSpans = this.lineWords.map((w, i) => {
+            const cls = this.matchedSet.has(i) ? 'dbg-matched' : 'dbg-pending';
+            return `<span class="${cls}">[${w}]</span>`;
+        }).join(' ');
+
+        const finalWords = normalizeWords(this.transcript);
+        const tail    = finalWords.slice(-10).join(' ') || '—';
+        const interim = this.latestInterim.trim() || '—';
+        const wBuf    = finalWords.length;
+        const wStart  = this.lineStartWordCount;
+
+        let html = '<div class="dbg-header">🎮 GAME DEBUG &mdash; press D to hide</div>';
+        html += `<div class="dbg-row"><span class="dbg-label">Line  </span>#${lineNum}: ${lineText}</div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">Words </span>${wordSpans || '—'}</div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">Final </span><span class="dbg-final">&hellip;${tail}</span></div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">Intrm </span><span class="dbg-interim">${interim}</span></div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">wBuf  </span>${wBuf} | wStart ${wStart} | scanFrom ${Math.max(0, wStart - 4)}</div>`;
+        html += '<div class="dbg-sep"></div>';
+
+        for (const e of this._dbBuf) {
+            let msg = '', cls = '';
+            if (e.type === 'LINE') {
+                msg = `[${e.ts}s] L${e.data.fromIdx}&rarr;L${e.data.toIdx} ${e.data.matched}/${e.data.total} missed:[${e.data.missedWords || '&mdash;'}] interim:"${(e.data.interim || '').trim()}"`;
+                cls = 'dbg-ev-line';
+            } else if (e.type === 'RESULT') {
+                const f = e.data.finalText ? '[F:' + e.data.finalText.trim().split(/\s+/).slice(-5).join(' ') + ']' : '';
+                const i = e.data.interim   ? '&lang;' + e.data.interim.trim().split(/\s+/).slice(-5).join(' ') + '&rang;' : '';
+                msg = `[${e.ts}s] L${e.data.lineIdx} ${f} ${i}`;
+                cls = 'dbg-ev-res';
+            } else if (e.type === 'MATCH') {
+                msg = `[${e.ts}s] L${e.data.lineIdx} matched:[${e.data.matchedIdxs.join(',')}]/${e.data.targets.length} spoken:${e.data.spokenWindow.slice(-8).join(' ')}`;
+                cls = 'dbg-ev-match';
+            }
+            html += `<div class="dbg-row ${cls}">${msg}</div>`;
+        }
+        hud.innerHTML = html;
     }
 
     showEndModal() {
@@ -575,6 +700,17 @@ seekBar.addEventListener('input', () => {
 
 // Volume
 volumeBar.addEventListener('input', () => { audio.volume = volumeBar.value; });
+
+// Debug HUD — press D to toggle (works any time, not just in Game Mode)
+document.addEventListener('keydown', (e) => {
+    if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        window._kDebug = !window._kDebug;
+        const hud = document.getElementById('debug-hud');
+        if (hud) hud.style.display = window._kDebug ? 'block' : 'none';
+        if (window._kDebug) gameMode._renderDebugHud();
+        console.log('[DEBUG HUD]', window._kDebug ? 'ON — start Game Mode and rap to see events' : 'OFF');
+    }
+});
 
 // Format seconds as m:ss
 function fmt(s) {

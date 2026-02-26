@@ -251,6 +251,36 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* ── Debug HUD (toggle with D key) ────────────────────────── */
+        #debug-hud {
+            position: fixed;
+            top: 60px;
+            right: 0;
+            width: 400px;
+            max-height: calc(100vh - 80px);
+            overflow-y: auto;
+            background: rgba(8, 8, 18, 0.93);
+            border-left: 2px solid #7c4dff;
+            font-family: 'Courier New', monospace;
+            font-size: 0.7rem;
+            color: #ccc;
+            padding: 8px 10px;
+            z-index: 150;
+            line-height: 1.55;
+        }
+        #debug-hud::-webkit-scrollbar { display: none; }
+        .dbg-header  { color: #7c4dff; font-weight: bold; margin-bottom: 4px; letter-spacing: 0.04em; }
+        .dbg-row     { padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
+        .dbg-label   { color: #666; }
+        .dbg-matched { color: #00e676; font-weight: bold; }
+        .dbg-pending { color: #555; }
+        .dbg-final   { color: #88aaff; }
+        .dbg-interim { color: #ffaa00; }
+        .dbg-sep     { border-top: 1px solid #2a2a4a; margin: 5px 0; }
+        .dbg-ev-line  { color: #e040fb; }
+        .dbg-ev-res   { color: #999; }
+        .dbg-ev-match { color: #5af; }
     </style>
 </head>
 <body>
@@ -289,6 +319,9 @@
     </div>
 
     <audio id="audio"></audio>
+
+    <!-- Debug HUD — toggle with D key while Game Mode is active -->
+    <div id="debug-hud" style="display:none"></div>
 
     <div class="game-modal" id="gameModal" style="display:none">
         <div class="game-modal-box">
