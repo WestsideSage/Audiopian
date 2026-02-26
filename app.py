@@ -1,5 +1,7 @@
+import io
 import os
 import threading
+import threading as _threading
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from downloader import extract_metadata, download_audio, AUDIO_PATH, search_youtube
 from lyrics import fetch_lyrics
@@ -9,6 +11,23 @@ app = Flask(__name__, static_folder="static", static_url_path="/static")
 
 separation_state = {"status": "idle"}
 separation_gen = 0  # incremented on each new song load; threads check before writing state
+
+_whisper_model = None
+_whisper_lock = _threading.Lock()
+
+
+def get_whisper_model():
+    """Lazy-load faster-whisper large-v3-turbo on CUDA. Thread-safe."""
+    global _whisper_model
+    with _whisper_lock:
+        if _whisper_model is None:
+            from faster_whisper import WhisperModel
+            _whisper_model = WhisperModel(
+                "large-v3-turbo",
+                device="cuda",
+                compute_type="float16"
+            )
+    return _whisper_model
 
 
 @app.route("/")
@@ -118,6 +137,22 @@ def separate_status():
     if status == "error":
         resp["error"] = separation_state.get("error", "Unknown error")
     return jsonify(resp)
+
+
+@app.route('/transcribe', methods=['POST'])
+def transcribe():
+    """Accept a raw WAV body, transcribe with Whisper, return {transcript}."""
+    wav_bytes = request.data
+    if len(wav_bytes) < 100:
+        return jsonify(transcript='')
+    try:
+        model = get_whisper_model()
+        audio_buf = io.BytesIO(wav_bytes)
+        segments, _ = model.transcribe(audio_buf, language='en', beam_size=1)
+        text = ' '.join(s.text for s in segments).strip()
+        return jsonify(transcript=text)
+    except Exception:
+        return jsonify(transcript=''), 503
 
 
 @app.route("/instrumental")

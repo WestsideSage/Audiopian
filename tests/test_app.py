@@ -167,3 +167,61 @@ def test_stale_separation_thread_does_not_overwrite_new_song_status(client):
 
     # Cleanup
     app_module.separation_state["status"] = "idle"
+
+
+import struct
+import wave
+import io
+
+
+def _make_wav(num_samples=32000, sample_rate=16000):
+    """Create a minimal valid 16kHz mono WAV with silence."""
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(b'\x00\x00' * num_samples)
+    return buf.getvalue()
+
+
+def test_transcribe_returns_transcript(client):
+    """Valid WAV body → 200 with transcript key."""
+    mock_model = MagicMock()
+    mock_segment = MagicMock()
+    mock_segment.text = 'hello world'
+    mock_model.transcribe.return_value = ([mock_segment], None)
+
+    with patch('app.get_whisper_model', return_value=mock_model):
+        resp = client.post('/transcribe', data=_make_wav(),
+                           content_type='audio/wav')
+
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data['transcript'] == 'hello world'
+
+
+def test_transcribe_empty_body_returns_empty(client):
+    """Body shorter than 100 bytes → 200 with empty transcript, no model call."""
+    with patch('app.get_whisper_model') as mock_get:
+        resp = client.post('/transcribe', data=b'tooshort',
+                           content_type='audio/wav')
+
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data['transcript'] == ''
+    mock_get.assert_not_called()
+
+
+def test_transcribe_whisper_exception_returns_503(client):
+    """If the model raises, return 503 with empty transcript."""
+    mock_model = MagicMock()
+    mock_model.transcribe.side_effect = RuntimeError('CUDA OOM')
+
+    with patch('app.get_whisper_model', return_value=mock_model):
+        resp = client.post('/transcribe', data=_make_wav(),
+                           content_type='audio/wav')
+
+    assert resp.status_code == 503
+    data = json.loads(resp.data)
+    assert data['transcript'] == ''
