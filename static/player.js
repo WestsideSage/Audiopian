@@ -29,6 +29,156 @@ const CONTRACTION_MAP = {
     'yall':    'you all',
 };
 
+// --- Phonetic + fuzzy matching ---
+
+/**
+ * Levenshtein edit distance (two-row DP). Returns integer >= 0.
+ */
+function editDistance(a, b) {
+    const m = a.length, n = b.length;
+    let prev = Array.from({length: n + 1}, (_, i) => i);
+    let curr = new Array(n + 1);
+    for (let i = 1; i <= m; i++) {
+        curr[0] = i;
+        for (let j = 1; j <= n; j++) {
+            curr[j] = a[i - 1] === b[j - 1]
+                ? prev[j - 1]
+                : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+        }
+        [prev, curr] = [curr, prev];
+    }
+    return prev[n];
+}
+
+/**
+ * Double Metaphone — returns [primary, secondary] phonetic codes (max 4 chars each).
+ * Based on the Philips (2000) algorithm. Maps words to sound-alike codes so that
+ * "night" and "knight" both produce ["NT","NT"], etc.
+ */
+function doubleMetaphone(word) {
+    if (!word || typeof word !== 'string') return ['', ''];
+    word = word.toUpperCase().replace(/[^A-Z]/g, '');
+    if (!word) return ['', ''];
+
+    const len = word.length;
+    let p = '', s = '';
+    let i = 0;
+
+    function add(a, b) { p += a || ''; s += (b !== undefined ? b : a) || ''; }
+    function at(pos) { return (pos >= 0 && pos < len) ? word[pos] : ''; }
+    function sub(pos, n) { return word.substring(pos, pos + n); }
+    function isV(c) { return 'AEIOU'.indexOf(c) >= 0; }
+    function slavo() { return word.indexOf('W') > -1 || word.indexOf('K') > -1 || sub(0,2) === 'CZ'; }
+
+    // Initial fixups
+    if (/^(GN|KN|PN|AE|WR)/.test(sub(0, 2))) i = 1;
+    if (at(0) === 'X') { add('S'); i = 1; }
+
+    while (i < len) {
+        const c = at(i);
+        switch (c) {
+            case 'A': case 'E': case 'I': case 'O': case 'U': case 'Y':
+                if (i === 0) add('A');
+                i++; break;
+            case 'B':
+                add('P'); i += (at(i+1) === 'B') ? 2 : 1; break;
+            case 'C':
+                if (sub(i,2) === 'CIA') { add('X'); i += 3; break; }
+                if (sub(i,2) === 'CH') {
+                    if (i > 0 && sub(i-2,6).match(/ORCHES|ARCHIT|ORCHID/)) { add('K'); }
+                    else if (at(i+2).match(/[IEY]/)) { add('S'); }
+                    else if (slavo() || sub(0,4).match(/VAN |VON |SCH/)) { add('K'); }
+                    else { add('X', 'K'); }
+                    i += 2; break;
+                }
+                if (sub(i,2).match(/CE|CI/)) { add('S'); i += 2; break; }
+                if (sub(i,2) === 'CK') { add('K'); i += 2; break; }
+                add('K');
+                i += (at(i+1) === 'C') ? 2 : 1; break;
+            case 'D':
+                if (sub(i,2) === 'DG' && at(i+2).match(/[IEY]/)) { add('J'); i += 3; break; }
+                add('T'); i += (sub(i,2).match(/DT|DD/)) ? 2 : 1; break;
+            case 'F':
+                add('F'); i += (at(i+1) === 'F') ? 2 : 1; break;
+            case 'G':
+                if (at(i+1) === 'H') {
+                    if (i > 0 && !isV(at(i-1))) { add('K'); i += 2; break; }
+                    if (i === 0) { add(at(i+2) === 'I' ? 'J' : 'K'); i += 2; break; }
+                    i += 2; break;
+                }
+                if (at(i+1) === 'N') {
+                    if (i === 1 && isV(at(0)) && !slavo()) add('KN', 'N');
+                    else add('N');
+                    i += 2; break;
+                }
+                if ('EIY'.includes(at(i+1))) { add('J', 'K'); i += 2; break; }
+                add('K'); i += (at(i+1) === 'G') ? 2 : 1; break;
+            case 'H':
+                if (isV(at(i+1)) && (i === 0 || isV(at(i-1)))) { add('H'); i++; }
+                i++; break;
+            case 'J':
+                add('J', 'H'); i += (at(i+1) === 'J') ? 2 : 1; break;
+            case 'K':
+                add('K'); i += (at(i+1) === 'K') ? 2 : 1; break;
+            case 'L':
+                add('L'); i += (at(i+1) === 'L') ? 2 : 1; break;
+            case 'M':
+                add('M'); i += (at(i+1) === 'M') ? 2 : 1; break;
+            case 'N':
+                add('N'); i += (at(i+1) === 'N') ? 2 : 1; break;
+            case 'P':
+                if (at(i+1) === 'H') { add('F'); i += 2; break; }
+                add('P'); i += (at(i+1) === 'P') ? 2 : 1; break;
+            case 'Q':
+                add('K'); i += (at(i+1) === 'Q') ? 2 : 1; break;
+            case 'R':
+                add('R'); i += (at(i+1) === 'R') ? 2 : 1; break;
+            case 'S':
+                if (sub(i,2) === 'SH') { add('X'); i += 2; break; }
+                if (sub(i,3).match(/SIO|SIA/)) { add('X'); i += 3; break; }
+                if (sub(i,2) === 'SC') {
+                    if (at(i+2).match(/[IEY]/)) { add('S'); i += 3; }
+                    else { add('SK'); i += 3; }
+                    break;
+                }
+                add('S'); i += (sub(i,2) === 'SS') ? 2 : 1; break;
+            case 'T':
+                if (sub(i,4) === 'TION' || sub(i,3).match(/TIA|TCH/)) { add('X'); i += 3; break; }
+                if (sub(i,2) === 'TH') { add('0', 'T'); i += 2; break; }
+                add('T'); i += (sub(i,2).match(/TT|TD/)) ? 2 : 1; break;
+            case 'V':
+                add('F'); i += (at(i+1) === 'V') ? 2 : 1; break;
+            case 'W':
+                if (sub(i,2) === 'WR') { add('R'); i += 2; break; }
+                if (i === 0 && isV(at(i+1))) { add('A'); }
+                i++; break;
+            case 'X':
+                add('KS'); i += (at(i+1).match(/[CX]/)) ? 2 : 1; break;
+            case 'Z':
+                if (at(i+1) === 'H') { add('J'); i += 2; break; }
+                add('S'); i += (at(i+1) === 'Z') ? 2 : 1; break;
+            default:
+                i++; break;
+        }
+    }
+    return [p.substring(0, 4), s.substring(0, 4)];
+}
+
+/**
+ * Returns true if spoken word matches target word by:
+ *  1. Exact equality (after normalizeWord has already been applied to both)
+ *  2. Double Metaphone phonetic match (handles "fk" == "fuck", homophones, ASR substitutions)
+ *  3. Levenshtein edit distance <= 1 (handles 1-char mishearings / typos in lyrics)
+ */
+function wordsMatch(spoken, target) {
+    if (spoken === target) return true;
+    const [sp, ss] = doubleMetaphone(spoken);
+    const [tp, ts] = doubleMetaphone(target);
+    if (sp && tp && (sp === tp || sp === ts || (ss && (ss === tp || ss === ts)))) return true;
+    if (Math.abs(spoken.length - target.length) <= 1 && editDistance(spoken, target) <= 1) return true;
+    return false;
+}
+
 function normalizeWord(w) {
     return w.toLowerCase().replace(/[''`,.!?;:\-"]/g, '').trim();
 }
@@ -216,7 +366,7 @@ class GameMode {
             var target = this.lineWords[li];
             var driftWindow = 12;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
-                if (spoken[si] === target) {
+                if (wordsMatch(spoken[si], target)) {
                     resultSet.add(li);
                     spokenIdx = si + 1;
                     break;
