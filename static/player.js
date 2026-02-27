@@ -369,6 +369,13 @@ class GameMode {
 
         // Diagnostic
         this._dbBuf = [];
+
+        // Predictive timing state
+        this.allWordTimings = [];    // interpolated word timings for all lines
+        this.wordTimings    = [];    // word timings for current active line
+        this.hotWordIndex   = -1;    // index of word whose time window contains audio.currentTime
+        this.isSpeaking     = false; // true when mic energy exceeds threshold
+        this._energyThreshold = 0.01; // RMS threshold for voice activity detection
     }
 
     start() {
@@ -388,6 +395,10 @@ class GameMode {
         this.bestStreak = 0;
         this.whisperBuffer = '';
         this._lastResultTime = Date.now();
+        this.allWordTimings = interpolateWordTimings(lyrics);
+        this.wordTimings = [];
+        this.hotWordIndex = -1;
+        this.isSpeaking = false;
 
         renderLyricsGameMode();
         this._setupRecognition();
@@ -621,6 +632,12 @@ class GameMode {
         this.lineStartWordCount = normalizeWords(this.transcript).length;
         this.matchedSet = new Set();
         this.whisperBuffer = ''; // reset per-line Whisper accumulation
+
+        // Load interpolated word timings for this line
+        this.wordTimings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
+            ? this.allWordTimings[lineIdx]
+            : [];
+        this.hotWordIndex = -1;
 
         if (lineIdx < 0 || lineIdx >= lyrics.length) {
             this.lineWords = [];
