@@ -12,6 +12,7 @@ let currentLineIndex = -1;
 // --- Game mode utilities ---
 
 const CONTRACTION_MAP = {
+    // Original entries
     'gonna':   'going to',
     'wanna':   'want to',
     'gotta':   'got to',
@@ -27,6 +28,47 @@ const CONTRACTION_MAP = {
     'ain':     'is not',
     'y\'all':  'you all',
     'yall':    'you all',
+    // Rap / AAVE slang additions
+    'finna':   'fixing to',
+    'bouta':   'about to',
+    'outta':   'out of',
+    'lotta':   'lot of',
+    'cmon':    'come on',
+    'nah':     'no',
+    'bruh':    'brother',
+    'bro':     'brother',
+    'fam':     'family',
+    'fasho':   'for sure',
+    'fosho':   'for sure',
+    'sho':     'sure',
+    'deadass': 'seriously',
+    'lowkey':  'low key',
+    'highkey': 'high key',
+    'ong':     'on god',
+    'fr':      'for real',
+    'ngl':     'not gonna lie',
+    'rn':      'right now',
+    'smh':     'shaking my head',
+    'aight':   'alright',
+    'ight':    'alright',
+    'prolly':  'probably',
+    'sumn':    'something',
+    'sumthin': 'something',
+    'nothin':  'nothing',
+    'nuthin':  'nothing',
+    'cuz':     'because',
+    'cus':     'because',
+    'wit':     'with',
+    'da':      'the',
+    'dem':     'them',
+    'dey':     'they',
+    'dat':     'that',
+    'dis':     'this',
+    'em':      'them',
+    'til':     'until',
+    'bout':    'about',
+    'ops':     'opposition',
+    'lil':     'little',
 };
 
 // --- Phonetic + fuzzy matching ---
@@ -180,7 +222,7 @@ function wordsMatch(spoken, target) {
 }
 
 function normalizeWord(w) {
-    return w.toLowerCase().replace(/[''`,.!?;:\-"]/g, '').trim();
+    return w.toLowerCase().replace(/[''`,.!?;:\-"*]/g, '').trim();
 }
 
 function normalizeWords(text) {
