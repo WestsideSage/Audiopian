@@ -29,6 +29,156 @@ const CONTRACTION_MAP = {
     'yall':    'you all',
 };
 
+// --- Phonetic + fuzzy matching ---
+
+/**
+ * Levenshtein edit distance (two-row DP). Returns integer >= 0.
+ */
+function editDistance(a, b) {
+    const m = a.length, n = b.length;
+    let prev = Array.from({length: n + 1}, (_, i) => i);
+    let curr = new Array(n + 1);
+    for (let i = 1; i <= m; i++) {
+        curr[0] = i;
+        for (let j = 1; j <= n; j++) {
+            curr[j] = a[i - 1] === b[j - 1]
+                ? prev[j - 1]
+                : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+        }
+        [prev, curr] = [curr, prev];
+    }
+    return prev[n];
+}
+
+/**
+ * Double Metaphone — returns [primary, secondary] phonetic codes (max 4 chars each).
+ * Based on the Philips (2000) algorithm. Maps words to sound-alike codes so that
+ * "night" and "knight" both produce ["NT","NT"], etc.
+ */
+function doubleMetaphone(word) {
+    if (!word || typeof word !== 'string') return ['', ''];
+    word = word.toUpperCase().replace(/[^A-Z]/g, '');
+    if (!word) return ['', ''];
+
+    const len = word.length;
+    let p = '', s = '';
+    let i = 0;
+
+    function add(a, b) { p += a || ''; s += (b !== undefined ? b : a) || ''; }
+    function at(pos) { return (pos >= 0 && pos < len) ? word[pos] : ''; }
+    function sub(pos, n) { return word.substring(pos, pos + n); }
+    function isV(c) { return 'AEIOU'.indexOf(c) >= 0; }
+    function slavo() { return word.indexOf('W') > -1 || word.indexOf('K') > -1 || sub(0,2) === 'CZ'; }
+
+    // Initial fixups
+    if (/^(GN|KN|PN|AE|WR)/.test(sub(0, 2))) i = 1;
+    if (at(0) === 'X') { add('S'); i = 1; }
+
+    while (i < len) {
+        const c = at(i);
+        switch (c) {
+            case 'A': case 'E': case 'I': case 'O': case 'U': case 'Y':
+                if (i === 0) add('A');
+                i++; break;
+            case 'B':
+                add('P'); i += (at(i+1) === 'B') ? 2 : 1; break;
+            case 'C':
+                if (sub(i,2) === 'CIA') { add('X'); i += 3; break; }
+                if (sub(i,2) === 'CH') {
+                    if (i > 0 && sub(i-2,6).match(/ORCHES|ARCHIT|ORCHID/)) { add('K'); }
+                    else if (at(i+2).match(/[IEY]/)) { add('S'); }
+                    else if (slavo() || sub(0,4).match(/VAN |VON |SCH/)) { add('K'); }
+                    else { add('X', 'K'); }
+                    i += 2; break;
+                }
+                if (sub(i,2).match(/CE|CI/)) { add('S'); i += 2; break; }
+                if (sub(i,2) === 'CK') { add('K'); i += 2; break; }
+                add('K');
+                i += (at(i+1) === 'C') ? 2 : 1; break;
+            case 'D':
+                if (sub(i,2) === 'DG' && at(i+2).match(/[IEY]/)) { add('J'); i += 3; break; }
+                add('T'); i += (sub(i,2).match(/DT|DD/)) ? 2 : 1; break;
+            case 'F':
+                add('F'); i += (at(i+1) === 'F') ? 2 : 1; break;
+            case 'G':
+                if (at(i+1) === 'H') {
+                    if (i > 0 && !isV(at(i-1))) { add('K'); i += 2; break; }
+                    if (i === 0) { add(at(i+2) === 'I' ? 'J' : 'K'); i += 2; break; }
+                    i += 2; break;
+                }
+                if (at(i+1) === 'N') {
+                    if (i === 1 && isV(at(0)) && !slavo()) add('KN', 'N');
+                    else add('N');
+                    i += 2; break;
+                }
+                if ('EIY'.includes(at(i+1))) { add('J', 'K'); i += 2; break; }
+                add('K'); i += (at(i+1) === 'G') ? 2 : 1; break;
+            case 'H':
+                if (isV(at(i+1)) && (i === 0 || isV(at(i-1)))) { add('H'); i++; }
+                i++; break;
+            case 'J':
+                add('J', 'H'); i += (at(i+1) === 'J') ? 2 : 1; break;
+            case 'K':
+                add('K'); i += (at(i+1) === 'K') ? 2 : 1; break;
+            case 'L':
+                add('L'); i += (at(i+1) === 'L') ? 2 : 1; break;
+            case 'M':
+                add('M'); i += (at(i+1) === 'M') ? 2 : 1; break;
+            case 'N':
+                add('N'); i += (at(i+1) === 'N') ? 2 : 1; break;
+            case 'P':
+                if (at(i+1) === 'H') { add('F'); i += 2; break; }
+                add('P'); i += (at(i+1) === 'P') ? 2 : 1; break;
+            case 'Q':
+                add('K'); i += (at(i+1) === 'Q') ? 2 : 1; break;
+            case 'R':
+                add('R'); i += (at(i+1) === 'R') ? 2 : 1; break;
+            case 'S':
+                if (sub(i,2) === 'SH') { add('X'); i += 2; break; }
+                if (sub(i,3).match(/SIO|SIA/)) { add('X'); i += 3; break; }
+                if (sub(i,2) === 'SC') {
+                    if (at(i+2).match(/[IEY]/)) { add('S'); i += 3; }
+                    else { add('SK'); i += 3; }
+                    break;
+                }
+                add('S'); i += (sub(i,2) === 'SS') ? 2 : 1; break;
+            case 'T':
+                if (sub(i,4) === 'TION' || sub(i,3).match(/TIA|TCH/)) { add('X'); i += 3; break; }
+                if (sub(i,2) === 'TH') { add('0', 'T'); i += 2; break; }
+                add('T'); i += (sub(i,2).match(/TT|TD/)) ? 2 : 1; break;
+            case 'V':
+                add('F'); i += (at(i+1) === 'V') ? 2 : 1; break;
+            case 'W':
+                if (sub(i,2) === 'WR') { add('R'); i += 2; break; }
+                if (i === 0 && isV(at(i+1))) { add('A'); }
+                i++; break;
+            case 'X':
+                add('KS'); i += (at(i+1).match(/[CX]/)) ? 2 : 1; break;
+            case 'Z':
+                if (at(i+1) === 'H') { add('J'); i += 2; break; }
+                add('S'); i += (at(i+1) === 'Z') ? 2 : 1; break;
+            default:
+                i++; break;
+        }
+    }
+    return [p.substring(0, 4), s.substring(0, 4)];
+}
+
+/**
+ * Returns true if spoken word matches target word by:
+ *  1. Exact equality (after normalizeWord has already been applied to both)
+ *  2. Double Metaphone phonetic match (handles "fk" == "fuck", homophones, ASR substitutions)
+ *  3. Levenshtein edit distance <= 1 (handles 1-char mishearings / typos in lyrics)
+ */
+function wordsMatch(spoken, target) {
+    if (spoken === target) return true;
+    const [sp, ss] = doubleMetaphone(spoken);
+    const [tp, ts] = doubleMetaphone(target);
+    if (sp && tp && (sp === tp || sp === ts || (ss && (ss === tp || ss === ts)))) return true;
+    if (Math.abs(spoken.length - target.length) <= 1 && editDistance(spoken, target) <= 1) return true;
+    return false;
+}
+
 function normalizeWord(w) {
     return w.toLowerCase().replace(/[''`,.!?;:\-"]/g, '').trim();
 }
@@ -71,6 +221,9 @@ class GameMode {
         this.perfectLines = 0;
         this.currentStreak = 0;
         this.bestStreak   = 0;
+
+        // Diagnostic
+        this._dbBuf = [];
     }
 
     start() {
@@ -150,6 +303,23 @@ class GameMode {
 
             self.matchedSet = unionSet;
             self._updateWordSpans();
+
+            // Diagnostic: log what the recognition heard and what matched
+            if (window._kDebug) {
+                const spokenFull = normalizeWords(self.transcript + interim);
+                const scanFrom   = Math.max(0, self.lineStartWordCount - 4);
+                self._debugLog('RESULT', {
+                    lineIdx:   self.activeLineIdx,
+                    finalText: finalText || null,
+                    interim:   interim   || null,
+                });
+                self._debugLog('MATCH', {
+                    lineIdx:     self.activeLineIdx,
+                    targets:     self.lineWords.slice(),
+                    spokenWindow: spokenFull.slice(scanFrom, scanFrom + 20),
+                    matchedIdxs: [...unionSet],
+                });
+            }
         };
 
         // Auto-restart so recognition doesn't stop on silence
@@ -168,9 +338,31 @@ class GameMode {
     }
 
     setActiveLine(lineIdx) {
+        // Capture outgoing state for diagnostics BEFORE anything changes
+        const _dbgFromIdx  = this.activeLineIdx;
+        const _dbgFromText = (_dbgFromIdx >= 0 && lyrics[_dbgFromIdx]) ? lyrics[_dbgFromIdx].text : '—';
+
         // Score the outgoing line before switching
         if (this.activeLineIdx >= 0 && this.lineWords.length > 0) {
             this._scoreLine();
+        }
+
+        // Diagnostic: log transition with score + transcript state at the exact moment of line change.
+        // This is the KEY evidence for the last-word problem:
+        //  - If interim contains the last word but matchedSet doesn't → _collectMatches missed it
+        //  - If both are empty → recognition hadn't fired for that word yet (timing race)
+        if (window._kDebug && _dbgFromIdx >= 0 && this.lineWords.length > 0) {
+            this._debugLog('LINE', {
+                fromIdx:       _dbgFromIdx,
+                fromText:      _dbgFromText,
+                toIdx:         lineIdx,
+                toText:        (lineIdx >= 0 && lyrics[lineIdx]) ? lyrics[lineIdx].text : '—',
+                matched:       this.matchedSet.size,
+                total:         this.lineWords.length,
+                missedWords:   this.lineWords.filter((w, i) => !this.matchedSet.has(i)).join(', '),
+                transcriptTail: normalizeWords(this.transcript).slice(-8).join(' '),
+                interim:       this.latestInterim,
+            });
         }
 
         this.activeLineIdx = lineIdx;
@@ -216,7 +408,7 @@ class GameMode {
             var target = this.lineWords[li];
             var driftWindow = 12;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
-                if (spoken[si] === target) {
+                if (wordsMatch(spoken[si], target)) {
                     resultSet.add(li);
                     spokenIdx = si + 1;
                     break;
@@ -288,6 +480,89 @@ class GameMode {
         if (this.totalWords === 0) return;
         const pct = Math.round((this.matchedWords / this.totalWords) * 100);
         document.getElementById('score-pct').textContent = pct + '%';
+    }
+
+    // ── Diagnostics ───────────────────────────────────────────────────
+
+    /**
+     * Log a debug event to the ring buffer, console, and HUD.
+     * Only active when window._kDebug === true (press D to toggle).
+     * @param {'LINE'|'RESULT'|'MATCH'} type
+     * @param {object} data
+     */
+    _debugLog(type, data) {
+        if (!window._kDebug) return;
+        const ts = (performance.now() / 1000).toFixed(2);
+        this._dbBuf.unshift({ ts, type, data });
+        if (this._dbBuf.length > 20) this._dbBuf.length = 20;
+
+        // Console output
+        const lbl = `[GAME ${ts}s] ${type}`;
+        if (type === 'LINE') {
+            console.group(lbl);
+            console.log('FROM line ' + data.fromIdx + ':', data.fromText);
+            console.log('score at transition:', data.matched + '/' + data.total,
+                        '| missed:', data.missedWords || '(none)');
+            console.log('transcript tail:', '"' + data.transcriptTail + '"');
+            console.log('interim at transition:', '"' + (data.interim || '') + '"');
+            console.log('TO line ' + data.toIdx + ':', data.toText);
+            console.groupEnd();
+        } else if (type === 'RESULT') {
+            const f = data.finalText ? 'FINAL:"' + data.finalText.trim() + '"' : '';
+            const i = data.interim   ? 'INTERIM:"' + data.interim.trim() + '"' : '';
+            console.log(lbl, '| line:' + data.lineIdx, f, i);
+        } else if (type === 'MATCH') {
+            console.log(lbl, '| line:' + data.lineIdx,
+                        '| spoken:', data.spokenWindow,
+                        '| targets:', data.targets,
+                        '| matched indices:', data.matchedIdxs);
+        }
+        this._renderDebugHud();
+    }
+
+    /** Re-render the floating debug panel with current GameMode state. */
+    _renderDebugHud() {
+        const hud = document.getElementById('debug-hud');
+        if (!hud || !window._kDebug) return;
+
+        const lineNum  = this.activeLineIdx;
+        const lineText = (lineNum >= 0 && lyrics[lineNum]) ? lyrics[lineNum].text : '—';
+        const wordSpans = this.lineWords.map((w, i) => {
+            const cls = this.matchedSet.has(i) ? 'dbg-matched' : 'dbg-pending';
+            return `<span class="${cls}">[${w}]</span>`;
+        }).join(' ');
+
+        const finalWords = normalizeWords(this.transcript);
+        const tail    = finalWords.slice(-10).join(' ') || '—';
+        const interim = this.latestInterim.trim() || '—';
+        const wBuf    = finalWords.length;
+        const wStart  = this.lineStartWordCount;
+
+        let html = '<div class="dbg-header">🎮 GAME DEBUG &mdash; press D to hide</div>';
+        html += `<div class="dbg-row"><span class="dbg-label">Line  </span>#${lineNum}: ${lineText}</div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">Words </span>${wordSpans || '—'}</div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">Final </span><span class="dbg-final">&hellip;${tail}</span></div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">Intrm </span><span class="dbg-interim">${interim}</span></div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">wBuf  </span>${wBuf} | wStart ${wStart} | scanFrom ${Math.max(0, wStart - 4)}</div>`;
+        html += '<div class="dbg-sep"></div>';
+
+        for (const e of this._dbBuf) {
+            let msg = '', cls = '';
+            if (e.type === 'LINE') {
+                msg = `[${e.ts}s] L${e.data.fromIdx}&rarr;L${e.data.toIdx} ${e.data.matched}/${e.data.total} missed:[${e.data.missedWords || '&mdash;'}] interim:"${(e.data.interim || '').trim()}"`;
+                cls = 'dbg-ev-line';
+            } else if (e.type === 'RESULT') {
+                const f = e.data.finalText ? '[F:' + e.data.finalText.trim().split(/\s+/).slice(-5).join(' ') + ']' : '';
+                const i = e.data.interim   ? '&lang;' + e.data.interim.trim().split(/\s+/).slice(-5).join(' ') + '&rang;' : '';
+                msg = `[${e.ts}s] L${e.data.lineIdx} ${f} ${i}`;
+                cls = 'dbg-ev-res';
+            } else if (e.type === 'MATCH') {
+                msg = `[${e.ts}s] L${e.data.lineIdx} matched:[${e.data.matchedIdxs.join(',')}]/${e.data.targets.length} spoken:${e.data.spokenWindow.slice(-8).join(' ')}`;
+                cls = 'dbg-ev-match';
+            }
+            html += `<div class="dbg-row ${cls}">${msg}</div>`;
+        }
+        hud.innerHTML = html;
     }
 
     showEndModal() {
@@ -426,6 +701,17 @@ seekBar.addEventListener('input', () => {
 // Volume
 volumeBar.addEventListener('input', () => { audio.volume = volumeBar.value; });
 
+// Debug HUD — press D to toggle (works any time, not just in Game Mode)
+document.addEventListener('keydown', (e) => {
+    if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        window._kDebug = !window._kDebug;
+        const hud = document.getElementById('debug-hud');
+        if (hud) hud.style.display = window._kDebug ? 'block' : 'none';
+        if (window._kDebug) gameMode._renderDebugHud();
+        console.log('[DEBUG HUD]', window._kDebug ? 'ON — start Game Mode and rap to see events' : 'OFF');
+    }
+});
+
 // Format seconds as m:ss
 function fmt(s) {
     const m = Math.floor(s / 60);
@@ -462,15 +748,20 @@ function initPrepOverlay() {
         document.getElementById('prepSongTitle').textContent =
             sd.artist + ' \u2014 ' + sd.title;
     }
-    var startTime = Date.now();
-    prepTimer = setInterval(function() {
-        var elapsed = Math.floor((Date.now() - startTime) / 1000);
-        var m = Math.floor(elapsed / 60);
-        var s = (elapsed % 60).toString().padStart(2, '0');
-        var el = document.getElementById('prepStatus');
-        if (el) el.textContent = 'Preparing audio\u2026 (' + m + ':' + s + ')';
-    }, 1000);
-    pollPrep();
+    // Vocal separation disabled — skip overlay immediately.
+    // To re-enable: replace skipPrep() with pollPrep() and restore the timer block.
+    skipPrep();
+    // --- re-enable block start ---
+    // var startTime = Date.now();
+    // prepTimer = setInterval(function() {
+    //     var elapsed = Math.floor((Date.now() - startTime) / 1000);
+    //     var m = Math.floor(elapsed / 60);
+    //     var s = (elapsed % 60).toString().padStart(2, '0');
+    //     var el = document.getElementById('prepStatus');
+    //     if (el) el.textContent = 'Preparing audio\u2026 (' + m + ':' + s + ')';
+    // }, 1000);
+    // pollPrep();
+    // --- re-enable block end ---
 }
 
 function pollPrep() {
@@ -583,16 +874,18 @@ function toggleGameMode() {
         alert('No lyrics available for this song \u2014 game mode requires synced lyrics.');
         return;
     }
-    if (!instrumentalReady) {
-        alert('Vocal separation is still processing. Please wait or click Skip to use karaoke-only mode.');
-        return;
-    }
+    // Vocal separation disabled — removed instrumentalReady guard and auto-switch.
+    // To re-enable: restore the two blocks marked below.
     if (gameMode.active) {
         gameMode.stop();
     } else {
-        if (!usingInstrumental) {
-            toggleVocals();
-        }
+        // --- re-enable block start (auto-switch to instrumental) ---
+        // if (!instrumentalReady) {
+        //     alert('Vocal separation is still processing. Please wait or click Skip.');
+        //     return;
+        // }
+        // if (!usingInstrumental) { toggleVocals(); }
+        // --- re-enable block end ---
         gameMode.start();
     }
 }
