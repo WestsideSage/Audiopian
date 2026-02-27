@@ -530,7 +530,17 @@ class GameMode {
             const src  = this._whisperCtx.createMediaStreamSource(this._whisperStream);
             this._whisperNode = new AudioWorkletNode(this._whisperCtx, 'chunk-processor');
             this._whisperNode.port.onmessage = (e) => {
-                if (this.active) this._sendChunkToWhisper(e.data);
+                if (!this.active) return;
+                var msg = e.data;
+                if (msg && msg.type === 'energy') {
+                    // Update voice activity detection flag
+                    this.isSpeaking = msg.rms > this._energyThreshold;
+                } else if (msg && msg.type === 'chunk') {
+                    this._sendChunkToWhisper(msg.data);
+                } else if (msg instanceof Float32Array) {
+                    // Backward compat: raw Float32Array (shouldn't happen but safe)
+                    this._sendChunkToWhisper(msg);
+                }
             };
             src.connect(this._whisperNode);
         } catch (err) {
