@@ -316,6 +316,7 @@ function interpolateWordTimings(lyricsArr) {
         var syllables = words.map(function(w) { return estimateSyllables(normalizeWord(w)); });
         var totalSyllables = 0;
         for (var s = 0; s < syllables.length; s++) totalSyllables += syllables[s];
+        if (totalSyllables === 0) totalSyllables = 1; // defensive guard
 
         // Distribute time proportionally by syllable count
         var wordTimings = [];
@@ -733,10 +734,11 @@ class GameMode {
         var t = audio.currentTime;
         var newHot = -1;
         for (var i = 0; i < this.wordTimings.length; i++) {
+            if (this.matchedSet.has(i)) continue; // skip already-green words
             var wt = this.wordTimings[i];
             if (t >= wt.windowStart && t <= wt.windowEnd) {
                 newHot = i;
-                break;  // first matching window wins
+                break;  // first unmatched window wins
             }
         }
         this.hotWordIndex = newHot;
