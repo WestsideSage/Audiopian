@@ -288,6 +288,54 @@ function estimateSyllables(word) {
     return Math.max(1, count);
 }
 
+/**
+ * Compute estimated per-word timestamps for all lyrics lines.
+ * Each word gets {estimatedTime, windowStart, windowEnd} based on
+ * syllable-weighted distribution within its line's time span.
+ *
+ * @param {Array<{time: number, text: string}>} lyricsArr - parsed LRC lines
+ * @returns {Array<Array<{word: string, estimatedTime: number, windowStart: number, windowEnd: number}>>}
+ *          One array per line, each containing per-word timing data.
+ */
+function interpolateWordTimings(lyricsArr) {
+    var allTimings = [];
+    for (var i = 0; i < lyricsArr.length; i++) {
+        var line = lyricsArr[i];
+        var words = line.text.trim().split(/\s+/);
+        if (words.length === 0 || !words[0]) {
+            allTimings.push([]);
+            continue;
+        }
+
+        // Line duration: time to next line, or 4s default for last line
+        var lineStart = line.time;
+        var lineEnd = (i + 1 < lyricsArr.length) ? lyricsArr[i + 1].time : lineStart + 4.0;
+        var lineDuration = lineEnd - lineStart;
+
+        // Compute syllable weights
+        var syllables = words.map(function(w) { return estimateSyllables(normalizeWord(w)); });
+        var totalSyllables = 0;
+        for (var s = 0; s < syllables.length; s++) totalSyllables += syllables[s];
+
+        // Distribute time proportionally by syllable count
+        var wordTimings = [];
+        var cursor = lineStart;
+        for (var wi = 0; wi < words.length; wi++) {
+            var wordDuration = (syllables[wi] / totalSyllables) * lineDuration;
+            var estimatedTime = cursor;
+            wordTimings.push({
+                word: normalizeWord(words[wi]),
+                estimatedTime: estimatedTime,
+                windowStart: estimatedTime - 0.3,  // 300ms early buffer
+                windowEnd: estimatedTime + 1.5      // 1500ms late buffer
+            });
+            cursor += wordDuration;
+        }
+        allTimings.push(wordTimings);
+    }
+    return allTimings;
+}
+
 class GameMode {
     constructor() {
         this.active       = false;
