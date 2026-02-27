@@ -706,6 +706,29 @@ class GameMode {
     }
 
     /**
+     * Update hotWordIndex based on current audio time.
+     * Called every 100ms from the updateLyrics poll.
+     * The hot word is the word whose predicted time window contains
+     * the current audio time — matching this word gets priority.
+     */
+    updateHotWord() {
+        if (!this.active || this.wordTimings.length === 0) {
+            this.hotWordIndex = -1;
+            return;
+        }
+        var t = audio.currentTime;
+        var newHot = -1;
+        for (var i = 0; i < this.wordTimings.length; i++) {
+            var wt = this.wordTimings[i];
+            if (t >= wt.windowStart && t <= wt.windowEnd) {
+                newHot = i;
+                break;  // first matching window wins
+            }
+        }
+        this.hotWordIndex = newHot;
+    }
+
+    /**
      * Score an outgoing line. Accepts explicit params so delayed calls can pass
      * a snapshot rather than relying on this.* (which will have advanced by then).
      */
@@ -950,6 +973,9 @@ function updateLyrics() {
         if (lyrics[i].time <= t) idx = i;
         else break;
     }
+
+    // Update hot word tracking every poll even if line hasn't changed
+    if (gameMode.active) gameMode.updateHotWord();
 
     if (idx === currentLineIndex) return;
     currentLineIndex = idx;
