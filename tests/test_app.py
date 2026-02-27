@@ -108,8 +108,11 @@ def test_search_missing_query(client):
     assert resp.status_code == 400
 
 
-def test_load_triggers_separation_automatically(client):
-    """POST /load should auto-start vocal separation in the background."""
+def test_load_does_not_trigger_separation_when_disabled(client):
+    """Vocal separation is temporarily disabled — POST /load should leave status idle
+    and not start any background thread.
+    TODO: rename back to test_load_triggers_separation_automatically and restore
+    assertions when re-enabling separation."""
     import app as app_module
     app_module.separation_state["status"] = "idle"
     with patch("app.extract_metadata") as mock_meta, \
@@ -121,12 +124,11 @@ def test_load_triggers_separation_automatically(client):
         mock_lyrics.return_value = []
         resp = client.post("/load", json={"url": "https://youtube.com/watch?v=fake"})
     assert resp.status_code == 200
-    assert mock_thread.called, "Thread should have been started for separation"
-    assert app_module.separation_state["status"] == "processing"
-    # Reset for other tests
-    app_module.separation_state["status"] = "idle"
+    assert not mock_thread.called, "Thread should NOT start while separation is disabled"
+    assert app_module.separation_state["status"] == "idle"
 
 
+@pytest.mark.skip(reason="Vocal separation disabled temporarily — re-enable with separation thread")
 def test_stale_separation_thread_does_not_overwrite_new_song_status(client):
     """When a second song is loaded, the first song's separation thread completing
     should NOT set separation_state to 'done' (stale generation must be ignored)."""

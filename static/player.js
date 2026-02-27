@@ -748,15 +748,20 @@ function initPrepOverlay() {
         document.getElementById('prepSongTitle').textContent =
             sd.artist + ' \u2014 ' + sd.title;
     }
-    var startTime = Date.now();
-    prepTimer = setInterval(function() {
-        var elapsed = Math.floor((Date.now() - startTime) / 1000);
-        var m = Math.floor(elapsed / 60);
-        var s = (elapsed % 60).toString().padStart(2, '0');
-        var el = document.getElementById('prepStatus');
-        if (el) el.textContent = 'Preparing audio\u2026 (' + m + ':' + s + ')';
-    }, 1000);
-    pollPrep();
+    // Vocal separation disabled — skip overlay immediately.
+    // To re-enable: replace skipPrep() with pollPrep() and restore the timer block.
+    skipPrep();
+    // --- re-enable block start ---
+    // var startTime = Date.now();
+    // prepTimer = setInterval(function() {
+    //     var elapsed = Math.floor((Date.now() - startTime) / 1000);
+    //     var m = Math.floor(elapsed / 60);
+    //     var s = (elapsed % 60).toString().padStart(2, '0');
+    //     var el = document.getElementById('prepStatus');
+    //     if (el) el.textContent = 'Preparing audio\u2026 (' + m + ':' + s + ')';
+    // }, 1000);
+    // pollPrep();
+    // --- re-enable block end ---
 }
 
 function pollPrep() {
@@ -869,16 +874,18 @@ function toggleGameMode() {
         alert('No lyrics available for this song \u2014 game mode requires synced lyrics.');
         return;
     }
-    if (!instrumentalReady) {
-        alert('Vocal separation is still processing. Please wait or click Skip to use karaoke-only mode.');
-        return;
-    }
+    // Vocal separation disabled — removed instrumentalReady guard and auto-switch.
+    // To re-enable: restore the two blocks marked below.
     if (gameMode.active) {
         gameMode.stop();
     } else {
-        if (!usingInstrumental) {
-            toggleVocals();
-        }
+        // --- re-enable block start (auto-switch to instrumental) ---
+        // if (!instrumentalReady) {
+        //     alert('Vocal separation is still processing. Please wait or click Skip.');
+        //     return;
+        // }
+        // if (!usingInstrumental) { toggleVocals(); }
+        // --- re-enable block end ---
         gameMode.start();
     }
 }

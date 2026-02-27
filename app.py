@@ -60,24 +60,26 @@ def load():
     except Exception as e:
         return jsonify({"error": f"Could not download audio: {str(e)}"}), 400
 
-    # Always reset and auto-kick separation for the new song
-    global separation_gen
-    separation_gen += 1
-    my_gen = separation_gen
-    separation_state["status"] = "processing"
+    # Vocal separation disabled for rapid testing — re-enable by restoring the block below.
+    separation_state["status"] = "idle"
     separation_state.pop("error", None)
-
-    def run():
-        try:
-            separate(AUDIO_PATH)
-            if separation_gen == my_gen:
-                separation_state["status"] = "done"
-        except Exception as e:
-            if separation_gen == my_gen:
-                separation_state["status"] = "error"
-                separation_state["error"] = str(e)
-
-    threading.Thread(target=run, daemon=True).start()
+    # --- re-enable block start ---
+    # global separation_gen
+    # separation_gen += 1
+    # my_gen = separation_gen
+    # separation_state["status"] = "processing"
+    # separation_state.pop("error", None)
+    # def run():
+    #     try:
+    #         separate(AUDIO_PATH)
+    #         if separation_gen == my_gen:
+    #             separation_state["status"] = "done"
+    #     except Exception as e:
+    #         if separation_gen == my_gen:
+    #             separation_state["status"] = "error"
+    #             separation_state["error"] = str(e)
+    # threading.Thread(target=run, daemon=True).start()
+    # --- re-enable block end ---
 
     lyrics = fetch_lyrics(title, artist)
     response = {

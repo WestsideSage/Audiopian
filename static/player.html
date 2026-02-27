@@ -308,7 +308,8 @@
 
     <div class="controls">
         <button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">🎮 Game</button>
-        <button class="ctrl-btn" id="vocalBtn" onclick="toggleVocals()">🎤 Remove Vocals</button>
+        <!-- vocalBtn hidden while vocal separation is disabled; restore display:'' to re-enable -->
+        <button class="ctrl-btn" id="vocalBtn" onclick="toggleVocals()" style="display:none">🎤 Remove Vocals</button>
         <button class="ctrl-btn" id="skipBackBtn" onclick="skipBack()">⏮</button>
         <button class="ctrl-btn" id="playBtn" onclick="togglePlay()">▶</button>
         <button class="ctrl-btn" id="skipFwdBtn" onclick="skipFwd()">⏭</button>
