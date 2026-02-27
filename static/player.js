@@ -456,6 +456,10 @@ class GameMode {
             if (finalText) self.transcript += finalText;
             self.latestInterim = interim;
 
+            // HOT-WORD PRIORITY: check predicted word first for instant green
+            var hotMatched = self._matchHotWord(self.transcript + interim);
+            if (hotMatched) self._updateWordSpans();
+
             // Match primary transcript
             var unionSet = new Set();
             self._collectMatches(self.transcript + interim, unionSet);
@@ -726,6 +730,42 @@ class GameMode {
             }
         }
         this.hotWordIndex = newHot;
+    }
+
+    /**
+     * Attempt to match the current hot word against spoken words.
+     * Uses more aggressive matching: accepts any word in the recent
+     * spoken buffer that phonetically matches the hot word.
+     * Only matches if isSpeaking is true (energy gate) OR if the
+     * match is an exact/phonetic match (not just edit-distance).
+     * Returns true if the hot word was matched.
+     */
+    _matchHotWord(transcript) {
+        if (this.hotWordIndex < 0 || this.hotWordIndex >= this.lineWords.length) return false;
+        if (this.matchedSet.has(this.hotWordIndex)) return false; // already matched
+
+        var target = this.lineWords[this.hotWordIndex];
+        var spoken = normalizeWords(transcript);
+
+        // Search the tail of the spoken buffer for the hot word
+        // (only look at recent words — last 10)
+        var searchStart = Math.max(0, spoken.length - 10);
+        for (var i = searchStart; i < spoken.length; i++) {
+            if (wordsMatch(spoken[i], target)) {
+                // Energy gate: if not speaking, require exact or phonetic match (not edit-distance)
+                if (!this.isSpeaking) {
+                    if (spoken[i] !== target) {
+                        var sp = doubleMetaphone(spoken[i]);
+                        var tp = doubleMetaphone(target);
+                        var phonetic = sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])));
+                        if (!phonetic) continue; // skip edit-distance-only matches when silent
+                    }
+                }
+                this.matchedSet.add(this.hotWordIndex);
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
