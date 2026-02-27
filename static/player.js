@@ -292,6 +292,10 @@ class GameMode {
         this.currentStreak = 0;
         this.bestStreak   = 0;
 
+        // Recognition watchdog
+        this._lastResultTime = 0;
+        this._watchdogInterval = null;
+
         // Whisper Track 2 state
         this._whisperStream = null;
         this._whisperCtx    = null;
@@ -318,6 +322,7 @@ class GameMode {
         this.currentStreak = 0;
         this.bestStreak = 0;
         this.whisperBuffer = '';
+        this._lastResultTime = Date.now();
 
         renderLyricsGameMode();
         this._setupRecognition();
@@ -331,6 +336,10 @@ class GameMode {
     stop() {
         if (!this.active) return;
         this.active = false;
+        if (this._watchdogInterval) {
+            clearInterval(this._watchdogInterval);
+            this._watchdogInterval = null;
+        }
         if (this.recognition) {
             this.recognition.onend = null;
             this.recognition.stop();
@@ -358,6 +367,7 @@ class GameMode {
         this.recognition.maxAlternatives = 3;
 
         this.recognition.onresult = function(e) {
+            self._lastResultTime = Date.now();
             var interim = '';
             var finalText = '';
             for (var i = e.resultIndex; i < e.results.length; i++) {
@@ -380,7 +390,9 @@ class GameMode {
                 self._collectMatches(self.transcript + latest[a].transcript, unionSet);
             }
 
-            self.matchedSet = unionSet;
+            // Sticky: once matched, stay matched. Prevents interim→final regression
+            // where a word flashes green then reverts to grey.
+            unionSet.forEach(i => self.matchedSet.add(i));
             self._updateWordSpans();
 
             // Diagnostic: log what the recognition heard and what matched
@@ -403,7 +415,10 @@ class GameMode {
 
         // Auto-restart so recognition doesn't stop on silence
         this.recognition.onend = () => {
-            if (this.active) this.recognition.start();
+            if (this.active) {
+                this.recognition.start();
+                this._lastResultTime = Date.now();
+            }
         };
 
         this.recognition.onerror = (e) => {
@@ -414,6 +429,17 @@ class GameMode {
         };
 
         this.recognition.start();
+
+        // Watchdog: detect when recognition silently dies and force restart
+        this._watchdogInterval = setInterval(() => {
+            if (!this.active || audio.paused) return;
+            if (Date.now() - this._lastResultTime > 5000) {
+                console.warn('[GAME] Recognition watchdog: no results for 5s, restarting');
+                this._lastResultTime = Date.now();
+                try { this.recognition.abort(); } catch(e) {}
+                // onend handler will restart
+            }
+        }, 2000);
     }
 
     async _startWhisperTrack() {
@@ -501,7 +527,7 @@ class GameMode {
         if (_prevLineIdx >= 0 && _prevLineWords.length > 0) {
             setTimeout(() => this._lateScoreLine(
                 _prevLineIdx, _prevLineWords, _prevMatched, _prevLineStart
-            ), 500);
+            ), 800);
         }
 
         // Diagnostic: log transition with score + transcript state at the exact moment of line change.
@@ -526,7 +552,8 @@ class GameMode {
         // Don't reset transcript — late-arriving finals from previous segments
         // must remain accessible. Instead, record where this line starts in the
         // word stream so _collectMatches can skip past earlier lines.
-        this.lineStartWordCount = normalizeWords(this.transcript + this.latestInterim).length;
+        // Use only finals (not interim) to avoid inflated offset when interim shrinks
+        this.lineStartWordCount = normalizeWords(this.transcript).length;
         this.matchedSet = new Set();
         this.whisperBuffer = ''; // reset per-line Whisper accumulation
 
@@ -564,7 +591,7 @@ class GameMode {
         var spokenIdx = startOffset;
         for (var li = 0; li < this.lineWords.length; li++) {
             var target = this.lineWords[li];
-            var driftWindow = 12;
+            var driftWindow = 18;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (wordsMatch(spoken[si], target)) {
                     resultSet.add(li);
@@ -942,10 +969,10 @@ audio.addEventListener('ended', () => {
             const _lastMatched   = new Set(gameMode.matchedSet);
             setTimeout(() => gameMode._lateScoreLine(
                 _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart
-            ), 500);
+            ), 800);
         }
-        // Wait for late scoring to finish before showing end modal
-        setTimeout(() => gameMode.showEndModal(), 1200);
+        // Wait for late scoring (800ms) to finish before showing end modal
+        setTimeout(() => gameMode.showEndModal(), 1500);
     }
 });
 
