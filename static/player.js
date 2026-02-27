@@ -221,6 +221,34 @@ function wordsMatch(spoken, target) {
     return false;
 }
 
+/**
+ * Encode a Float32Array of mono audio samples as a standard WAV buffer.
+ * @param {Float32Array} float32 - Raw audio samples in [-1, 1]
+ * @param {number} sampleRate - Sample rate (16000 for Whisper)
+ * @returns {ArrayBuffer} - Valid WAV file bytes ready to POST
+ */
+function encodeWav(float32, sampleRate) {
+    const pcm = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+        pcm[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
+    }
+    const buf = new ArrayBuffer(44 + pcm.byteLength);
+    const v = new DataView(buf);
+    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+    w(0, 'RIFF');  v.setUint32(4, 36 + pcm.byteLength, true);
+    w(8, 'WAVE');  w(12, 'fmt ');
+    v.setUint32(16, 16, true);          // PCM chunk size
+    v.setUint16(20, 1, true);           // PCM format
+    v.setUint16(22, 1, true);           // 1 channel (mono)
+    v.setUint32(24, sampleRate, true);  // sample rate
+    v.setUint32(28, sampleRate * 2, true); // byte rate
+    v.setUint16(32, 2, true);           // block align
+    v.setUint16(34, 16, true);          // bits per sample
+    w(36, 'data'); v.setUint32(40, pcm.byteLength, true);
+    new Int16Array(buf, 44).set(pcm);
+    return buf;
+}
+
 function normalizeWord(w) {
     return w.toLowerCase().replace(/[''`,.!?;:\-"*]/g, '').trim();
 }
@@ -264,6 +292,12 @@ class GameMode {
         this.currentStreak = 0;
         this.bestStreak   = 0;
 
+        // Whisper Track 2 state
+        this._whisperStream = null;
+        this._whisperCtx    = null;
+        this._whisperNode   = null;
+        this.whisperBuffer  = '';
+
         // Diagnostic
         this._dbBuf = [];
     }
@@ -283,9 +317,11 @@ class GameMode {
         this.perfectLines = 0;
         this.currentStreak = 0;
         this.bestStreak = 0;
+        this.whisperBuffer = '';
 
         renderLyricsGameMode();
         this._setupRecognition();
+        this._startWhisperTrack(); // async — Track 2 starts in background
 
         document.getElementById('score-display').style.display = 'flex';
         document.getElementById('score-pct').textContent = '0%';
@@ -300,6 +336,7 @@ class GameMode {
             this.recognition.stop();
             this.recognition = null;
         }
+        this._stopWhisperTrack();
         renderLyrics(); // restore normal lyric rendering
         document.getElementById('score-display').style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
@@ -379,6 +416,77 @@ class GameMode {
         this.recognition.start();
     }
 
+    async _startWhisperTrack() {
+        try {
+            this._whisperStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            this._whisperCtx    = new AudioContext({ sampleRate: 16000 });
+            await this._whisperCtx.audioWorklet.addModule('/static/audio-processor.js');
+            const src  = this._whisperCtx.createMediaStreamSource(this._whisperStream);
+            this._whisperNode = new AudioWorkletNode(this._whisperCtx, 'chunk-processor');
+            this._whisperNode.port.onmessage = (e) => {
+                if (this.active) this._sendChunkToWhisper(e.data);
+            };
+            src.connect(this._whisperNode);
+        } catch (err) {
+            console.warn('[Whisper track] unavailable — running on Track 1 only:', err.message);
+            this._whisperStream = null;
+            this._whisperCtx    = null;
+            this._whisperNode   = null;
+        }
+    }
+
+    _stopWhisperTrack() {
+        if (this._whisperNode) {
+            this._whisperNode.disconnect();
+            this._whisperNode = null;
+        }
+        if (this._whisperCtx) {
+            this._whisperCtx.close();
+            this._whisperCtx = null;
+        }
+        if (this._whisperStream) {
+            this._whisperStream.getTracks().forEach(t => t.stop());
+            this._whisperStream = null;
+        }
+    }
+
+    async _sendChunkToWhisper(float32) {
+        const wav = encodeWav(float32, 16000);
+        try {
+            const resp = await fetch('/transcribe', {
+                method: 'POST',
+                body: wav,
+                headers: { 'Content-Type': 'audio/wav' }
+            });
+            if (!resp.ok) return;
+            const { transcript } = await resp.json();
+            if (transcript && this.active) {
+                this.whisperBuffer = (this.whisperBuffer + ' ' + transcript).trim();
+                this._collectMatchesWhisper(this.whisperBuffer);
+            }
+        } catch (_) { /* fire-and-forget: ignore network errors */ }
+    }
+
+    _collectMatchesWhisper(transcript) {
+        if (this.lineWords.length === 0) return;
+        const spoken = normalizeWords(transcript);
+        const whisperSet = new Set();
+        let spokenIdx = 0;
+        for (let li = 0; li < this.lineWords.length; li++) {
+            const target = this.lineWords[li];
+            const driftWindow = 15; // slightly wider than Track 1 — Whisper gives complete phrases
+            for (let si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
+                if (wordsMatch(spoken[si], target)) {
+                    whisperSet.add(li);
+                    spokenIdx = si + 1;
+                    break;
+                }
+            }
+        }
+        whisperSet.forEach(i => this.matchedSet.add(i));
+        this._updateWordSpans();
+    }
+
     setActiveLine(lineIdx) {
         // Capture outgoing state for diagnostics BEFORE anything changes
         const _dbgFromIdx  = this.activeLineIdx;
@@ -420,6 +528,7 @@ class GameMode {
         // word stream so _collectMatches can skip past earlier lines.
         this.lineStartWordCount = normalizeWords(this.transcript + this.latestInterim).length;
         this.matchedSet = new Set();
+        this.whisperBuffer = ''; // reset per-line Whisper accumulation
 
         if (lineIdx < 0 || lineIdx >= lyrics.length) {
             this.lineWords = [];
