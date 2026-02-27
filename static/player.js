@@ -342,9 +342,16 @@ class GameMode {
         const _dbgFromIdx  = this.activeLineIdx;
         const _dbgFromText = (_dbgFromIdx >= 0 && lyrics[_dbgFromIdx]) ? lyrics[_dbgFromIdx].text : '—';
 
-        // Score the outgoing line before switching
-        if (this.activeLineIdx >= 0 && this.lineWords.length > 0) {
-            this._scoreLine();
+        // Snapshot the outgoing line state and score it 500ms later so late-arriving
+        // speech-recognition finals (last-word timing race) are included before scoring.
+        const _prevLineIdx   = this.activeLineIdx;
+        const _prevLineWords = this.lineWords.slice();
+        const _prevLineStart = this.lineStartWordCount;
+        const _prevMatched   = new Set(this.matchedSet);
+        if (_prevLineIdx >= 0 && _prevLineWords.length > 0) {
+            setTimeout(() => this._lateScoreLine(
+                _prevLineIdx, _prevLineWords, _prevMatched, _prevLineStart
+            ), 500);
         }
 
         // Diagnostic: log transition with score + transcript state at the exact moment of line change.
@@ -438,18 +445,26 @@ class GameMode {
         });
     }
 
-    _scoreLine() {
-        const total = this.lineWords.length;
+    /**
+     * Score an outgoing line. Accepts explicit params so delayed calls can pass
+     * a snapshot rather than relying on this.* (which will have advanced by then).
+     */
+    _scoreLine(lineIdx, lineWords, matchedSet) {
+        lineIdx    = (lineIdx    !== undefined) ? lineIdx    : this.activeLineIdx;
+        lineWords  = (lineWords  !== undefined) ? lineWords  : this.lineWords;
+        matchedSet = (matchedSet !== undefined) ? matchedSet : this.matchedSet;
+
+        const total = lineWords.length;
         if (total === 0) return;
 
-        const matched = this.matchedSet.size;
+        const matched = matchedSet.size;
 
         // Mark unmatched spans as red
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
-        const lineEl = lines[this.activeLineIdx];
+        const lineEl = lines[lineIdx];
         if (lineEl) {
             lineEl.querySelectorAll('.word-span').forEach((span, wi) => {
-                if (!this.matchedSet.has(wi)) span.classList.add('missed');
+                if (!matchedSet.has(wi)) span.classList.add('missed');
             });
 
             // Flash per-line score
@@ -480,6 +495,41 @@ class GameMode {
         if (this.totalWords === 0) return;
         const pct = Math.round((this.matchedWords / this.totalWords) * 100);
         document.getElementById('score-pct').textContent = pct + '%';
+    }
+
+    /**
+     * Called 500ms after a line advances. Re-runs word matching against the
+     * latest transcript snapshot so that speech-recognition finals that arrived
+     * after the line change (the last-word timing race) can still be captured.
+     * Any newly-matched words are lit green before scoring.
+     */
+    _lateScoreLine(lineIdx, lineWords, matchedSet, lineStartWordCount) {
+        if (lineWords.length === 0) return;
+
+        const spokenNow = normalizeWords(this.transcript);
+        const startOff  = Math.max(0, lineStartWordCount - 4);
+        let   spokenIdx = startOff;
+
+        for (let li = 0; li < lineWords.length; li++) {
+            if (matchedSet.has(li)) { spokenIdx++; continue; }
+            const target = lineWords[li];
+            for (let si = spokenIdx; si < Math.min(spokenIdx + 20, spokenNow.length); si++) {
+                if (wordsMatch(spokenNow[si], target)) {
+                    matchedSet.add(li);
+                    spokenIdx = si + 1;
+                    // Light the span green — this word just arrived late
+                    const allLines = lyricsScroll.querySelectorAll('.lyric-line');
+                    const lineEl   = allLines[lineIdx];
+                    if (lineEl) {
+                        const span = lineEl.querySelectorAll('.word-span')[li];
+                        if (span) { span.classList.remove('missed'); span.classList.add('matched'); }
+                    }
+                    break;
+                }
+            }
+        }
+
+        this._scoreLine(lineIdx, lineWords, matchedSet);
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────
@@ -732,11 +782,19 @@ audio.addEventListener('canplay', () => {
 
 audio.addEventListener('ended', () => {
     if (gameMode.active) {
-        // Score the final line
+        // Score the final line — use _lateScoreLine so the last word of the song
+        // (which almost always arrives 200-500ms after the track ends) is captured.
         if (gameMode.activeLineIdx >= 0 && gameMode.lineWords.length > 0) {
-            gameMode._scoreLine();
+            const _lastLineIdx   = gameMode.activeLineIdx;
+            const _lastLineWords = gameMode.lineWords.slice();
+            const _lastLineStart = gameMode.lineStartWordCount;
+            const _lastMatched   = new Set(gameMode.matchedSet);
+            setTimeout(() => gameMode._lateScoreLine(
+                _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart
+            ), 500);
         }
-        setTimeout(() => gameMode.showEndModal(), 600);
+        // Wait for late scoring to finish before showing end modal
+        setTimeout(() => gameMode.showEndModal(), 1200);
     }
 });
 
