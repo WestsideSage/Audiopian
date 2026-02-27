@@ -271,6 +271,23 @@ function expandContractions(words) {
     return out;
 }
 
+/**
+ * Estimate syllable count for a word using vowel-cluster heuristic.
+ * Used to weight word-level timestamp interpolation so longer words
+ * get proportionally more time.
+ * @param {string} word - lowercase, already normalized
+ * @returns {number} estimated syllable count (minimum 1)
+ */
+function estimateSyllables(word) {
+    if (!word) return 1;
+    // Remove trailing silent-e
+    var w = word.replace(/e$/, '') || word;
+    // Count vowel clusters
+    var matches = w.match(/[aeiouy]+/gi);
+    var count = matches ? matches.length : 1;
+    return Math.max(1, count);
+}
+
 class GameMode {
     constructor() {
         this.active       = false;
