@@ -848,6 +848,9 @@ class GameMode {
         if (lineWords.length === 0) return;
 
         const spokenNow = normalizeWords(this.transcript);
+        // Intentionally retains the -4 lookback (unlike _collectMatches which uses a
+        // strict fence). This method runs 800ms after line change, so it needs slack
+        // to catch late-arriving recognition finals from the transition boundary.
         const startOff  = Math.max(0, lineStartWordCount - 4);
         let   spokenIdx = startOff;
 
