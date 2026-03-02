@@ -348,6 +348,7 @@ class GameMode {
         this.matchedSet        = new Set(); // indices of matched words in lineWords
         this.transcript        = '';      // accumulated final transcript (never reset)
         this.lineStartWordCount = 0;      // word count in transcript when current line started
+        this.lineStartTranscriptPos = 0;  // transcript word index when current line started (fence)
         this.latestInterim     = '';      // most recent interim, used to anchor fast-song lines
 
         // Scoring
@@ -387,6 +388,7 @@ class GameMode {
         this.matchedSet = new Set();
         this.transcript = '';
         this.lineStartWordCount = 0;
+        this.lineStartTranscriptPos = 0;
         this.latestInterim = '';
         this.totalWords = 0;
         this.matchedWords = 0;
@@ -479,7 +481,7 @@ class GameMode {
             // Diagnostic: log what the recognition heard and what matched
             if (window._kDebug) {
                 const spokenFull = normalizeWords(self.transcript + interim);
-                const scanFrom   = Math.max(0, self.lineStartWordCount - 4);
+                const scanFrom   = self.lineStartTranscriptPos;
                 self._debugLog('RESULT', {
                     lineIdx:   self.activeLineIdx,
                     finalText: finalText || null,
@@ -490,6 +492,13 @@ class GameMode {
                     targets:     self.lineWords.slice(),
                     spokenWindow: spokenFull.slice(scanFrom, scanFrom + 20),
                     matchedIdxs: [...unionSet],
+                    hotIdx:      self.hotWordIndex,
+                    hotWindow:   self.hotWordIndex >= 0 && self.wordTimings[self.hotWordIndex]
+                                    ? [self.wordTimings[self.hotWordIndex].windowStart.toFixed(2),
+                                       self.wordTimings[self.hotWordIndex].windowEnd.toFixed(2)]
+                                    : null,
+                    audioTime:   audio.currentTime.toFixed(2),
+                    fencePos:    self.lineStartTranscriptPos,
                 });
             }
         };
@@ -588,8 +597,15 @@ class GameMode {
         if (this.lineWords.length === 0) return;
         const spoken = normalizeWords(transcript);
         const whisperSet = new Set();
+        // spokenIdx starts at 0 because whisperBuffer is reset per-line (see setActiveLine),
+        // unlike the cumulative Track 1 transcript which needs lineStartTranscriptPos as fence.
         let spokenIdx = 0;
+        var now = audio.currentTime;
         for (let li = 0; li < this.lineWords.length; li++) {
+            // Time gate: don't match words whose predicted window hasn't started yet
+            if (li < this.wordTimings.length) {
+                if (now < this.wordTimings[li].windowStart) continue;
+            }
             const target = this.lineWords[li];
             const driftWindow = 15; // slightly wider than Track 1 — Whisper gives complete phrases
             for (let si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
@@ -645,6 +661,7 @@ class GameMode {
         // word stream so _collectMatches can skip past earlier lines.
         // Use only finals (not interim) to avoid inflated offset when interim shrinks
         this.lineStartWordCount = normalizeWords(this.transcript).length;
+        this.lineStartTranscriptPos = this.lineStartWordCount;
         this.matchedSet = new Set();
         this.whisperBuffer = ''; // reset per-line Whisper accumulation
 
@@ -681,12 +698,15 @@ class GameMode {
     _collectMatches(transcript, resultSet) {
         if (this.lineWords.length === 0) return;
         var spoken = normalizeWords(transcript);
-        // Start near the word position where the current line began.
-        // The -4 buffer absorbs recognition latency: finals that committed
-        // just before setActiveLine fired may still contain the line's words.
-        var startOffset = Math.max(0, this.lineStartWordCount - 4);
-        var spokenIdx = startOffset;
+        // Fence: only scan words spoken since the current line started.
+        // Late-arriving finals for the previous line are handled by _lateScoreLine.
+        var spokenIdx = this.lineStartTranscriptPos;
+        var now = audio.currentTime;
         for (var li = 0; li < this.lineWords.length; li++) {
+            // Time gate: don't match words whose predicted window hasn't started yet
+            if (li < this.wordTimings.length) {
+                if (now < this.wordTimings[li].windowStart) continue;
+            }
             var target = this.lineWords[li];
             var driftWindow = 18;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
@@ -759,9 +779,9 @@ class GameMode {
         var target = this.lineWords[this.hotWordIndex];
         var spoken = normalizeWords(transcript);
 
-        // Search the tail of the spoken buffer for the hot word
-        // (only look at recent words — last 10)
-        var searchStart = Math.max(0, spoken.length - 10);
+        // Fence: only search words spoken since the current line started
+        // (within that, only look at recent 10)
+        var searchStart = Math.max(this.lineStartTranscriptPos, spoken.length - 10);
         for (var i = searchStart; i < spoken.length; i++) {
             if (wordsMatch(spoken[i], target)) {
                 // Energy gate: if not speaking, require exact or phonetic match (not edit-distance)
@@ -842,6 +862,9 @@ class GameMode {
         if (lineWords.length === 0) return;
 
         const spokenNow = normalizeWords(this.transcript);
+        // Intentionally retains the -4 lookback (unlike _collectMatches which uses a
+        // strict fence). This method runs 800ms after line change, so it needs slack
+        // to catch late-arriving recognition finals from the transition boundary.
         const startOff  = Math.max(0, lineStartWordCount - 4);
         let   spokenIdx = startOff;
 
@@ -928,7 +951,7 @@ class GameMode {
         html += `<div class="dbg-row"><span class="dbg-label">Words </span>${wordSpans || '—'}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Final </span><span class="dbg-final">&hellip;${tail}</span></div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Intrm </span><span class="dbg-interim">${interim}</span></div>`;
-        html += `<div class="dbg-row"><span class="dbg-label">wBuf  </span>${wBuf} | wStart ${wStart} | scanFrom ${Math.max(0, wStart - 4)}</div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">wBuf  </span>${wBuf} | wStart ${wStart} | fence ${this.lineStartTranscriptPos}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Hot   </span>word[${this.hotWordIndex}] ${this.hotWordIndex >= 0 && this.wordTimings[this.hotWordIndex] ? this.wordTimings[this.hotWordIndex].word : '\u2014'} | speaking: ${this.isSpeaking ? 'YES' : 'no'}</div>`;
         html += '<div class="dbg-sep"></div>';
 
