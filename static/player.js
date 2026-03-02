@@ -348,6 +348,7 @@ class GameMode {
         this.matchedSet        = new Set(); // indices of matched words in lineWords
         this.transcript        = '';      // accumulated final transcript (never reset)
         this.lineStartWordCount = 0;      // word count in transcript when current line started
+        this.lineStartTranscriptPos = 0;  // transcript word index when current line started (fence)
         this.latestInterim     = '';      // most recent interim, used to anchor fast-song lines
 
         // Scoring
@@ -387,6 +388,7 @@ class GameMode {
         this.matchedSet = new Set();
         this.transcript = '';
         this.lineStartWordCount = 0;
+        this.lineStartTranscriptPos = 0;
         this.latestInterim = '';
         this.totalWords = 0;
         this.matchedWords = 0;
@@ -645,6 +647,7 @@ class GameMode {
         // word stream so _collectMatches can skip past earlier lines.
         // Use only finals (not interim) to avoid inflated offset when interim shrinks
         this.lineStartWordCount = normalizeWords(this.transcript).length;
+        this.lineStartTranscriptPos = this.lineStartWordCount;
         this.matchedSet = new Set();
         this.whisperBuffer = ''; // reset per-line Whisper accumulation
 
@@ -681,12 +684,15 @@ class GameMode {
     _collectMatches(transcript, resultSet) {
         if (this.lineWords.length === 0) return;
         var spoken = normalizeWords(transcript);
-        // Start near the word position where the current line began.
-        // The -4 buffer absorbs recognition latency: finals that committed
-        // just before setActiveLine fired may still contain the line's words.
-        var startOffset = Math.max(0, this.lineStartWordCount - 4);
-        var spokenIdx = startOffset;
+        // Fence: only scan words spoken since the current line started.
+        // Late-arriving finals for the previous line are handled by _lateScoreLine.
+        var spokenIdx = this.lineStartTranscriptPos;
+        var now = audio.currentTime;
         for (var li = 0; li < this.lineWords.length; li++) {
+            // Time gate: don't match words whose predicted window hasn't started yet
+            if (li < this.wordTimings.length) {
+                if (now < this.wordTimings[li].windowStart) continue;
+            }
             var target = this.lineWords[li];
             var driftWindow = 18;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
