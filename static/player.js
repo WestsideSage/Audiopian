@@ -597,6 +597,8 @@ class GameMode {
         if (this.lineWords.length === 0) return;
         const spoken = normalizeWords(transcript);
         const whisperSet = new Set();
+        // spokenIdx starts at 0 because whisperBuffer is reset per-line (see setActiveLine),
+        // unlike the cumulative Track 1 transcript which needs lineStartTranscriptPos as fence.
         let spokenIdx = 0;
         var now = audio.currentTime;
         for (let li = 0; li < this.lineWords.length; li++) {
