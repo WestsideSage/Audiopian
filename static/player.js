@@ -481,7 +481,7 @@ class GameMode {
             // Diagnostic: log what the recognition heard and what matched
             if (window._kDebug) {
                 const spokenFull = normalizeWords(self.transcript + interim);
-                const scanFrom   = Math.max(0, self.lineStartWordCount - 4);
+                const scanFrom   = self.lineStartTranscriptPos;
                 self._debugLog('RESULT', {
                     lineIdx:   self.activeLineIdx,
                     finalText: finalText || null,
@@ -951,7 +951,7 @@ class GameMode {
         html += `<div class="dbg-row"><span class="dbg-label">Words </span>${wordSpans || '—'}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Final </span><span class="dbg-final">&hellip;${tail}</span></div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Intrm </span><span class="dbg-interim">${interim}</span></div>`;
-        html += `<div class="dbg-row"><span class="dbg-label">wBuf  </span>${wBuf} | wStart ${wStart} | scanFrom ${Math.max(0, wStart - 4)}</div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">wBuf  </span>${wBuf} | wStart ${wStart} | fence ${this.lineStartTranscriptPos}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Hot   </span>word[${this.hotWordIndex}] ${this.hotWordIndex >= 0 && this.wordTimings[this.hotWordIndex] ? this.wordTimings[this.hotWordIndex].word : '\u2014'} | speaking: ${this.isSpeaking ? 'YES' : 'no'}</div>`;
         html += '<div class="dbg-sep"></div>';
 
