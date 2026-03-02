@@ -492,6 +492,13 @@ class GameMode {
                     targets:     self.lineWords.slice(),
                     spokenWindow: spokenFull.slice(scanFrom, scanFrom + 20),
                     matchedIdxs: [...unionSet],
+                    hotIdx:      self.hotWordIndex,
+                    hotWindow:   self.hotWordIndex >= 0 && self.wordTimings[self.hotWordIndex]
+                                    ? [self.wordTimings[self.hotWordIndex].windowStart.toFixed(2),
+                                       self.wordTimings[self.hotWordIndex].windowEnd.toFixed(2)]
+                                    : null,
+                    audioTime:   audio.currentTime.toFixed(2),
+                    fencePos:    self.lineStartTranscriptPos,
                 });
             }
         };
@@ -591,7 +598,12 @@ class GameMode {
         const spoken = normalizeWords(transcript);
         const whisperSet = new Set();
         let spokenIdx = 0;
+        var now = audio.currentTime;
         for (let li = 0; li < this.lineWords.length; li++) {
+            // Time gate: don't match words whose predicted window hasn't started yet
+            if (li < this.wordTimings.length) {
+                if (now < this.wordTimings[li].windowStart) continue;
+            }
             const target = this.lineWords[li];
             const driftWindow = 15; // slightly wider than Track 1 — Whisper gives complete phrases
             for (let si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
@@ -765,9 +777,9 @@ class GameMode {
         var target = this.lineWords[this.hotWordIndex];
         var spoken = normalizeWords(transcript);
 
-        // Search the tail of the spoken buffer for the hot word
-        // (only look at recent words — last 10)
-        var searchStart = Math.max(0, spoken.length - 10);
+        // Fence: only search words spoken since the current line started
+        // (within that, only look at recent 10)
+        var searchStart = Math.max(this.lineStartTranscriptPos, spoken.length - 10);
         for (var i = searchStart; i < spoken.length; i++) {
             if (wordsMatch(spoken[i], target)) {
                 // Energy gate: if not speaking, require exact or phonetic match (not edit-distance)
