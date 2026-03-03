@@ -405,6 +405,9 @@ class GameMode {
         this.isSpeaking     = false; // true when mic energy exceeds threshold
         this._energyThreshold = 0.01; // RMS threshold for voice activity detection
         this.currentParams = getWindowParams('normal'); // adaptive window params for active line
+
+        // Soft boundary: previous line overlay during overlap zone
+        this.prevLine = null;  // { lineIdx, lineWords, matchedSet, lineStartWordCount, lineStartTranscriptPos, wordTimings, params, overlapEnd, whisperBuffer }
     }
 
     start() {
@@ -424,6 +427,7 @@ class GameMode {
         this.currentStreak = 0;
         this.bestStreak = 0;
         this.whisperBuffer = '';
+        this.prevLine = null;
         this._lastResultTime = Date.now();
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.wordTimings = [];
@@ -452,6 +456,7 @@ class GameMode {
             this.recognition = null;
         }
         this._stopWhisperTrack();
+        this.prevLine = null;
         renderLyrics(); // restore normal lyric rendering
         document.getElementById('score-display').style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
@@ -489,6 +494,9 @@ class GameMode {
             // HOT-WORD PRIORITY: check predicted word first for instant green
             var hotMatched = self._matchHotWord(self.transcript + interim);
             if (hotMatched) self._updateWordSpans();
+
+            // Match against previous line during overlap zone (Track 1)
+            self._matchPrevLine(self.transcript + interim, 'track1');
 
             // Match primary transcript
             var unionSet = new Set();
@@ -620,6 +628,60 @@ class GameMode {
         } catch (_) { /* fire-and-forget: ignore network errors */ }
     }
 
+    /**
+     * Finalize and score the previous line's overlay, then discard it.
+     * Called when the overlap zone expires or when a new overlap begins.
+     */
+    _finalizePrevLine() {
+        if (!this.prevLine) return;
+        var prev = this.prevLine;
+        this.prevLine = null;
+
+        // Score the previous line with its final match state
+        if (prev.lineWords.length > 0) {
+            this._scoreLine(prev.lineIdx, prev.lineWords, prev.matchedSet);
+        }
+    }
+
+    /**
+     * During the overlap zone, attempt to match ASR words against the
+     * previous line's unmatched words. Returns true if any match was found.
+     * @param {string} transcript - full transcript (Track 1) or whisper buffer (Track 2)
+     * @param {'track1'|'track2'} track
+     */
+    _matchPrevLine(transcript, track) {
+        if (!this.prevLine) return false;
+        if (performance.now() > this.prevLine.overlapEnd) return false;
+
+        var prev = this.prevLine;
+        var spoken = normalizeWords(transcript);
+        var spokenIdx = (track === 'track1') ? prev.lineStartTranscriptPos : 0;
+        var driftWindow = (track === 'track1') ? prev.params.driftTrack1 : prev.params.driftTrack2;
+        var cursor = spokenIdx;
+        var anyMatched = false;
+
+        for (var li = 0; li < prev.lineWords.length; li++) {
+            if (prev.matchedSet.has(li)) { cursor++; continue; }
+            var target = prev.lineWords[li];
+            for (var si = cursor; si < Math.min(cursor + driftWindow, spoken.length); si++) {
+                if (wordsMatch(spoken[si], target)) {
+                    prev.matchedSet.add(li);
+                    cursor = si + 1;
+                    anyMatched = true;
+                    // Light the span green on the previous line
+                    var allLines = lyricsScroll.querySelectorAll('.lyric-line');
+                    var lineEl = allLines[prev.lineIdx];
+                    if (lineEl) {
+                        var span = lineEl.querySelectorAll('.word-span')[li];
+                        if (span) { span.classList.remove('missed'); span.classList.add('matched'); }
+                    }
+                    break;
+                }
+            }
+        }
+        return anyMatched;
+    }
+
     _collectMatchesWhisper(transcript) {
         if (this.lineWords.length === 0) return;
         const spoken = normalizeWords(transcript);
@@ -642,29 +704,53 @@ class GameMode {
         }
         whisperSet.forEach(i => this.matchedSet.add(i));
         this._updateWordSpans();
+
+        // Match against previous line during overlap zone (Track 2)
+        if (this.prevLine) {
+            this._matchPrevLine(this.prevLine.whisperBuffer + ' ' + transcript, 'track2');
+        }
     }
 
     setActiveLine(lineIdx) {
         // Capture outgoing state for diagnostics BEFORE anything changes
-        const _dbgFromIdx  = this.activeLineIdx;
-        const _dbgFromText = (_dbgFromIdx >= 0 && lyrics[_dbgFromIdx]) ? lyrics[_dbgFromIdx].text : '—';
+        var _dbgFromIdx  = this.activeLineIdx;
+        var _dbgFromText = (_dbgFromIdx >= 0 && lyrics[_dbgFromIdx]) ? lyrics[_dbgFromIdx].text : '—';
 
-        // Snapshot the outgoing line state and score it 500ms later so late-arriving
-        // speech-recognition finals (last-word timing race) are included before scoring.
-        const _prevLineIdx   = this.activeLineIdx;
-        const _prevLineWords = this.lineWords.slice();
-        const _prevLineStart = this.lineStartWordCount;
-        const _prevMatched   = new Set(this.matchedSet);
-        if (_prevLineIdx >= 0 && _prevLineWords.length > 0) {
-            setTimeout(() => this._lateScoreLine(
-                _prevLineIdx, _prevLineWords, _prevMatched, _prevLineStart
-            ), 800);
+        // --- Soft boundary: preserve outgoing line as prevLine overlay ---
+        // If there's already a prevLine overlay, finalize it first (fast succession)
+        this._finalizePrevLine();
+
+        // Create overlay for the outgoing line (if it had words to match)
+        if (this.activeLineIdx >= 0 && this.lineWords.length > 0) {
+            var outgoingTempoClass = (this.wordTimings && this.wordTimings.tempoClass) || 'normal';
+            var overlapDuration = getOverlapDuration(outgoingTempoClass);
+            var scoreDelay = getScoreDelay(outgoingTempoClass);
+
+            this.prevLine = {
+                lineIdx:                this.activeLineIdx,
+                lineWords:              this.lineWords.slice(),
+                matchedSet:             new Set(this.matchedSet),
+                lineStartWordCount:     this.lineStartWordCount,
+                lineStartTranscriptPos: this.lineStartTranscriptPos,
+                wordTimings:            this.wordTimings,
+                params:                 this.currentParams,
+                overlapEnd:             performance.now() + (overlapDuration * 1000),
+                whisperBuffer:          this.whisperBuffer,
+            };
+
+            // Schedule finalization after overlap + score delay
+            var totalDelay = (overlapDuration + scoreDelay) * 1000;
+            var capturedLineIdx = this.activeLineIdx;
+            var self = this;
+            setTimeout(function() {
+                // Only finalize if this prevLine is still the active overlay
+                if (self.prevLine && self.prevLine.lineIdx === capturedLineIdx) {
+                    self._finalizePrevLine();
+                }
+            }, totalDelay);
         }
 
-        // Diagnostic: log transition with score + transcript state at the exact moment of line change.
-        // This is the KEY evidence for the last-word problem:
-        //  - If interim contains the last word but matchedSet doesn't → _collectMatches missed it
-        //  - If both are empty → recognition hadn't fired for that word yet (timing race)
+        // Diagnostic: log transition
         if (window._kDebug && _dbgFromIdx >= 0 && this.lineWords.length > 0) {
             this._debugLog('LINE', {
                 fromIdx:       _dbgFromIdx,
@@ -673,21 +759,18 @@ class GameMode {
                 toText:        (lineIdx >= 0 && lyrics[lineIdx]) ? lyrics[lineIdx].text : '—',
                 matched:       this.matchedSet.size,
                 total:         this.lineWords.length,
-                missedWords:   this.lineWords.filter((w, i) => !this.matchedSet.has(i)).join(', '),
+                missedWords:   this.lineWords.filter(function(w, i) { return !this.matchedSet.has(i); }.bind(this)).join(', '),
                 transcriptTail: normalizeWords(this.transcript).slice(-8).join(' '),
                 interim:       this.latestInterim,
             });
         }
 
+        // --- Set up new line ---
         this.activeLineIdx = lineIdx;
-        // Don't reset transcript — late-arriving finals from previous segments
-        // must remain accessible. Instead, record where this line starts in the
-        // word stream so _collectMatches can skip past earlier lines.
-        // Use only finals (not interim) to avoid inflated offset when interim shrinks
         this.lineStartWordCount = normalizeWords(this.transcript).length;
         this.lineStartTranscriptPos = this.lineStartWordCount;
         this.matchedSet = new Set();
-        this.whisperBuffer = ''; // reset per-line Whisper accumulation
+        this.whisperBuffer = '';
 
         // Load interpolated word timings for this line
         this.wordTimings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
@@ -705,20 +788,19 @@ class GameMode {
             return;
         }
 
-        const lineText = lyrics[lineIdx].text.trim();
-        // Skip empty lines and music notation lines
-        if (!lineText || lineText === '♪' || lineText === '♫') {
+        var lineText = lyrics[lineIdx].text.trim();
+        if (!lineText || lineText === '\u266a' || lineText === '\u266b') {
             this.lineWords = [];
             return;
         }
 
-        const rawWords = lineText.split(' ');
-        this.lineWords = rawWords.map(w => normalizeWord(w));
+        var rawWords = lineText.split(' ');
+        this.lineWords = rawWords.map(function(w) { return normalizeWord(w); });
 
         // Reset spans to grey for new active line
-        const lines = lyricsScroll.querySelectorAll('.lyric-line');
+        var lines = lyricsScroll.querySelectorAll('.lyric-line');
         if (lines[lineIdx]) {
-            lines[lineIdx].querySelectorAll('.word-span').forEach(s => {
+            lines[lineIdx].querySelectorAll('.word-span').forEach(function(s) {
                 s.classList.remove('matched', 'missed');
             });
         }
@@ -1168,21 +1250,25 @@ audio.addEventListener('canplay', () => {
     }
 });
 
-audio.addEventListener('ended', () => {
+audio.addEventListener('ended', function() {
     if (gameMode.active) {
-        // Score the final line — use _lateScoreLine so the last word of the song
-        // (which almost always arrives 200-500ms after the track ends) is captured.
-        if (gameMode.activeLineIdx >= 0 && gameMode.lineWords.length > 0) {
-            const _lastLineIdx   = gameMode.activeLineIdx;
-            const _lastLineWords = gameMode.lineWords.slice();
-            const _lastLineStart = gameMode.lineStartWordCount;
-            const _lastMatched   = new Set(gameMode.matchedSet);
-            setTimeout(() => gameMode._lateScoreLine(
-                _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart
-            ), 800);
+        // Finalize any active prevLine overlay
+        if (gameMode.prevLine) {
+            setTimeout(function() { gameMode._finalizePrevLine(); }, 500);
         }
-        // Wait for late scoring (800ms) to finish before showing end modal
-        setTimeout(() => gameMode.showEndModal(), 1500);
+        // Score the final line
+        if (gameMode.activeLineIdx >= 0 && gameMode.lineWords.length > 0) {
+            var _lastLineIdx   = gameMode.activeLineIdx;
+            var _lastLineWords = gameMode.lineWords.slice();
+            var _lastLineStart = gameMode.lineStartWordCount;
+            var _lastMatched   = new Set(gameMode.matchedSet);
+            setTimeout(function() {
+                gameMode._lateScoreLine(
+                    _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart
+                );
+            }, 800);
+        }
+        setTimeout(function() { gameMode.showEndModal(); }, 1500);
     }
 });
 
