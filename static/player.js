@@ -404,6 +404,7 @@ class GameMode {
         this.hotWordIndex   = -1;    // index of word whose time window contains audio.currentTime
         this.isSpeaking     = false; // true when mic energy exceeds threshold
         this._energyThreshold = 0.01; // RMS threshold for voice activity detection
+        this.currentParams = getWindowParams('normal'); // adaptive window params for active line
     }
 
     start() {
@@ -623,17 +624,14 @@ class GameMode {
         if (this.lineWords.length === 0) return;
         const spoken = normalizeWords(transcript);
         const whisperSet = new Set();
-        // spokenIdx starts at 0 because whisperBuffer is reset per-line (see setActiveLine),
-        // unlike the cumulative Track 1 transcript which needs lineStartTranscriptPos as fence.
         let spokenIdx = 0;
         var now = audio.currentTime;
+        var driftWindow = this.currentParams.driftTrack2;
         for (let li = 0; li < this.lineWords.length; li++) {
-            // Time gate: don't match words whose predicted window hasn't started yet
             if (li < this.wordTimings.length) {
                 if (now < this.wordTimings[li].windowStart) continue;
             }
             const target = this.lineWords[li];
-            const driftWindow = 15; // slightly wider than Track 1 — Whisper gives complete phrases
             for (let si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (wordsMatch(spoken[si], target)) {
                     whisperSet.add(li);
@@ -697,6 +695,11 @@ class GameMode {
             : [];
         this.hotWordIndex = -1;
 
+        // Load adaptive window params for this line's tempo
+        this.currentParams = (this.wordTimings && this.wordTimings.tempoClass)
+            ? getWindowParams(this.wordTimings.tempoClass)
+            : getWindowParams('normal');
+
         if (lineIdx < 0 || lineIdx >= lyrics.length) {
             this.lineWords = [];
             return;
@@ -724,17 +727,14 @@ class GameMode {
     _collectMatches(transcript, resultSet) {
         if (this.lineWords.length === 0) return;
         var spoken = normalizeWords(transcript);
-        // Fence: only scan words spoken since the current line started.
-        // Late-arriving finals for the previous line are handled by _lateScoreLine.
         var spokenIdx = this.lineStartTranscriptPos;
         var now = audio.currentTime;
+        var driftWindow = this.currentParams.driftTrack1;
         for (var li = 0; li < this.lineWords.length; li++) {
-            // Time gate: don't match words whose predicted window hasn't started yet
             if (li < this.wordTimings.length) {
                 if (now < this.wordTimings[li].windowStart) continue;
             }
             var target = this.lineWords[li];
-            var driftWindow = 18;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (wordsMatch(spoken[si], target)) {
                     resultSet.add(li);
