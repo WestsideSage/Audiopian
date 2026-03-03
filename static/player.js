@@ -292,6 +292,7 @@ function estimateSyllables(word) {
  * Compute estimated per-word timestamps for all lyrics lines.
  * Each word gets {estimatedTime, windowStart, windowEnd} based on
  * syllable-weighted distribution within its line's time span.
+ * Each line's array also gets metadata: wps, tempoClass, lineStart, lineEnd.
  *
  * @param {Array<{time: number, text: string}>} lyricsArr - parsed LRC lines
  * @returns {Array<Array<{word: string, estimatedTime: number, windowStart: number, windowEnd: number}>>}
@@ -303,14 +304,32 @@ function interpolateWordTimings(lyricsArr) {
         var line = lyricsArr[i];
         var words = line.text.trim().split(/\s+/);
         if (words.length === 0 || !words[0]) {
-            allTimings.push([]);
+            var empty = [];
+            empty.wps = 0;
+            empty.tempoClass = 'slow';
+            empty.lineStart = line.time;
+            empty.lineEnd = line.time;
+            allTimings.push(empty);
             continue;
         }
 
-        // Line duration: time to next line, or 4s default for last line
+        // Line duration: time to next line, or audio.duration for last line (clamped to 8s)
         var lineStart = line.time;
-        var lineEnd = (i + 1 < lyricsArr.length) ? lyricsArr[i + 1].time : lineStart + 4.0;
+        var lineEnd;
+        if (i + 1 < lyricsArr.length) {
+            lineEnd = lyricsArr[i + 1].time;
+        } else {
+            // Last line: use audio duration if available, else fallback to +4s
+            var audioDur = (typeof audio !== 'undefined' && audio.duration && isFinite(audio.duration))
+                ? audio.duration : lineStart + 4.0;
+            lineEnd = Math.min(audioDur, lineStart + 8.0);
+        }
         var lineDuration = lineEnd - lineStart;
+
+        // Compute per-line tempo
+        var wps = lineDuration > 0 ? words.length / lineDuration : 0;
+        var tempoClass = classifyTempo(wps);
+        var params = getWindowParams(tempoClass);
 
         // Compute syllable weights
         var syllables = words.map(function(w) { return estimateSyllables(normalizeWord(w)); });
@@ -327,11 +346,18 @@ function interpolateWordTimings(lyricsArr) {
             wordTimings.push({
                 word: normalizeWord(words[wi]),
                 estimatedTime: estimatedTime,
-                windowStart: estimatedTime - 0.3,  // 300ms early buffer
-                windowEnd: estimatedTime + 1.5      // 1500ms late buffer
+                windowStart: estimatedTime + params.windowStart,
+                windowEnd: estimatedTime + params.windowEnd
             });
             cursor += wordDuration;
         }
+
+        // Attach line-level metadata to the array
+        wordTimings.wps = wps;
+        wordTimings.tempoClass = tempoClass;
+        wordTimings.lineStart = lineStart;
+        wordTimings.lineEnd = lineEnd;
+
         allTimings.push(wordTimings);
     }
     return allTimings;

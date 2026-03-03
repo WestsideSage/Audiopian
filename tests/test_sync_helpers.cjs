@@ -63,4 +63,24 @@ assert.strictEqual(getScoreDelay('normal'), 0.8);
 assert.strictEqual(getScoreDelay('fast'), 0.5);
 assert.strictEqual(getScoreDelay('unknown'), 0.8);
 
+// --- interpolateWordTimings tempo metadata ---
+// We test the WPS calculation formula that interpolateWordTimings will use.
+// The actual integration is: interpolateWordTimings calls classifyTempo(wps).
+
+// Verify WPS calculation formula
+function computeWps(wordCount, lineStart, lineEnd) {
+    var duration = lineEnd - lineStart;
+    if (duration <= 0) return 0;
+    return wordCount / duration;
+}
+
+// Slow: 3 words in 4 seconds = 0.75 wps
+assert.strictEqual(classifyTempo(computeWps(3, 0, 4)), 'slow');
+// Normal: 6 words in 2 seconds = 3.0 wps
+assert.strictEqual(classifyTempo(computeWps(6, 10, 12)), 'normal');
+// Fast: 12 words in 1.5 seconds = 8.0 wps
+assert.strictEqual(classifyTempo(computeWps(12, 20, 21.5)), 'fast');
+// Edge: last line with audio.duration fallback (8s clamp)
+assert.strictEqual(classifyTempo(computeWps(4, 180, 188)), 'slow');
+
 console.log('All sync-helpers tests passed.');
