@@ -783,6 +783,15 @@ class GameMode {
             ? getWindowParams(this.wordTimings.tempoClass)
             : getWindowParams('normal');
 
+        // Dynamic Whisper chunk size: smaller chunks for fast sections
+        if (this._whisperNode && this._whisperNode.port) {
+            var tempoClass = (this.wordTimings && this.wordTimings.tempoClass) || 'normal';
+            this._whisperNode.port.postMessage({
+                type: 'setChunkSize',
+                samples: getChunkSamples(tempoClass)
+            });
+        }
+
         if (lineIdx < 0 || lineIdx >= lyrics.length) {
             this.lineWords = [];
             return;
