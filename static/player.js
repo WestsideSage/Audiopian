@@ -1061,6 +1061,19 @@ class GameMode {
         html += `<div class="dbg-row"><span class="dbg-label">Intrm </span><span class="dbg-interim">${interim}</span></div>`;
         html += `<div class="dbg-row"><span class="dbg-label">wBuf  </span>${wBuf} | wStart ${wStart} | fence ${this.lineStartTranscriptPos}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Hot   </span>word[${this.hotWordIndex}] ${this.hotWordIndex >= 0 && this.wordTimings[this.hotWordIndex] ? this.wordTimings[this.hotWordIndex].word : '\u2014'} | speaking: ${this.isSpeaking ? 'YES' : 'no'}</div>`;
+
+        // Tempo classification
+        const tc = (this.wordTimings && this.wordTimings.tempoClass) || '\u2014';
+        const wpsVal = (this.wordTimings && this.wordTimings.wps) ? this.wordTimings.wps.toFixed(1) : '\u2014';
+        html += `<div class="dbg-row"><span class="dbg-label">Tempo </span>${tc} (${wpsVal} wps)</div>`;
+
+        // Overlap state
+        const overlapActive = this.prevLine && performance.now() < this.prevLine.overlapEnd;
+        const overlapInfo = overlapActive
+            ? `OVERLAP line ${this.prevLine.lineIdx} (${((this.prevLine.overlapEnd - performance.now()) / 1000).toFixed(1)}s left, ${this.prevLine.matchedSet.size}/${this.prevLine.lineWords.length} matched)`
+            : 'none';
+        html += `<div class="dbg-row"><span class="dbg-label">Ovrlp </span>${overlapInfo}</div>`;
+
         html += '<div class="dbg-sep"></div>';
 
         for (const e of this._dbBuf) {
