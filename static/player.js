@@ -343,10 +343,16 @@ function interpolateWordTimings(lyricsArr) {
         for (var wi = 0; wi < words.length; wi++) {
             var wordDuration = (syllables[wi] / totalSyllables) * lineDuration;
             var estimatedTime = cursor;
+            // Slow lines: all words share line-level windowStart so the
+            // entire phrase is matchable as soon as the line activates.
+            // Normal/fast lines keep per-word gates for positional accuracy.
+            var wStart = tempoClass === 'slow'
+                ? lineStart + params.windowStart
+                : estimatedTime + params.windowStart;
             wordTimings.push({
                 word: normalizeWord(words[wi]),
                 estimatedTime: estimatedTime,
-                windowStart: estimatedTime + params.windowStart,
+                windowStart: wStart,
                 windowEnd: estimatedTime + params.windowEnd
             });
             cursor += wordDuration;
