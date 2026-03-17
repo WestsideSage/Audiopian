@@ -378,6 +378,7 @@ class GameMode {
         // Current line tracking
         this.lineWords         = [];      // normalized words for active line
         this.matchedSet        = new Set(); // indices of matched words in lineWords
+        this.vadMatchedSet  = new Set(); // indices matched via VAD (optimistic)
         this.transcript        = '';      // accumulated final transcript (never reset)
         this.lineStartWordCount = 0;      // word count in transcript when current line started
         this.lineStartTranscriptPos = 0;  // transcript word index when current line started (fence)
@@ -426,6 +427,7 @@ class GameMode {
         this.activeLineIdx = -1;
         this.lineWords = [];
         this.matchedSet = new Set();
+        this.vadMatchedSet = new Set();
         this.transcript = '';
         this.lineStartWordCount = 0;
         this.lineStartTranscriptPos = 0;
@@ -806,6 +808,7 @@ class GameMode {
         this.lineStartWordCount = normalizeWords(this.transcript).length;
         this.lineStartTranscriptPos = this.lineStartWordCount;
         this.matchedSet = new Set();
+        this.vadMatchedSet = new Set();
         this.whisperBuffer = '';
 
         // Load interpolated word timings for this line
@@ -915,6 +918,16 @@ class GameMode {
             }
         }
         this.hotWordIndex = newHot;
+
+        // VAD optimistic scoring: if this line uses VAD mode and mic is active,
+        // mark the hot word as hit immediately without waiting for ASR.
+        if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad) {
+            if (!this.matchedSet.has(newHot)) {
+                this.matchedSet.add(newHot);
+                this.vadMatchedSet.add(newHot);
+                this._updateWordSpans();
+            }
+        }
     }
 
     /**
