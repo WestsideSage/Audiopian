@@ -90,3 +90,25 @@ assert.strictEqual(FILLER_WORDS.has('um'), true);
 assert.strictEqual(FILLER_WORDS.has('hello'), false);
 
 console.log('All phrase matching tests passed.');
+
+var maxEditDistance = fakeModule.exports.maxEditDistance;
+var skipFuzzyMatch = fakeModule.exports.skipFuzzyMatch;
+
+// --- maxEditDistance ---
+assert.strictEqual(maxEditDistance(1), 1);
+assert.strictEqual(maxEditDistance(3), 1);
+assert.strictEqual(maxEditDistance(6), 1);
+assert.strictEqual(maxEditDistance(7), 2);
+assert.strictEqual(maxEditDistance(9), 2);
+assert.strictEqual(maxEditDistance(10), 3);
+assert.strictEqual(maxEditDistance(15), 3);
+assert.strictEqual(maxEditDistance(0), 1);
+
+// --- skipFuzzyMatch ---
+assert.strictEqual(skipFuzzyMatch('i'), true);
+assert.strictEqual(skipFuzzyMatch('a'), true);
+assert.strictEqual(skipFuzzyMatch('to'), true);
+assert.strictEqual(skipFuzzyMatch('the'), false);
+assert.strictEqual(skipFuzzyMatch('love'), false);
+
+console.log('All edit distance tests passed.');

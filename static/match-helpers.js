@@ -211,6 +211,17 @@ function phraseMatch(spokenWords, spokenIdx, targetWords, targetIdx) {
 
 var FILLER_WORDS = new Set(['uh', 'um', 'ah', 'er', 'hm', 'hmm', 'mhm', 'ugh']);
 
+function maxEditDistance(len) {
+    if (len <= 0) return 1;
+    if (len <= 6) return 1;
+    if (len <= 9) return 2;
+    return 3;
+}
+
+function skipFuzzyMatch(word) {
+    return word.length <= 2;
+}
+
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -221,5 +232,7 @@ if (typeof module !== 'undefined' && module.exports) {
         PHRASE_EQUIV_MAP: PHRASE_EQUIV_MAP,
         phraseMatch: phraseMatch,
         FILLER_WORDS: FILLER_WORDS,
+        maxEditDistance: maxEditDistance,
+        skipFuzzyMatch: skipFuzzyMatch,
     };
 }

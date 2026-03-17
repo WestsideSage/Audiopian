@@ -157,7 +157,10 @@ function wordsMatch(spoken, target) {
     const [sp, ss] = doubleMetaphone(spoken);
     const [tp, ts] = doubleMetaphone(target);
     if (sp && tp && (sp === tp || sp === ts || (ss && (ss === tp || ss === ts)))) return true;
-    if (Math.abs(spoken.length - target.length) <= 1 && editDistance(spoken, target) <= 1) return true;
+    if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
+        var maxDist = maxEditDistance(Math.min(spoken.length, target.length));
+        if (Math.abs(spoken.length - target.length) <= maxDist && editDistance(spoken, target) <= maxDist) return true;
+    }
     if (contractionsMatch(spoken, target)) return true;
     return false;
 }
