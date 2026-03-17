@@ -55,3 +55,38 @@ assert.strictEqual(multiWordContractionMatch(['do', 'not', 'know', 'why'], 0, 'd
     '"do not know" should match "dunno", consuming 3 words');
 
 console.log('All contraction matching tests passed.');
+
+var PHRASE_EQUIV_MAP = fakeModule.exports.PHRASE_EQUIV_MAP;
+var phraseMatch = fakeModule.exports.phraseMatch;
+var FILLER_WORDS = fakeModule.exports.FILLER_WORDS;
+
+// --- PHRASE_EQUIV_MAP ---
+assert.strictEqual(PHRASE_EQUIV_MAP['all right'], 'alright');
+assert.strictEqual(PHRASE_EQUIV_MAP['alright'], 'all right');
+assert.strictEqual(PHRASE_EQUIV_MAP['every day'], 'everyday');
+assert.strictEqual(PHRASE_EQUIV_MAP['everyday'], 'every day');
+
+// --- phraseMatch: spoken multi-word matches single target ---
+var r1 = phraseMatch(['all', 'right', 'now'], 0, ['alright', 'now'], 0);
+assert.deepStrictEqual(r1, { spokenConsumed: 2, targetConsumed: 1 },
+    '"all right" should match "alright"');
+
+// --- phraseMatch: spoken single matches multi-word target ---
+var r2 = phraseMatch(['alright', 'now'], 0, ['all', 'right', 'now'], 0);
+assert.deepStrictEqual(r2, { spokenConsumed: 1, targetConsumed: 2 },
+    '"alright" should match "all right"');
+
+// --- phraseMatch: no match ---
+var r3 = phraseMatch(['hello'], 0, ['world'], 0);
+assert.strictEqual(r3, null, 'unrelated words should return null');
+
+// --- phraseMatch: "cannot" vs "can not" ---
+var r4 = phraseMatch(['cannot'], 0, ['can', 'not'], 0);
+assert.deepStrictEqual(r4, { spokenConsumed: 1, targetConsumed: 2 });
+
+// --- FILLER_WORDS ---
+assert.strictEqual(FILLER_WORDS.has('uh'), true);
+assert.strictEqual(FILLER_WORDS.has('um'), true);
+assert.strictEqual(FILLER_WORDS.has('hello'), false);
+
+console.log('All phrase matching tests passed.');

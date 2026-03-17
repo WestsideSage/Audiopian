@@ -672,6 +672,7 @@ class GameMode {
             }
             const target = this.lineWords[li];
             for (let si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
+                if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
                 if (wordsMatch(spoken[si], target)) {
                     whisperSet.add(li);
                     spokenIdx = si + 1;
@@ -681,6 +682,13 @@ class GameMode {
                 if (consumed > 0) {
                     whisperSet.add(li);
                     spokenIdx = si + consumed;
+                    break;
+                }
+                var pm = phraseMatch(spoken, si, this.lineWords, li);
+                if (pm) {
+                    for (var pt = 0; pt < pm.targetConsumed; pt++) { whisperSet.add(li + pt); }
+                    spokenIdx = si + pm.spokenConsumed;
+                    li += pm.targetConsumed - 1;
                     break;
                 }
             }
@@ -815,6 +823,7 @@ class GameMode {
             }
             var target = this.lineWords[li];
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
+                if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
                 if (wordsMatch(spoken[si], target)) {
                     resultSet.add(li);
                     spokenIdx = si + 1;
@@ -824,6 +833,13 @@ class GameMode {
                 if (consumed > 0) {
                     resultSet.add(li);
                     spokenIdx = si + consumed;
+                    break;
+                }
+                var pm = phraseMatch(spoken, si, this.lineWords, li);
+                if (pm) {
+                    for (var pt = 0; pt < pm.targetConsumed; pt++) { resultSet.add(li + pt); }
+                    spokenIdx = si + pm.spokenConsumed;
+                    li += pm.targetConsumed - 1;
                     break;
                 }
             }

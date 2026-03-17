@@ -125,6 +125,92 @@ function multiWordContractionMatch(spokenWords, startIdx, target) {
     return 0;
 }
 
+// --- Equivalent Phrase Map ---
+var _PHRASE_PAIRS = [
+    ['alright', 'all right'],
+    ['altogether', 'all together'],
+    ['everyday', 'every day'],
+    ['everyone', 'every one'],
+    ['everything', 'every thing'],
+    ['cannot', 'can not'],
+    ['into', 'in to'],
+    ['onto', 'on to'],
+    ['anymore', 'any more'],
+    ['anyone', 'any one'],
+    ['anyway', 'any way'],
+    ['outside', 'out side'],
+    ['tonight', 'to night'],
+    ['without', 'with out'],
+    ['maybe', 'may be'],
+    ['goodbye', 'good bye'],
+    ['throughout', 'through out'],
+    ['wherever', 'where ever'],
+    ['whatever', 'what ever'],
+    ['whenever', 'when ever'],
+];
+
+var PHRASE_EQUIV_MAP = {};
+(function() {
+    for (var i = 0; i < _PHRASE_PAIRS.length; i++) {
+        PHRASE_EQUIV_MAP[_PHRASE_PAIRS[i][0]] = _PHRASE_PAIRS[i][1];
+        PHRASE_EQUIV_MAP[_PHRASE_PAIRS[i][1]] = _PHRASE_PAIRS[i][0];
+    }
+})();
+
+var _phraseIndex = {};
+(function() {
+    for (var key in PHRASE_EQUIV_MAP) {
+        var words = key.split(' ');
+        if (words.length >= 2) {
+            if (!_phraseIndex[words[0]]) _phraseIndex[words[0]] = [];
+            _phraseIndex[words[0]].push({ words: words, equiv: PHRASE_EQUIV_MAP[key] });
+        }
+    }
+    for (var k in _phraseIndex) {
+        _phraseIndex[k].sort(function(a, b) { return b.words.length - a.words.length; });
+    }
+})();
+
+function phraseMatch(spokenWords, spokenIdx, targetWords, targetIdx) {
+    var spokenWord = spokenWords[spokenIdx];
+    var targetWord = targetWords[targetIdx];
+
+    // Direction 1: multiple spoken words → single target word
+    var spokenCandidates = _phraseIndex[spokenWord];
+    if (spokenCandidates) {
+        for (var i = 0; i < spokenCandidates.length; i++) {
+            var entry = spokenCandidates[i];
+            if (spokenIdx + entry.words.length > spokenWords.length) continue;
+            var match = true;
+            for (var w = 0; w < entry.words.length; w++) {
+                if (spokenWords[spokenIdx + w] !== entry.words[w]) { match = false; break; }
+            }
+            if (match && entry.equiv === targetWord) {
+                return { spokenConsumed: entry.words.length, targetConsumed: 1 };
+            }
+        }
+    }
+
+    // Direction 2: single spoken word → multiple target words
+    var equivOfSpoken = PHRASE_EQUIV_MAP[spokenWord];
+    if (equivOfSpoken) {
+        var equivWords = equivOfSpoken.split(' ');
+        if (equivWords.length >= 2 && targetIdx + equivWords.length <= targetWords.length) {
+            var match2 = true;
+            for (var w2 = 0; w2 < equivWords.length; w2++) {
+                if (targetWords[targetIdx + w2] !== equivWords[w2]) { match2 = false; break; }
+            }
+            if (match2) {
+                return { spokenConsumed: 1, targetConsumed: equivWords.length };
+            }
+        }
+    }
+
+    return null;
+}
+
+var FILLER_WORDS = new Set(['uh', 'um', 'ah', 'er', 'hm', 'hmm', 'mhm', 'ugh']);
+
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -132,5 +218,8 @@ if (typeof module !== 'undefined' && module.exports) {
         REVERSE_CONTRACTION_MAP: REVERSE_CONTRACTION_MAP,
         contractionsMatch: contractionsMatch,
         multiWordContractionMatch: multiWordContractionMatch,
+        PHRASE_EQUIV_MAP: PHRASE_EQUIV_MAP,
+        phraseMatch: phraseMatch,
+        FILLER_WORDS: FILLER_WORDS,
     };
 }
