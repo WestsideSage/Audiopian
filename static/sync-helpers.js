@@ -97,7 +97,19 @@ function computeSongTempoProfile(allWordTimings) {
     };
 }
 
+/**
+ * Classify a line's tempo relative to its song's tempo profile.
+ * @param {number} wps - words per second for this line
+ * @param {{ p50: number, p80: number }} profile - song tempo profile
+ * @returns {'slow'|'medium'|'fast'}
+ */
+function classifyLineTempoRelative(wps, profile) {
+    if (wps >= profile.p80) return 'fast';
+    if (wps >= profile.p50) return 'medium';
+    return 'slow';
+}
+
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getScoreDelay, getChunkSamples, computeSongTempoProfile };
+    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getScoreDelay, getChunkSamples, computeSongTempoProfile, classifyLineTempoRelative };
 }

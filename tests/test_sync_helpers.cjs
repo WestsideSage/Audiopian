@@ -118,4 +118,27 @@ var withZero = [{ wps: 0 }, { wps: 2.0 }, { wps: 4.0 }];
 var wzp = computeSongTempoProfile(withZero);
 assert.strictEqual(wzp.p50, 3.0); // median of [2.0, 4.0] = 3.0
 
+// --- classifyLineTempoRelative ---
+var classifyLineTempoRelative = fakeModule.exports.classifyLineTempoRelative;
+
+var profile = { p50: 2.0, p80: 4.0 };
+
+// below p50 → slow
+assert.strictEqual(classifyLineTempoRelative(1.0, profile), 'slow');
+assert.strictEqual(classifyLineTempoRelative(1.9, profile), 'slow');
+
+// at or above p50, below p80 → medium
+assert.strictEqual(classifyLineTempoRelative(2.0, profile), 'medium');
+assert.strictEqual(classifyLineTempoRelative(3.5, profile), 'medium');
+assert.strictEqual(classifyLineTempoRelative(3.99, profile), 'medium');
+
+// at or above p80 → fast
+assert.strictEqual(classifyLineTempoRelative(4.0, profile), 'fast');
+assert.strictEqual(classifyLineTempoRelative(8.0, profile), 'fast');
+
+// edge: p50 === p80 (all lines same tempo) → fast if at/above, slow otherwise
+var flatProfile = { p50: 3.0, p80: 3.0 };
+assert.strictEqual(classifyLineTempoRelative(3.0, flatProfile), 'fast');
+assert.strictEqual(classifyLineTempoRelative(2.9, flatProfile), 'slow');
+
 console.log('All sync-helpers tests passed.');
