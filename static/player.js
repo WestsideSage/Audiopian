@@ -420,6 +420,8 @@ class GameMode {
         this._vadAnalyserBuf = null;     // Float32Array reused each tick
         this.currentParams = getWindowParams('normal'); // adaptive window params for active line
 
+        this.lrcOffset = 0;   // seconds to add to all LRC timestamps (positive = delay lyrics)
+
         // Soft boundary: previous line overlay during overlap zone
         this.prevLine = null;  // { lineIdx, lineWords, matchedSet, lineStartWordCount, lineStartTranscriptPos, wordTimings, params, overlapEnd, whisperBuffer }
     }
@@ -453,6 +455,10 @@ class GameMode {
             lt.useVad = (relClass !== 'slow');
             lt.vadTempoClass = relClass;
         }
+        // Restore per-video LRC offset from localStorage
+        var _vid = new URLSearchParams(window.location.search).get('v') || '';
+        this.lrcOffset = parseFloat(localStorage.getItem('lrcOffset_' + _vid) || '0');
+        _updateOffsetDisplay();
         this.wordTimings = [];
         this.hotWordIndex = -1;
         this.isSpeaking = false;
@@ -470,6 +476,7 @@ class GameMode {
         document.getElementById('score-display').style.display = 'flex';
         document.getElementById('score-pct').textContent = '0%';
         document.getElementById('gameBtn').classList.add('active');
+        document.getElementById('lrc-offset-control').style.display = 'flex';
     }
 
     stop() {
@@ -489,6 +496,7 @@ class GameMode {
         renderLyrics(); // restore normal lyric rendering
         document.getElementById('score-display').style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
+        document.getElementById('lrc-offset-control').style.display = 'none';
     }
 
     _setupRecognition() {
@@ -949,7 +957,7 @@ class GameMode {
             this.hotWordIndex = -1;
             return;
         }
-        var t = audio.currentTime;
+        var t = audio.currentTime - this.lrcOffset;
         var newHot = -1;
         for (var i = 0; i < this.wordTimings.length; i++) {
             if (this.matchedSet.has(i)) continue; // skip already-green words
@@ -1346,6 +1354,28 @@ seekBar.addEventListener('input', () => {
 
 // Volume
 volumeBar.addEventListener('input', () => { audio.volume = volumeBar.value; });
+
+// LRC offset buttons
+function _updateOffsetDisplay() {
+    document.getElementById('offsetDisplay').textContent =
+        (gameMode ? gameMode.lrcOffset : 0).toFixed(1) + 's';
+}
+
+document.getElementById('offsetMinus').addEventListener('click', function() {
+    if (!gameMode) return;
+    gameMode.lrcOffset = Math.max(-10, gameMode.lrcOffset - 0.5);
+    var vid = new URLSearchParams(window.location.search).get('v') || '';
+    localStorage.setItem('lrcOffset_' + vid, gameMode.lrcOffset);
+    _updateOffsetDisplay();
+});
+
+document.getElementById('offsetPlus').addEventListener('click', function() {
+    if (!gameMode) return;
+    gameMode.lrcOffset = Math.min(10, gameMode.lrcOffset + 0.5);
+    var vid = new URLSearchParams(window.location.search).get('v') || '';
+    localStorage.setItem('lrcOffset_' + vid, gameMode.lrcOffset);
+    _updateOffsetDisplay();
+});
 
 // Debug HUD — press D to toggle (works any time, not just in Game Mode)
 document.addEventListener('keydown', (e) => {

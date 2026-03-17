@@ -327,6 +327,12 @@
         <div id="time-display">0:00 / 0:00</div>
         <span style="font-size:0.8rem;color:#aaa">🔊</span>
         <input type="range" id="volume" min="0" max="1" step="0.05" value="1">
+        <div id="lrc-offset-control" style="display:none; align-items:center; gap:6px; font-size:13px; color:#aaa;">
+          <span>Lyrics offset</span>
+          <button id="offsetMinus" title="Shift lyrics earlier">−0.5s</button>
+          <span id="offsetDisplay">0.0s</span>
+          <button id="offsetPlus"  title="Shift lyrics later">+0.5s</button>
+        </div>
     </div>
 
     <audio id="audio"></audio>
