@@ -901,7 +901,7 @@ class GameMode {
             span.classList.remove('matched', 'missed', 'asr-confirmed');
             if (this.matchedSet.has(wi)) {
                 span.classList.add('matched');
-                if (this.asrConfirmedSet && this.asrConfirmedSet.has(wi)) {
+                if (this.asrConfirmedSet.has(wi)) {
                     span.classList.add('asr-confirmed');
                 }
             }
