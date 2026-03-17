@@ -128,6 +128,16 @@
             color: #ff5252;
         }
 
+        @keyframes confirmPulse {
+            0%   { text-shadow: 0 0 0px #fff; }
+            50%  { text-shadow: 0 0 8px #fff, 0 0 14px #00e676; }
+            100% { text-shadow: 0 0 0px #fff; }
+        }
+
+        .word-span.asr-confirmed {
+            animation: confirmPulse 0.4s ease-out;
+        }
+
         /* Game button active state */
         .game-btn.active {
             background: #7c4dff;

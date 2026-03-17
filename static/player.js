@@ -379,6 +379,7 @@ class GameMode {
         this.lineWords         = [];      // normalized words for active line
         this.matchedSet        = new Set(); // indices of matched words in lineWords
         this.vadMatchedSet  = new Set(); // indices matched via VAD (optimistic)
+        this.asrConfirmedSet = new Set(); // VAD-matched words later confirmed by ASR
         this.transcript        = '';      // accumulated final transcript (never reset)
         this.lineStartWordCount = 0;      // word count in transcript when current line started
         this.lineStartTranscriptPos = 0;  // transcript word index when current line started (fence)
@@ -428,6 +429,7 @@ class GameMode {
         this.lineWords = [];
         this.matchedSet = new Set();
         this.vadMatchedSet = new Set();
+        this.asrConfirmedSet = new Set();
         this.transcript = '';
         this.lineStartWordCount = 0;
         this.lineStartTranscriptPos = 0;
@@ -533,7 +535,10 @@ class GameMode {
 
             // Sticky: once matched, stay matched. Prevents interim→final regression
             // where a word flashes green then reverts to grey.
-            unionSet.forEach(i => self.matchedSet.add(i));
+            unionSet.forEach(i => {
+                self.matchedSet.add(i);
+                if (self.vadMatchedSet.has(i)) self.asrConfirmedSet.add(i);
+            });
             self._updateWordSpans();
 
             // Diagnostic: log what the recognition heard and what matched
@@ -740,7 +745,10 @@ class GameMode {
                 }
             }
         }
-        whisperSet.forEach(i => this.matchedSet.add(i));
+        whisperSet.forEach(i => {
+            this.matchedSet.add(i);
+            if (this.vadMatchedSet.has(i)) this.asrConfirmedSet.add(i);
+        });
         this._updateWordSpans();
 
         // Match against previous line during overlap zone (Track 2)
@@ -809,6 +817,7 @@ class GameMode {
         this.lineStartTranscriptPos = this.lineStartWordCount;
         this.matchedSet = new Set();
         this.vadMatchedSet = new Set();
+        this.asrConfirmedSet = new Set();
         this.whisperBuffer = '';
 
         // Load interpolated word timings for this line
@@ -889,9 +898,12 @@ class GameMode {
 
         const spans = lineEl.querySelectorAll('.word-span');
         spans.forEach((span, wi) => {
-            span.classList.remove('matched', 'missed');
+            span.classList.remove('matched', 'missed', 'asr-confirmed');
             if (this.matchedSet.has(wi)) {
                 span.classList.add('matched');
+                if (this.asrConfirmedSet && this.asrConfirmedSet.has(wi)) {
+                    span.classList.add('asr-confirmed');
+                }
             }
         });
     }
@@ -960,6 +972,7 @@ class GameMode {
                     }
                 }
                 this.matchedSet.add(this.hotWordIndex);
+                if (this.vadMatchedSet.has(this.hotWordIndex)) this.asrConfirmedSet.add(this.hotWordIndex);
                 return true;
             }
         }
