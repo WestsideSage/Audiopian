@@ -142,3 +142,12 @@ assert.strictEqual(classifyLineTempoRelative(3.0, flatProfile), 'fast');
 assert.strictEqual(classifyLineTempoRelative(2.9, flatProfile), 'slow');
 
 console.log('All sync-helpers tests passed.');
+
+var getSpokenWindowSize = fakeModule.exports.getSpokenWindowSize;
+
+assert.strictEqual(getSpokenWindowSize('slow'), 20);
+assert.strictEqual(getSpokenWindowSize('normal'), 15);
+assert.strictEqual(getSpokenWindowSize('fast'), 12);
+assert.strictEqual(getSpokenWindowSize('unknown'), 15);
+
+console.log('All getSpokenWindowSize tests passed.');

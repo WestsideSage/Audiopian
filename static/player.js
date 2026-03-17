@@ -686,7 +686,8 @@ class GameMode {
         if (this.lineWords.length === 0) return;
         const spoken = normalizeWords(transcript);
         const whisperSet = new Set();
-        let spokenIdx = 0;
+        const windowSize = getSpokenWindowSize((this.wordTimings && this.wordTimings.tempoClass) || 'normal');
+        let spokenIdx = Math.max(0, spoken.length - windowSize);
         var now = audio.currentTime;
         var driftWindow = this.currentParams.driftTrack2;
         for (let li = 0; li < this.lineWords.length; li++) {
@@ -843,7 +844,8 @@ class GameMode {
     _collectMatches(transcript, resultSet) {
         if (this.lineWords.length === 0) return;
         var spoken = normalizeWords(transcript);
-        var spokenIdx = this.lineStartTranscriptPos;
+        var windowSize = getSpokenWindowSize((this.wordTimings && this.wordTimings.tempoClass) || 'normal');
+        var spokenIdx = Math.max(this.lineStartTranscriptPos, spoken.length - windowSize);
         var now = audio.currentTime;
         var driftWindow = this.currentParams.driftTrack1;
         for (var li = 0; li < this.lineWords.length; li++) {

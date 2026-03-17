@@ -109,7 +109,16 @@ function classifyLineTempoRelative(wps, profile) {
     return 'slow';
 }
 
+function getSpokenWindowSize(tempoClass) {
+    switch (tempoClass) {
+        case 'slow':   return 20;
+        case 'fast':   return 12;
+        case 'normal':
+        default:       return 15;
+    }
+}
+
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getScoreDelay, getChunkSamples, computeSongTempoProfile, classifyLineTempoRelative };
+    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getScoreDelay, getChunkSamples, computeSongTempoProfile, classifyLineTempoRelative, getSpokenWindowSize };
 }
