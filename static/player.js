@@ -643,6 +643,8 @@ class GameMode {
             this._whisperCtx.close();
             this._whisperCtx = null;
         }
+        this._vadAnalyser    = null;
+        this._vadAnalyserBuf = null;
         if (this._whisperStream) {
             this._whisperStream.getTracks().forEach(t => t.stop());
             this._whisperStream = null;
