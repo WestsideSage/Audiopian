@@ -605,11 +605,13 @@ class GameMode {
                     if (!this._vadBaselineReady) {
                         if (audio.currentTime > 0 && audio.currentTime < 2.0) {
                             this._vadBaselineSamples.push(msg.rms);
-                        } else if (audio.currentTime >= 2.0 && this._vadBaselineSamples.length > 0) {
-                            var sum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
-                            this._vadBaseline = sum / this._vadBaselineSamples.length;
-                            this._energyThreshold = this._vadBaseline + 0.025;
-                            this._vadBaselineReady = true;
+                        } else if (audio.currentTime >= 2.0) {
+                            if (this._vadBaselineSamples.length > 0) {
+                                var sum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
+                                this._vadBaseline = sum / this._vadBaselineSamples.length;
+                                this._energyThreshold = Math.min(this._vadBaseline + 0.025, 0.06);
+                            }
+                            this._vadBaselineReady = true; // always latch, even with no samples (keeps 0.01 default)
                         }
                     }
                     // Update voice activity detection flag
