@@ -416,6 +416,8 @@ class GameMode {
         this._vadBaseline = 0;
         this._vadBaselineReady = false;
         this._vadBaselineSamples = [];
+        this._vadAnalyser = null;        // AnalyserNode for real-time VAD
+        this._vadAnalyserBuf = null;     // Float32Array reused each tick
         this.currentParams = getWindowParams('normal'); // adaptive window params for active line
 
         // Soft boundary: previous line overlay during overlap zone
@@ -457,6 +459,8 @@ class GameMode {
         this._vadBaseline = 0;
         this._vadBaselineReady = false;
         this._vadBaselineSamples = [];
+        this._vadAnalyser = null;
+        this._vadAnalyserBuf = null;
         this._energyThreshold = 0.01; // reset to default until baseline computed
 
         renderLyricsGameMode();
@@ -604,25 +608,16 @@ class GameMode {
             await this._whisperCtx.audioWorklet.addModule('/static/audio-processor.js');
             const src  = this._whisperCtx.createMediaStreamSource(this._whisperStream);
             this._whisperNode = new AudioWorkletNode(this._whisperCtx, 'chunk-processor');
+            // VAD AnalyserNode — polled every 100ms, decoupled from Whisper chunks
+            this._vadAnalyser = this._whisperCtx.createAnalyser();
+            this._vadAnalyser.fftSize = 256;
+            this._vadAnalyserBuf = new Float32Array(this._vadAnalyser.fftSize);
+            src.connect(this._vadAnalyser);
             this._whisperNode.port.onmessage = (e) => {
                 if (!this.active) return;
                 var msg = e.data;
                 if (msg && msg.type === 'energy') {
-                    // Collect ambient baseline during first 2 seconds of playback
-                    if (!this._vadBaselineReady) {
-                        if (audio.currentTime > 0 && audio.currentTime < 2.0) {
-                            this._vadBaselineSamples.push(msg.rms);
-                        } else if (audio.currentTime >= 2.0) {
-                            if (this._vadBaselineSamples.length > 0) {
-                                var sum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
-                                this._vadBaseline = sum / this._vadBaselineSamples.length;
-                                this._energyThreshold = Math.min(this._vadBaseline + 0.025, 0.06);
-                            }
-                            this._vadBaselineReady = true; // always latch, even with no samples (keeps 0.01 default)
-                        }
-                    }
-                    // Update voice activity detection flag
-                    this.isSpeaking = msg.rms > this._energyThreshold;
+                    // isSpeaking and baseline calibration are now handled in updateHotWord via AnalyserNode
                 } else if (msg && msg.type === 'chunk') {
                     this._sendChunkToWhisper(msg.data);
                 } else if (msg instanceof Float32Array) {
@@ -912,6 +907,17 @@ class GameMode {
         });
     }
 
+    /** Read current mic RMS from the AnalyserNode. Returns 0 if not ready. */
+    _readVadRms() {
+        if (!this._vadAnalyser || !this._vadAnalyserBuf) return 0;
+        this._vadAnalyser.getFloatTimeDomainData(this._vadAnalyserBuf);
+        var sum = 0;
+        for (var i = 0; i < this._vadAnalyserBuf.length; i++) {
+            sum += this._vadAnalyserBuf[i] * this._vadAnalyserBuf[i];
+        }
+        return Math.sqrt(sum / this._vadAnalyserBuf.length);
+    }
+
     /**
      * Update hotWordIndex based on current audio time.
      * Called every 100ms from the updateLyrics poll.
@@ -919,6 +925,24 @@ class GameMode {
      * the current audio time — matching this word gets priority.
      */
     updateHotWord() {
+        // Refresh isSpeaking from AnalyserNode — real-time, not tied to Whisper chunk rate
+        var vadRms = this._readVadRms();
+        this.isSpeaking = vadRms > this._energyThreshold;
+
+        // Baseline calibration during first 2s of playback
+        if (!this._vadBaselineReady) {
+            if (audio.currentTime > 0 && audio.currentTime < 2.0) {
+                this._vadBaselineSamples.push(vadRms);
+            } else if (audio.currentTime >= 2.0) {
+                if (this._vadBaselineSamples.length > 0) {
+                    var bSum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
+                    this._vadBaseline = bSum / this._vadBaselineSamples.length;
+                    this._energyThreshold = Math.min(this._vadBaseline + 0.025, 0.06);
+                }
+                this._vadBaselineReady = true;
+            }
+        }
+
         if (!this.active || this.wordTimings.length === 0) {
             this.hotWordIndex = -1;
             return;
