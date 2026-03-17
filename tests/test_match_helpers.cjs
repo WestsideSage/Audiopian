@@ -1,0 +1,57 @@
+var assert = require('node:assert');
+var fs = require('node:fs');
+var path = require('node:path');
+
+var filePath = path.join(__dirname, '..', 'static', 'match-helpers.js');
+var code = fs.readFileSync(filePath, 'utf8');
+var fakeModule = { exports: {} };
+var fn = new Function('module', 'exports', code);
+fn(fakeModule, fakeModule.exports);
+
+var REVERSE_CONTRACTION_MAP = fakeModule.exports.REVERSE_CONTRACTION_MAP;
+var contractionsMatch = fakeModule.exports.contractionsMatch;
+var multiWordContractionMatch = fakeModule.exports.multiWordContractionMatch;
+
+// --- REVERSE_CONTRACTION_MAP ---
+// "going to" should reverse-map to "gonna"
+assert.strictEqual(REVERSE_CONTRACTION_MAP['going to'], 'gonna');
+assert.strictEqual(REVERSE_CONTRACTION_MAP['want to'], 'wanna');
+assert.strictEqual(REVERSE_CONTRACTION_MAP['got to'], 'gotta');
+assert.strictEqual(REVERSE_CONTRACTION_MAP['kind of'], 'kinda');
+assert.strictEqual(REVERSE_CONTRACTION_MAP['about to'], 'bouta');
+
+// --- contractionsMatch: spoken contraction vs full-form target ---
+// Lyric says "going", ASR says "gonna" — should match via contraction expansion
+assert.strictEqual(contractionsMatch('gonna', 'going'), true,
+    'contraction "gonna" should match first word of expansion "going to"');
+assert.strictEqual(contractionsMatch('hello', 'going'), false,
+    'unrelated word should not match');
+
+// --- contractionsMatch: spoken full-form vs contraction target ---
+// Lyric says "gonna", ASR says "going" — need reverse lookup
+assert.strictEqual(contractionsMatch('going', 'gonna'), false,
+    'single word "going" does not match "gonna" (need multi-word "going to")');
+
+// --- multiWordContractionMatch ---
+// ASR returns ["going", "to"] and target is "gonna"
+// Returns number of spoken words consumed (2) or 0 if no match
+assert.strictEqual(multiWordContractionMatch(['going', 'to', 'the'], 0, 'gonna'), 2,
+    '"going to" at index 0 should match "gonna", consuming 2 words');
+assert.strictEqual(multiWordContractionMatch(['going', 'to', 'the'], 0, 'hello'), 0,
+    '"going to" should not match unrelated target');
+assert.strictEqual(multiWordContractionMatch(['i', 'am', 'going', 'to'], 2, 'gonna'), 2,
+    '"going to" at index 2 should match "gonna"');
+
+// Edge: spoken array too short
+assert.strictEqual(multiWordContractionMatch(['going'], 0, 'gonna'), 0,
+    'not enough spoken words to form "going to"');
+
+// 3-word expansion: "i am going to" → "ima"
+assert.strictEqual(multiWordContractionMatch(['i', 'am', 'going', 'to'], 0, 'ima'), 4,
+    '"i am going to" should match "ima", consuming 4 words');
+
+// "do not know" → "dunno"
+assert.strictEqual(multiWordContractionMatch(['do', 'not', 'know', 'why'], 0, 'dunno'), 3,
+    '"do not know" should match "dunno", consuming 3 words');
+
+console.log('All contraction matching tests passed.');

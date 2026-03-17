@@ -11,66 +11,6 @@ let currentLineIndex = -1;
 
 // --- Game mode utilities ---
 
-const CONTRACTION_MAP = {
-    // Original entries
-    'gonna':   'going to',
-    'wanna':   'want to',
-    'gotta':   'got to',
-    'kinda':   'kind of',
-    'sorta':   'sort of',
-    'coulda':  'could have',
-    'shoulda': 'should have',
-    'woulda':  'would have',
-    'ima':     'i am going to',
-    'tryna':   'trying to',
-    'dunno':   'do not know',
-    'ain\'t':  'is not',
-    'ain':     'is not',
-    'y\'all':  'you all',
-    'yall':    'you all',
-    // Rap / AAVE slang additions
-    'finna':   'fixing to',
-    'bouta':   'about to',
-    'outta':   'out of',
-    'lotta':   'lot of',
-    'cmon':    'come on',
-    'nah':     'no',
-    'bruh':    'brother',
-    'bro':     'brother',
-    'fam':     'family',
-    'fasho':   'for sure',
-    'fosho':   'for sure',
-    'sho':     'sure',
-    'deadass': 'seriously',
-    'lowkey':  'low key',
-    'highkey': 'high key',
-    'ong':     'on god',
-    'fr':      'for real',
-    'ngl':     'not gonna lie',
-    'rn':      'right now',
-    'smh':     'shaking my head',
-    'aight':   'alright',
-    'ight':    'alright',
-    'prolly':  'probably',
-    'sumn':    'something',
-    'sumthin': 'something',
-    'nothin':  'nothing',
-    'nuthin':  'nothing',
-    'cuz':     'because',
-    'cus':     'because',
-    'wit':     'with',
-    'da':      'the',
-    'dem':     'them',
-    'dey':     'they',
-    'dat':     'that',
-    'dis':     'this',
-    'em':      'them',
-    'til':     'until',
-    'bout':    'about',
-    'ops':     'opposition',
-    'lil':     'little',
-};
-
 // --- Phonetic + fuzzy matching ---
 
 /**
@@ -218,6 +158,7 @@ function wordsMatch(spoken, target) {
     const [tp, ts] = doubleMetaphone(target);
     if (sp && tp && (sp === tp || sp === ts || (ss && (ss === tp || ss === ts)))) return true;
     if (Math.abs(spoken.length - target.length) <= 1 && editDistance(spoken, target) <= 1) return true;
+    if (contractionsMatch(spoken, target)) return true;
     return false;
 }
 
@@ -257,18 +198,6 @@ function normalizeWords(text) {
     return text.split(/\s+/)
         .map(normalizeWord)
         .filter(w => w.length > 0);
-}
-
-function expandContractions(words) {
-    const out = [];
-    for (const w of words) {
-        if (CONTRACTION_MAP[w]) {
-            out.push(...CONTRACTION_MAP[w].split(' '));
-        } else {
-            out.push(w);
-        }
-    }
-    return out;
 }
 
 /**
@@ -748,6 +677,12 @@ class GameMode {
                     spokenIdx = si + 1;
                     break;
                 }
+                var consumed = multiWordContractionMatch(spoken, si, target);
+                if (consumed > 0) {
+                    whisperSet.add(li);
+                    spokenIdx = si + consumed;
+                    break;
+                }
             }
         }
         whisperSet.forEach(i => {
@@ -883,6 +818,12 @@ class GameMode {
                 if (wordsMatch(spoken[si], target)) {
                     resultSet.add(li);
                     spokenIdx = si + 1;
+                    break;
+                }
+                var consumed = multiWordContractionMatch(spoken, si, target);
+                if (consumed > 0) {
+                    resultSet.add(li);
+                    spokenIdx = si + consumed;
                     break;
                 }
             }
