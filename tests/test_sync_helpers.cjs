@@ -105,7 +105,7 @@ assert.strictEqual(sp.p50, 3.0);
 assert.strictEqual(sp.p80, 3.0);
 
 // Five lines: [1.0, 2.0, 3.0, 4.0, 5.0]
-// p50 = 3.0, p80 = 4.6 (interpolated between index 3 and 4)
+// p50 = 3.0, p80 = 4.2 (interpolated between index 3 and 4)
 var fiveLines = [
     { wps: 5.0 }, { wps: 1.0 }, { wps: 3.0 }, { wps: 2.0 }, { wps: 4.0 }
 ];
