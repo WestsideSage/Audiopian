@@ -337,6 +337,7 @@ class GameMode {
         this._whisperCtx    = null;
         this._whisperNode   = null;
         this.whisperBuffer  = '';
+        this._whisperInFlight = 0;
 
         // Diagnostic
         this._dbBuf = [];
@@ -563,6 +564,10 @@ class GameMode {
                     // isSpeaking and baseline calibration are now handled in updateHotWord via AnalyserNode
                 } else if (msg && msg.type === 'chunk') {
                     this._sendChunkToWhisper(msg.data);
+                } else if (msg && msg.type === 'overlap-chunk') {
+                    if (this._whisperInFlight < 2) {
+                        this._sendChunkToWhisper(msg.data);
+                    }
                 } else if (msg instanceof Float32Array) {
                     // Backward compat: raw Float32Array (shouldn't happen but safe)
                     this._sendChunkToWhisper(msg);
@@ -595,6 +600,7 @@ class GameMode {
     }
 
     async _sendChunkToWhisper(float32) {
+        this._whisperInFlight++;
         const wav = encodeWav(float32, 16000);
         try {
             var headers = { 'Content-Type': 'audio/wav' };
@@ -616,6 +622,9 @@ class GameMode {
                 this._lastWhisperWords = data.words;
             }
         } catch (_) { /* fire-and-forget */ }
+        finally {
+            this._whisperInFlight = Math.max(0, this._whisperInFlight - 1);
+        }
     }
 
     /**
@@ -794,12 +803,17 @@ class GameMode {
             ? getWindowParams(this.wordTimings.tempoClass)
             : getWindowParams('normal');
 
-        // Dynamic Whisper chunk size: smaller chunks for fast sections
+        // Dynamic Whisper chunk size: flush current buffer, then resize and enable overlap for fast
         if (this._whisperNode && this._whisperNode.port) {
             var tempoClass = (this.wordTimings && this.wordTimings.tempoClass) || 'normal';
+            this._whisperNode.port.postMessage({ type: 'flush' });
             this._whisperNode.port.postMessage({
                 type: 'setChunkSize',
                 samples: getChunkSamples(tempoClass)
+            });
+            this._whisperNode.port.postMessage({
+                type: 'enableOverlap',
+                enabled: tempoClass === 'fast'
             });
         }
 
