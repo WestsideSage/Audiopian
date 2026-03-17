@@ -1223,6 +1223,7 @@ class GameMode {
         document.getElementById('modalWords').textContent = `${this.matchedWords}/${this.totalWords}`;
         document.getElementById('modalLines').textContent = `${this.perfectLines}/${this.linesScored}`;
         document.getElementById('modalStreak').textContent = this.bestStreak;
+        document.getElementById('lrc-offset-control').style.display = 'none';
         document.getElementById('gameModal').style.display = 'flex';
     }
 }
