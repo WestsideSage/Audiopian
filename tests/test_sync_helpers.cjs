@@ -90,4 +90,32 @@ assert.strictEqual(getChunkSamples('normal'), 24000);
 assert.strictEqual(getChunkSamples('fast'), 12000);
 assert.strictEqual(getChunkSamples('unknown'), 24000);
 
+// --- computeSongTempoProfile ---
+var computeSongTempoProfile = fakeModule.exports.computeSongTempoProfile;
+
+// Empty / all-zero input → fallback defaults
+var emptyProfile = computeSongTempoProfile([]);
+assert.strictEqual(emptyProfile.p50, 2.0);
+assert.strictEqual(emptyProfile.p80, 5.0);
+
+// Single line
+var single = [{ wps: 3.0 }];
+var sp = computeSongTempoProfile(single);
+assert.strictEqual(sp.p50, 3.0);
+assert.strictEqual(sp.p80, 3.0);
+
+// Five lines: [1.0, 2.0, 3.0, 4.0, 5.0]
+// p50 = 3.0, p80 = 4.6 (interpolated between index 3 and 4)
+var fiveLines = [
+    { wps: 5.0 }, { wps: 1.0 }, { wps: 3.0 }, { wps: 2.0 }, { wps: 4.0 }
+];
+var fp = computeSongTempoProfile(fiveLines);
+assert.strictEqual(fp.p50, 3.0);
+assert.ok(fp.p80 > 4.0 && fp.p80 < 5.0, 'p80 should be between 4 and 5');
+
+// Lines with wps=0 are filtered out
+var withZero = [{ wps: 0 }, { wps: 2.0 }, { wps: 4.0 }];
+var wzp = computeSongTempoProfile(withZero);
+assert.strictEqual(wzp.p50, 3.0); // median of [2.0, 4.0] = 3.0
+
 console.log('All sync-helpers tests passed.');

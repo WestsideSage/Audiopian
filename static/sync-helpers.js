@@ -70,7 +70,34 @@ function getChunkSamples(tempoClass) {
     }
 }
 
+/**
+ * Compute per-song tempo distribution from all interpolated line timings.
+ * Returns percentile thresholds for slow/medium/fast classification.
+ * @param {Array} allWordTimings - array of line timing arrays, each with .wps property
+ * @returns {{ p50: number, p80: number }}
+ */
+function computeSongTempoProfile(allWordTimings) {
+    var wpsList = allWordTimings
+        .map(function(lt) { return lt.wps || 0; })
+        .filter(function(wps) { return wps > 0; })
+        .sort(function(a, b) { return a - b; });
+    if (wpsList.length === 0) return { p50: 2.0, p80: 5.0 };
+
+    function percentile(arr, p) {
+        var idx = (p / 100) * (arr.length - 1);
+        var lo = Math.floor(idx);
+        var hi = Math.ceil(idx);
+        if (lo === hi) return arr[lo];
+        return arr[lo] + (idx - lo) * (arr[hi] - arr[lo]);
+    }
+
+    return {
+        p50: percentile(wpsList, 50),
+        p80: percentile(wpsList, 80)
+    };
+}
+
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getScoreDelay, getChunkSamples };
+    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getScoreDelay, getChunkSamples, computeSongTempoProfile };
 }
