@@ -575,7 +575,9 @@ class GameMode {
 
     async _startWhisperTrack() {
         try {
-            this._whisperStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            this._whisperStream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+            });
             this._whisperCtx    = new AudioContext({ sampleRate: 16000 });
             await this._whisperCtx.audioWorklet.addModule('/static/audio-processor.js');
             const src  = this._whisperCtx.createMediaStreamSource(this._whisperStream);
