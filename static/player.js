@@ -962,7 +962,11 @@ class GameMode {
         for (var i = 0; i < this.wordTimings.length; i++) {
             if (this.matchedSet.has(i)) continue; // skip already-green words
             var wt = this.wordTimings[i];
-            if (t >= wt.windowStart && t <= wt.windowEnd) {
+            // VAD mode: use estimatedTime - 0.05s instead of windowStart (-0.5s)
+            // so words don't score green 500ms before they're actually said.
+            // ASR mode keeps the wide negative offset to give transcription time to catch up.
+            var winOpen = (this.wordTimings.useVad) ? (wt.estimatedTime - 0.05) : wt.windowStart;
+            if (t >= winOpen && t <= wt.windowEnd) {
                 newHot = i;
                 break;  // first unmatched window wins
             }
