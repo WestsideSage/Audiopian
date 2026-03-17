@@ -143,18 +143,38 @@ def separate_status():
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
-    """Accept a raw WAV body, transcribe with Whisper, return {transcript}."""
+    """Accept a raw WAV body, transcribe with Whisper, return {transcript, words}."""
     wav_bytes = request.data
     if len(wav_bytes) < 100:
-        return jsonify(transcript='')
+        return jsonify(transcript='', words=[])
     try:
         model = get_whisper_model()
         audio_buf = io.BytesIO(wav_bytes)
-        segments, _ = model.transcribe(audio_buf, language='en', beam_size=1)
+
+        hint = request.headers.get('X-Lyric-Hint')
+
+        kwargs = dict(language='en', beam_size=1, word_timestamps=True)
+        if hint:
+            kwargs['initial_prompt'] = hint
+
+        segments, _ = model.transcribe(audio_buf, **kwargs)
+        segments = list(segments)
+
         text = ' '.join(s.text for s in segments).strip()
-        return jsonify(transcript=text)
+
+        words = []
+        for seg in segments:
+            if seg.words:
+                for w in seg.words:
+                    words.append({
+                        'text': w.word.strip(),
+                        'start': round(w.start, 3),
+                        'end': round(w.end, 3),
+                    })
+
+        return jsonify(transcript=text, words=words)
     except Exception:
-        return jsonify(transcript=''), 503
+        return jsonify(transcript='', words=[]), 503
 
 
 @app.route("/instrumental")

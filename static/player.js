@@ -591,18 +591,25 @@ class GameMode {
     async _sendChunkToWhisper(float32) {
         const wav = encodeWav(float32, 16000);
         try {
+            var headers = { 'Content-Type': 'audio/wav' };
+            if (this.activeLineIdx >= 0 && lyrics[this.activeLineIdx]) {
+                headers['X-Lyric-Hint'] = lyrics[this.activeLineIdx].text;
+            }
             const resp = await fetch('/transcribe', {
                 method: 'POST',
                 body: wav,
-                headers: { 'Content-Type': 'audio/wav' }
+                headers: headers
             });
             if (!resp.ok) return;
-            const { transcript } = await resp.json();
-            if (transcript && this.active) {
-                this.whisperBuffer = (this.whisperBuffer + ' ' + transcript).trim();
+            const data = await resp.json();
+            if (data.transcript && this.active) {
+                this.whisperBuffer = (this.whisperBuffer + ' ' + data.transcript).trim();
                 this._collectMatchesWhisper(this.whisperBuffer);
             }
-        } catch (_) { /* fire-and-forget: ignore network errors */ }
+            if (data.words && data.words.length > 0 && this.active) {
+                this._lastWhisperWords = data.words;
+            }
+        } catch (_) { /* fire-and-forget */ }
     }
 
     /**

@@ -192,6 +192,7 @@ def test_transcribe_returns_transcript(client):
     mock_model = MagicMock()
     mock_segment = MagicMock()
     mock_segment.text = 'hello world'
+    mock_segment.words = []
     mock_model.transcribe.return_value = ([mock_segment], None)
 
     with patch('app.get_whisper_model', return_value=mock_model):
@@ -227,3 +228,66 @@ def test_transcribe_whisper_exception_returns_503(client):
     assert resp.status_code == 503
     data = json.loads(resp.data)
     assert data['transcript'] == ''
+
+
+def test_transcribe_with_hint(client):
+    """When hint is provided via header, it should be passed as initial_prompt."""
+    mock_model = MagicMock()
+    mock_segment = MagicMock()
+    mock_segment.text = 'gonna be alright'
+    mock_segment.words = []
+    mock_model.transcribe.return_value = ([mock_segment], None)
+
+    with patch('app.get_whisper_model', return_value=mock_model):
+        resp = client.post('/transcribe', data=_make_wav(),
+                           content_type='audio/wav',
+                           headers={'X-Lyric-Hint': 'gonna be alright'})
+
+    assert resp.status_code == 200
+    call_kwargs = mock_model.transcribe.call_args
+    assert call_kwargs[1].get('initial_prompt') == 'gonna be alright'
+
+
+def test_transcribe_without_hint(client):
+    """Without hint header, initial_prompt should not be passed."""
+    mock_model = MagicMock()
+    mock_segment = MagicMock()
+    mock_segment.text = 'going to be all right'
+    mock_segment.words = []
+    mock_model.transcribe.return_value = ([mock_segment], None)
+
+    with patch('app.get_whisper_model', return_value=mock_model):
+        resp = client.post('/transcribe', data=_make_wav(),
+                           content_type='audio/wav')
+
+    assert resp.status_code == 200
+    call_kwargs = mock_model.transcribe.call_args
+    assert 'initial_prompt' not in call_kwargs[1] or call_kwargs[1]['initial_prompt'] is None
+
+
+def test_transcribe_returns_word_timestamps(client):
+    """Response should include words array with text, start, end."""
+    mock_model = MagicMock()
+    mock_segment = MagicMock()
+    mock_segment.text = 'hello world'
+    mock_word1 = MagicMock()
+    mock_word1.word = 'hello'
+    mock_word1.start = 0.0
+    mock_word1.end = 0.5
+    mock_word2 = MagicMock()
+    mock_word2.word = 'world'
+    mock_word2.start = 0.5
+    mock_word2.end = 1.0
+    mock_segment.words = [mock_word1, mock_word2]
+    mock_model.transcribe.return_value = ([mock_segment], None)
+
+    with patch('app.get_whisper_model', return_value=mock_model):
+        resp = client.post('/transcribe', data=_make_wav(),
+                           content_type='audio/wav')
+
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert 'words' in data
+    assert len(data['words']) == 2
+    assert data['words'][0] == {'text': 'hello', 'start': 0.0, 'end': 0.5}
+    assert data['words'][1] == {'text': 'world', 'start': 0.5, 'end': 1.0}
