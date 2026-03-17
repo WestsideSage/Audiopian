@@ -112,3 +112,23 @@ assert.strictEqual(skipFuzzyMatch('the'), false);
 assert.strictEqual(skipFuzzyMatch('love'), false);
 
 console.log('All edit distance tests passed.');
+
+var MetaphoneLRU = fakeModule.exports.MetaphoneLRU;
+
+var lru = new MetaphoneLRU(5);
+var r = lru.get('night');
+assert.ok(Array.isArray(r), 'should return array');
+assert.strictEqual(r.length, 2, 'should have primary and secondary');
+
+var r2 = lru.get('night');
+assert.deepStrictEqual(r, r2, 'cached result should be identical');
+
+// Fill beyond capacity
+lru.get('a'); lru.get('b'); lru.get('c'); lru.get('d'); lru.get('e');
+assert.strictEqual(lru._cache.has('night'), false, 'oldest should be evicted');
+assert.strictEqual(lru._cache.size, 5, 'cache at capacity');
+
+lru.reset();
+assert.strictEqual(lru._cache.size, 0, 'reset clears cache');
+
+console.log('All MetaphoneLRU tests passed.');

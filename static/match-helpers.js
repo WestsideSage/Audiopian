@@ -222,6 +222,31 @@ function skipFuzzyMatch(word) {
     return word.length <= 2;
 }
 
+function MetaphoneLRU(capacity) {
+    this._capacity = capacity || 50;
+    this._cache = new Map();
+}
+
+MetaphoneLRU.prototype.get = function(word) {
+    if (this._cache.has(word)) {
+        var val = this._cache.get(word);
+        this._cache.delete(word);
+        this._cache.set(word, val);
+        return val;
+    }
+    var result = (typeof doubleMetaphone === 'function') ? doubleMetaphone(word) : [word, ''];
+    if (this._cache.size >= this._capacity) {
+        var oldest = this._cache.keys().next().value;
+        this._cache.delete(oldest);
+    }
+    this._cache.set(word, result);
+    return result;
+};
+
+MetaphoneLRU.prototype.reset = function() {
+    this._cache.clear();
+};
+
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -234,5 +259,6 @@ if (typeof module !== 'undefined' && module.exports) {
         FILLER_WORDS: FILLER_WORDS,
         maxEditDistance: maxEditDistance,
         skipFuzzyMatch: skipFuzzyMatch,
+        MetaphoneLRU: MetaphoneLRU,
     };
 }

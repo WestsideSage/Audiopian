@@ -152,11 +152,13 @@ function doubleMetaphone(word) {
  *  2. Double Metaphone phonetic match (handles "fk" == "fuck", homophones, ASR substitutions)
  *  3. Levenshtein edit distance <= 1 (handles 1-char mishearings / typos in lyrics)
  */
-function wordsMatch(spoken, target) {
+var _spokenLRU = new MetaphoneLRU(50);
+
+function wordsMatch(spoken, target, targetPhonetic) {
     if (spoken === target) return true;
-    const [sp, ss] = doubleMetaphone(spoken);
-    const [tp, ts] = doubleMetaphone(target);
-    if (sp && tp && (sp === tp || sp === ts || (ss && (ss === tp || ss === ts)))) return true;
+    var sp = _spokenLRU.get(spoken);
+    var tp = targetPhonetic || doubleMetaphone(target);
+    if (sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])))) return true;
     if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
         var maxDist = maxEditDistance(Math.min(spoken.length, target.length));
         if (Math.abs(spoken.length - target.length) <= maxDist && editDistance(spoken, target) <= maxDist) return true;
@@ -287,6 +289,7 @@ function interpolateWordTimings(lyricsArr) {
                 windowStart: wStart,
                 windowEnd: estimatedTime + params.windowEnd
             });
+            wordTimings[wordTimings.length - 1].phonetic = doubleMetaphone(normalizeWord(words[wi]));
             cursor += wordDuration;
         }
 
@@ -650,8 +653,9 @@ class GameMode {
         for (var li = 0; li < prev.lineWords.length; li++) {
             if (prev.matchedSet.has(li)) { cursor++; continue; }
             var target = prev.lineWords[li];
+            var targetPhonetic = prev.wordTimings && prev.wordTimings[li] ? prev.wordTimings[li].phonetic : undefined;
             for (var si = cursor; si < Math.min(cursor + driftWindow, spoken.length); si++) {
-                if (wordsMatch(spoken[si], target)) {
+                if (wordsMatch(spoken[si], target, targetPhonetic)) {
                     prev.matchedSet.add(li);
                     cursor = si + 1;
                     anyMatched = true;
@@ -681,9 +685,10 @@ class GameMode {
                 if (now < this.wordTimings[li].windowStart) continue;
             }
             const target = this.lineWords[li];
+            const targetPhonetic = this.wordTimings[li] ? this.wordTimings[li].phonetic : undefined;
             for (let si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
-                if (wordsMatch(spoken[si], target)) {
+                if (wordsMatch(spoken[si], target, targetPhonetic)) {
                     whisperSet.add(li);
                     spokenIdx = si + 1;
                     break;
@@ -832,9 +837,10 @@ class GameMode {
                 if (now < this.wordTimings[li].windowStart) continue;
             }
             var target = this.lineWords[li];
+            var targetPhonetic = this.wordTimings[li] ? this.wordTimings[li].phonetic : undefined;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
-                if (wordsMatch(spoken[si], target)) {
+                if (wordsMatch(spoken[si], target, targetPhonetic)) {
                     resultSet.add(li);
                     spokenIdx = si + 1;
                     break;
@@ -964,13 +970,14 @@ class GameMode {
         if (this.matchedSet.has(this.hotWordIndex)) return false; // already matched
 
         var target = this.lineWords[this.hotWordIndex];
+        var targetPhonetic = this.wordTimings[this.hotWordIndex] ? this.wordTimings[this.hotWordIndex].phonetic : undefined;
         var spoken = normalizeWords(transcript);
 
         // Fence: only search words spoken since the current line started
         // (within that, only look at recent 10)
         var searchStart = Math.max(this.lineStartTranscriptPos, spoken.length - 10);
         for (var i = searchStart; i < spoken.length; i++) {
-            if (wordsMatch(spoken[i], target)) {
+            if (wordsMatch(spoken[i], target, targetPhonetic)) {
                 // Energy gate: if not speaking, require exact or phonetic match (not edit-distance)
                 if (!this.isSpeaking) {
                     if (spoken[i] !== target) {
@@ -1056,11 +1063,13 @@ class GameMode {
         const startOff  = Math.max(0, lineStartWordCount - 4);
         let   spokenIdx = startOff;
 
+        const lateWordTimings = this.allWordTimings[lineIdx];
         for (let li = 0; li < lineWords.length; li++) {
             if (matchedSet.has(li)) { spokenIdx++; continue; }
             const target = lineWords[li];
+            const targetPhonetic = lateWordTimings && lateWordTimings[li] ? lateWordTimings[li].phonetic : undefined;
             for (let si = spokenIdx; si < Math.min(spokenIdx + 20, spokenNow.length); si++) {
-                if (wordsMatch(spokenNow[si], target)) {
+                if (wordsMatch(spokenNow[si], target, targetPhonetic)) {
                     matchedSet.add(li);
                     spokenIdx = si + 1;
                     // Light the span green — this word just arrived late
