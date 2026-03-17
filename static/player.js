@@ -411,6 +411,9 @@ class GameMode {
         this.hotWordIndex   = -1;    // index of word whose time window contains audio.currentTime
         this.isSpeaking     = false; // true when mic energy exceeds threshold
         this._energyThreshold = 0.01; // RMS threshold for voice activity detection
+        this._vadBaseline = 0;
+        this._vadBaselineReady = false;
+        this._vadBaselineSamples = [];
         this.currentParams = getWindowParams('normal'); // adaptive window params for active line
 
         // Soft boundary: previous line overlay during overlap zone
@@ -447,6 +450,10 @@ class GameMode {
         this.wordTimings = [];
         this.hotWordIndex = -1;
         this.isSpeaking = false;
+        this._vadBaseline = 0;
+        this._vadBaselineReady = false;
+        this._vadBaselineSamples = [];
+        this._energyThreshold = 0.01; // reset to default until baseline computed
 
         renderLyricsGameMode();
         this._setupRecognition();
@@ -594,6 +601,17 @@ class GameMode {
                 if (!this.active) return;
                 var msg = e.data;
                 if (msg && msg.type === 'energy') {
+                    // Collect ambient baseline during first 2 seconds of playback
+                    if (!this._vadBaselineReady) {
+                        if (audio.currentTime > 0 && audio.currentTime < 2.0) {
+                            this._vadBaselineSamples.push(msg.rms);
+                        } else if (audio.currentTime >= 2.0 && this._vadBaselineSamples.length > 0) {
+                            var sum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
+                            this._vadBaseline = sum / this._vadBaselineSamples.length;
+                            this._energyThreshold = this._vadBaseline + 0.025;
+                            this._vadBaselineReady = true;
+                        }
+                    }
                     // Update voice activity detection flag
                     this.isSpeaking = msg.rms > this._energyThreshold;
                 } else if (msg && msg.type === 'chunk') {
