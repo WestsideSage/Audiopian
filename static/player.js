@@ -858,7 +858,7 @@ class GameMode {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
         if (lines[lineIdx]) {
             lines[lineIdx].querySelectorAll('.word-span').forEach(function(s) {
-                s.classList.remove('matched', 'missed');
+                s.classList.remove('matched', 'missed', 'asr-confirmed');
             });
         }
     }
@@ -898,12 +898,16 @@ class GameMode {
 
         const spans = lineEl.querySelectorAll('.word-span');
         spans.forEach((span, wi) => {
-            span.classList.remove('matched', 'missed', 'asr-confirmed');
+            span.classList.remove('matched', 'missed');
             if (this.matchedSet.has(wi)) {
                 span.classList.add('matched');
-                if (this.asrConfirmedSet.has(wi)) {
+                // Only add asr-confirmed if not already present — avoids replaying the animation
+                if (this.asrConfirmedSet.has(wi) && !span.classList.contains('asr-confirmed')) {
                     span.classList.add('asr-confirmed');
                 }
+            } else {
+                // Word is unmatched — clear any stale asr-confirmed class
+                span.classList.remove('asr-confirmed');
             }
         });
     }
