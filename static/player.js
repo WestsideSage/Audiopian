@@ -1138,6 +1138,18 @@ class GameMode {
         const wpsVal = (this.wordTimings && this.wordTimings.wps) ? this.wordTimings.wps.toFixed(1) : '\u2014';
         html += `<div class="dbg-row"><span class="dbg-label">Tempo </span>${tc} (${wpsVal} wps)</div>`;
 
+        // Song tempo profile and VAD state
+        const p50 = this.songTempoProfile ? this.songTempoProfile.p50.toFixed(2) : '—';
+        const p80 = this.songTempoProfile ? this.songTempoProfile.p80.toFixed(2) : '—';
+        const vadMode = (this.wordTimings && this.wordTimings.useVad) ? `VAD:ON (${this.wordTimings.vadTempoClass})` : 'VAD:off';
+        const vadThresh = this._vadBaselineReady ? `thr:${this._energyThreshold.toFixed(4)}` : 'calibrating…';
+        html += `<div class="dbg-row"><span class="dbg-label">Song  </span>p50:${p50} | p80:${p80} | ${vadMode} | ${vadThresh}</div>`;
+
+        // VAD hit and ASR confirmation count
+        const vadHits = this.vadMatchedSet ? this.vadMatchedSet.size : 0;
+        const confirmed = this.asrConfirmedSet ? this.asrConfirmedSet.size : 0;
+        html += `<div class="dbg-row"><span class="dbg-label">VAD   </span>hits:${vadHits} | asr-conf:${confirmed}/${this.lineWords.length}</div>`;
+
         // Overlap state
         const overlapActive = this.prevLine && performance.now() < this.prevLine.overlapEnd;
         const overlapInfo = overlapActive
