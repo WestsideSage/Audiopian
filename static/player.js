@@ -406,6 +406,7 @@ class GameMode {
 
         // Predictive timing state
         this.allWordTimings = [];    // interpolated word timings for all lines
+        this.songTempoProfile = null; // per-song { p50, p80 } computed at start
         this.wordTimings    = [];    // word timings for current active line
         this.hotWordIndex   = -1;    // index of word whose time window contains audio.currentTime
         this.isSpeaking     = false; // true when mic energy exceeds threshold
@@ -436,6 +437,13 @@ class GameMode {
         this.prevLine = null;
         this._lastResultTime = Date.now();
         this.allWordTimings = interpolateWordTimings(lyrics);
+        this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
+        for (var li = 0; li < this.allWordTimings.length; li++) {
+            var lt = this.allWordTimings[li];
+            var relClass = classifyLineTempoRelative(lt.wps || 0, this.songTempoProfile);
+            lt.useVad = (relClass !== 'slow');
+            lt.vadTempoClass = relClass;
+        }
         this.wordTimings = [];
         this.hotWordIndex = -1;
         this.isSpeaking = false;
