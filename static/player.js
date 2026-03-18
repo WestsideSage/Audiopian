@@ -830,6 +830,20 @@ class GameMode {
             }, totalDelay);
         }
 
+        // --- Final match pass on outgoing line before transition ---
+        if (this.lineWords.length > 0 && this.transcript) {
+            var finalMap = new Map();
+            this._collectMatches(this.transcript + ' ' + this.latestInterim, finalMap);
+            // Merge any new matches into matchedSet (upgrade only)
+            finalMap.forEach(function(score, idx) {
+                var existing = this.matchedSet.get(idx);
+                if (existing === undefined || score > existing) {
+                    this.matchedSet.set(idx, score);
+                }
+            }.bind(this));
+            this._updateWordSpans();
+        }
+
         // Diagnostic: log transition
         if (window._kDebug && _dbgFromIdx >= 0 && this.lineWords.length > 0) {
             this._debugLog('LINE', {
