@@ -861,22 +861,27 @@ class GameMode {
                 if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
                 if (wordsMatch(spoken[si], target, targetPhonetic)) {
                     resultSet.add(li);
+                    this._logMatch(spoken[si], target, 'exact', 0, true, 1.0, true, si);
                     spokenIdx = si + 1;
                     break;
                 }
                 var consumed = multiWordContractionMatch(spoken, si, target);
                 if (consumed > 0) {
                     resultSet.add(li);
+                    this._logMatch(spoken[si], target, 'contraction', 0, false, 1.0, true, si);
                     spokenIdx = si + consumed;
                     break;
                 }
                 var pm = phraseMatch(spoken, si, this.lineWords, li);
                 if (pm) {
                     for (var pt = 0; pt < pm.targetConsumed; pt++) { resultSet.add(li + pt); }
+                    this._logMatch(spoken[si], this.lineWords[li], 'phrase', 0, false, 1.0, true, si);
                     spokenIdx = si + pm.spokenConsumed;
                     li += pm.targetConsumed - 1;
                     break;
                 }
+                // Log unmatched attempt for this (spokenWord, targetWord) pair
+                this._logMatch(spoken[si], target, 'none', -1, false, 0.0, false, si);
             }
         }
     }
@@ -1152,6 +1157,33 @@ class GameMode {
                 type:           type,
                 text:           text || '',
                 wordTimestamps: wordTimestamps || []
+            });
+        } catch (e) { /* telemetry must never crash the game */ }
+    }
+
+    /**
+     * Record a single word-match attempt to the telemetry log.
+     */
+    _logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
+        if (!this._telemetry) return;
+        if (this._telemetry.matches.length >= 5000) return;  // cap
+        try {
+            var tempoClass = 'medium';
+            if (this.activeLineIdx >= 0 && this.allWordTimings[this.activeLineIdx]) {
+                tempoClass = this.allWordTimings[this.activeLineIdx].vadTempoClass || 'medium';
+            }
+            this._telemetry.matches.push({
+                ts:            parseFloat((performance.now() / 1000).toFixed(3)),
+                lineIdx:       this.activeLineIdx,
+                lineTempo:     tempoClass,
+                spokenWord:    spokenWord  || '',
+                targetWord:    targetWord  || '',
+                method:        method,
+                editDistance:  editDistance,
+                phoneticMatch: phoneticMatch,
+                score:         score,
+                matched:       matched,
+                windowPosition: windowPosition
             });
         } catch (e) { /* telemetry must never crash the game */ }
     }
