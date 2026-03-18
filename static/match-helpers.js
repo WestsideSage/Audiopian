@@ -62,6 +62,57 @@ var CONTRACTION_MAP = {
     'lil':     'little',
 };
 
+// --- Slang / ASR-mishearing dictionary ---
+// Bidirectional: if ASR hears key, it can match value, and vice versa.
+// These handle cases where ASR sanitizes, mishears, or normalizes slang.
+var SLANG_MAP = {};
+(function() {
+    var pairs = [
+        // Profanity ASR sanitization
+        ['nigga', 'n***a'], ['nigga', 'ninja'], ['nigga', 'miga'],
+        ['niggas', 'ninjas'], ['shit', 'shoot'], ['shit', 'ship'],
+        ['fuck', 'fudge'], ['fuck', 'fk'], ['fuckin', 'freaking'],
+        ['fucking', 'freaking'], ['ass', 'as'], ['bitch', 'beach'],
+        ['bitches', 'beaches'], ['damn', 'dang'], ['hell', 'heck'],
+        // Common ASR mishearings
+        ['ya', 'you'], ['yo', 'you'], ['yuh', 'yeah'],
+        ['nah', 'no'], ['na', 'no'], ['aye', 'hey'],
+        ['em', 'them'], ['im', "i'm"], ['ur', 'your'],
+        ['cuz', 'because'], ['cause', 'because'],
+        ['bout', 'about'], ['wit', 'with'],
+        ['da', 'the'], ['tha', 'the'],
+        ['dat', 'that'], ['dis', 'this'],
+        ['dem', 'them'], ['dey', 'they'],
+        ['lil', 'little'], ['til', 'until'],
+        // Ad-lib / interjection normalization
+        ['ooh', 'oh'], ['oooh', 'oh'], ['ooo', 'oh'],
+        ['ahh', 'ah'], ['ahhh', 'ah'],
+        ['yeah', 'yea'], ['yea', 'yeah'],
+        ['huh', 'ha'], ['hmm', 'hm'],
+        ['ayy', 'hey'], ['ey', 'hey'], ['ay', 'hey'],
+        ['woo', 'whoo'], ['woah', 'whoa'],
+        // Numbers / abbreviations
+        ['2', 'two'], ['to', 'two'], ['too', 'two'],
+        ['4', 'four'], ['for', 'four'],
+    ];
+    for (var i = 0; i < pairs.length; i++) {
+        var a = pairs[i][0], b = pairs[i][1];
+        if (!SLANG_MAP[a]) SLANG_MAP[a] = new Set();
+        SLANG_MAP[a].add(b);
+        if (!SLANG_MAP[b]) SLANG_MAP[b] = new Set();
+        SLANG_MAP[b].add(a);
+    }
+})();
+
+/**
+ * Check if spoken word matches target via slang/ASR-mishearing dictionary.
+ * Returns true if spoken is a known synonym of target.
+ */
+function slangMatch(spoken, target) {
+    var alts = SLANG_MAP[spoken];
+    return !!(alts && alts.has(target));
+}
+
 // --- Reverse Contraction Map (auto-generated) ---
 var REVERSE_CONTRACTION_MAP = {};
 (function() {
@@ -260,5 +311,7 @@ if (typeof module !== 'undefined' && module.exports) {
         maxEditDistance: maxEditDistance,
         skipFuzzyMatch: skipFuzzyMatch,
         MetaphoneLRU: MetaphoneLRU,
+        SLANG_MAP: SLANG_MAP,
+        slangMatch: slangMatch,
     };
 }
