@@ -1257,6 +1257,43 @@ class GameMode {
     }
 
     /**
+     * Serialise the telemetry log to JSON and trigger a browser download.
+     * Falls back to console.warn if the blob URL fails.
+     */
+    _downloadTelemetry() {
+        if (!this._telemetry) return;
+        try {
+            // Fill in songDurationMs now if audio is ready and it was null at startGame
+            if (!this._telemetry.meta.songDurationMs && audio && isFinite(audio.duration)) {
+                this._telemetry.meta.songDurationMs = Math.round(audio.duration * 1000);
+            }
+            // Fill in whisperAvailable now that async setup has completed
+            if (this._telemetry.meta.whisperAvailable === null) {
+                this._telemetry.meta.whisperAvailable = !!(this._whisperStream);
+            }
+            var json = JSON.stringify(this._telemetry, null, 2);
+            var ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            var name = 'karaokee-telemetry-' + ts + '.json';
+            var blob = new Blob([json], { type: 'application/json' });
+            var url  = URL.createObjectURL(blob);
+            var a    = document.createElement('a');
+            a.href     = url;
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            console.log('[Telemetry] Downloaded:', name,
+                '|', this._telemetry.asr.length, 'asr,',
+                this._telemetry.matches.length, 'matches,',
+                this._telemetry.transitions.length, 'transitions');
+        } catch (e) {
+            console.warn('[Telemetry] Download failed — raw JSON below:', e);
+            console.warn(JSON.stringify(this._telemetry, null, 2));
+        }
+    }
+
+    /**
      * Log a debug event to the ring buffer, console, and HUD.
      * Only active when window._kDebug === true (press D to toggle).
      * @param {'LINE'|'RESULT'|'MATCH'} type
@@ -1360,7 +1397,8 @@ class GameMode {
             }
             html += `<div class="dbg-row ${cls}">${msg}</div>`;
         }
-        hud.innerHTML = html;
+        const dlBtn = `<div style="margin-top:6px"><button onclick="gameMode._downloadTelemetry()" style="font-size:11px;padding:2px 6px;cursor:pointer">📥 Download Telemetry</button></div>`;
+        hud.innerHTML = html + dlBtn;
     }
 
     showEndModal() {
@@ -1572,6 +1610,7 @@ audio.addEventListener('ended', function() {
                 );
             }, 800);
         }
+        if (window._kDebug) gameMode._downloadTelemetry();
         setTimeout(function() { gameMode.showEndModal(); }, 1500);
     }
 });
