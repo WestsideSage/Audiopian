@@ -262,6 +262,43 @@ function phraseMatch(spokenWords, spokenIdx, targetWords, targetIdx) {
 
 var FILLER_WORDS = new Set(['uh', 'um', 'ah', 'er', 'hm', 'hmm', 'mhm', 'ugh']);
 
+// --- Word classification for weighted scoring ---
+var FUNCTION_WORDS = new Set([
+    'a', 'an', 'the', 'i', 'me', 'my', 'we', 'us', 'our',
+    'you', 'your', 'he', 'him', 'his', 'she', 'her',
+    'it', 'its', 'they', 'them', 'their',
+    'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being',
+    'in', 'on', 'at', 'to', 'of', 'for', 'with', 'by', 'from',
+    'and', 'or', 'but', 'so', 'if', 'as', 'than', 'that',
+    'do', 'does', 'did', 'has', 'have', 'had',
+    'not', 'no', 'up', 'out',
+]);
+
+var ADLIB_WORDS = new Set([
+    'ooh', 'oh', 'ah', 'uh', 'yeah', 'yea', 'hey', 'huh',
+    'wow', 'woo', 'whoo', 'whoa', 'woah', 'ayy', 'aye', 'ay',
+    'la', 'na', 'da', 'ba', 'sha', 'ra',
+    'hmm', 'hm', 'mm', 'mmm',
+    'oo', 'ooo', 'oooh', 'ahh', 'ahhh',
+    'skrrt', 'brr', 'grr', 'pew', 'pow', 'bang',
+    'yuh', 'yah', 'aye',
+]);
+
+var WORD_WEIGHTS = { core: 1.0, function: 0.5, adlib: 0.25 };
+
+/**
+ * Classify a word for scoring weight.
+ * @param {string} normalizedWord - already lowercased, punctuation-stripped
+ * @param {boolean} inParentheses - true if the word was inside parentheses in the original lyric
+ * @returns {'core'|'function'|'adlib'}
+ */
+function classifyWord(normalizedWord, inParentheses) {
+    if (inParentheses) return 'adlib';
+    if (ADLIB_WORDS.has(normalizedWord)) return 'adlib';
+    if (FUNCTION_WORDS.has(normalizedWord)) return 'function';
+    return 'core';
+}
+
 function maxEditDistance(len) {
     if (len <= 0) return 1;
     if (len <= 6) return 1;
@@ -313,5 +350,9 @@ if (typeof module !== 'undefined' && module.exports) {
         MetaphoneLRU: MetaphoneLRU,
         SLANG_MAP: SLANG_MAP,
         slangMatch: slangMatch,
+        FUNCTION_WORDS: FUNCTION_WORDS,
+        ADLIB_WORDS: ADLIB_WORDS,
+        WORD_WEIGHTS: WORD_WEIGHTS,
+        classifyWord: classifyWord,
     };
 }

@@ -297,8 +297,17 @@ function interpolateWordTimings(lyricsArr) {
         var tempoClass = classifyTempo(wps);
         var params = getWindowParams(tempoClass);
 
-        // Compute syllable weights
-        var syllables = words.map(function(w) { return estimateSyllables(normalizeWord(w)); });
+        // Compute syllable weights and word classifications
+        var inParen = false;
+        var wordClasses = [];
+        var syllables = words.map(function(w, wi) {
+            var nw = normalizeWord(w);
+            // Track parentheses — a word starting with '(' opens, ending with ')' closes
+            if (w.indexOf('(') >= 0) inParen = true;
+            wordClasses.push(classifyWord(nw, inParen));
+            if (w.indexOf(')') >= 0) inParen = false;
+            return estimateSyllables(nw);
+        });
         var totalSyllables = 0;
         for (var s = 0; s < syllables.length; s++) totalSyllables += syllables[s];
         if (totalSyllables === 0) totalSyllables = 1; // defensive guard
@@ -315,13 +324,16 @@ function interpolateWordTimings(lyricsArr) {
             var wStart = tempoClass === 'slow'
                 ? lineStart + params.windowStart
                 : estimatedTime + params.windowStart;
-            wordTimings.push({
+            var timing = {
                 word: normalizeWord(words[wi]),
                 estimatedTime: estimatedTime,
                 windowStart: wStart,
-                windowEnd: estimatedTime + params.windowEnd
-            });
-            wordTimings[wordTimings.length - 1].phonetic = doubleMetaphone(normalizeWord(words[wi]));
+                windowEnd: estimatedTime + params.windowEnd,
+                wordClass: wordClasses[wi],
+                weight: WORD_WEIGHTS[wordClasses[wi]]
+            };
+            timing.phonetic = doubleMetaphone(normalizeWord(words[wi]));
+            wordTimings.push(timing);
             cursor += wordDuration;
         }
 
