@@ -388,7 +388,7 @@ class GameMode {
         this._lastResultTime = Date.now();
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
-        if (window._kDebug) this._initTelemetry();
+        this._initTelemetry();   // always init so download button works whenever D is pressed
         for (var li = 0; li < this.allWordTimings.length; li++) {
             var lt = this.allWordTimings[li];
             var relClass = classifyLineTempoRelative(lt.wps || 0, this.songTempoProfile);
@@ -1179,6 +1179,7 @@ class GameMode {
      */
     _logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
         if (!this._telemetry) return;
+        if (!window._kDebug) return;   // _collectMatches() is not gated, so guard here
         if (this._telemetry.matches.length >= 5000) return;  // cap
         try {
             var tempoClass = 'medium';
