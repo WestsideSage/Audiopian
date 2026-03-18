@@ -878,6 +878,7 @@ class GameMode {
         this.vadMatchedSet = new Map();
         this.asrConfirmedSet = new Set();
         this.whisperBuffer = '';
+        this._telemetryLoggedMatches = new Set();
 
         // Load interpolated word timings for this line
         this.wordTimings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
@@ -1285,8 +1286,14 @@ class GameMode {
      */
     _logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
         if (!this._telemetry) return;
-        if (!window._kDebug) return;   // _collectMatches() is not gated, so guard here
-        if (this._telemetry.matches.length >= 5000) return;  // cap
+        if (!window._kDebug) return;
+
+        // Smart filtering: only log first-time matches for words already confirmed matched.
+        // Skip redundant re-checks for words already confirmed matched.
+        if (matched && this._telemetryLoggedMatches && this._telemetryLoggedMatches.has(this.activeLineIdx + ':' + targetWord)) {
+            return;  // Already logged a match for this word on this line
+        }
+
         try {
             var tempoClass = 'medium';
             if (this.activeLineIdx >= 0 && this.allWordTimings[this.activeLineIdx]) {
@@ -1305,7 +1312,34 @@ class GameMode {
                 matched:       matched,
                 windowPosition: windowPosition
             });
+
+            // Track logged matches to avoid duplicates
+            if (matched) {
+                if (!this._telemetryLoggedMatches) this._telemetryLoggedMatches = new Set();
+                this._telemetryLoggedMatches.add(this.activeLineIdx + ':' + targetWord);
+            }
         } catch (e) { /* telemetry must never crash the game */ }
+    }
+
+    _computeLineWeightedTotal(lineIdx) {
+        var timings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
+            ? this.allWordTimings[lineIdx] : [];
+        var total = 0;
+        for (var i = 0; i < timings.length; i++) {
+            total += (timings[i].weight || 1.0);
+        }
+        return parseFloat(total.toFixed(2));
+    }
+
+    _computeLineWeightedMatched(lineIdx) {
+        var timings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
+            ? this.allWordTimings[lineIdx] : [];
+        var matched = 0;
+        for (var i = 0; i < timings.length; i++) {
+            var score = this.matchedSet.get ? this.matchedSet.get(i) : (this.matchedSet.has(i) ? 1.0 : 0);
+            if (score > 0) matched += (timings[i].weight || 1.0) * score;
+        }
+        return parseFloat(matched.toFixed(2));
     }
 
     /**
@@ -1351,8 +1385,10 @@ class GameMode {
                 toIdx:        toIdx,
                 fromText:     fromText || '',
                 trigger:      trigger,
-                matchedWords: matchedWords,
-                totalWords:   totalWords,
+                matchedWords:    matchedWords,
+                totalWords:      totalWords,
+                weightedMatched: this._computeLineWeightedMatched(fromIdx),
+                weightedTotal:   this._computeLineWeightedTotal(fromIdx),
                 missedWords:  missedWords || [],
                 timeSpentMs:  timeSpentMs,
                 lineTempo:    tempoClass,
