@@ -1213,8 +1213,16 @@ class GameMode {
             const target = lineWords[li];
             const targetPhonetic = lateWordTimings && lateWordTimings[li] ? lateWordTimings[li].phonetic : undefined;
             for (let si = spokenIdx; si < Math.min(spokenIdx + 20, spokenNow.length); si++) {
-                if (wordsMatch(spokenNow[si], target, targetPhonetic)) {
-                    matchedSet.add(li);
+                var result = wordsMatchScore(spokenNow[si], target, targetPhonetic);
+                if (result.score > 0) {
+                    var existing = matchedSet.get ? matchedSet.get(li) : undefined;
+                    if (existing === undefined || result.score > existing) {
+                        if (matchedSet.set) {
+                            matchedSet.set(li, result.score);
+                        } else {
+                            matchedSet.add(li); // fallback for Set
+                        }
+                    }
                     spokenIdx = si + 1;
                     // Light the span green — this word just arrived late
                     const allLines = lyricsScroll.querySelectorAll('.lyric-line');
