@@ -500,6 +500,7 @@ class GameMode {
                     finalText: finalText || null,
                     interim:   interim   || null,
                 });
+                self._logAsr(finalText ? 'final' : 'interim', finalText || interim, []);
                 self._debugLog('MATCH', {
                     lineIdx:     self.activeLineIdx,
                     targets:     self.lineWords.slice(),
@@ -1129,6 +1130,30 @@ class GameMode {
             matches:     [],
             transitions: []
         };
+    }
+
+    /**
+     * Record a speech recognition result to the telemetry log.
+     * @param {'final'|'interim'} type
+     * @param {string} text
+     * @param {Array} wordTimestamps  - Whisper word-level timestamps or []
+     */
+    _logAsr(type, text, wordTimestamps) {
+        if (!this._telemetry) return;
+        try {
+            var tempoClass = 'medium';
+            if (this.activeLineIdx >= 0 && this.allWordTimings[this.activeLineIdx]) {
+                tempoClass = this.allWordTimings[this.activeLineIdx].vadTempoClass || 'medium';
+            }
+            this._telemetry.asr.push({
+                ts:             parseFloat((performance.now() / 1000).toFixed(3)),
+                lineIdx:        this.activeLineIdx,
+                lineTempo:      tempoClass,
+                type:           type,
+                text:           text || '',
+                wordTimestamps: wordTimestamps || []
+            });
+        } catch (e) { /* telemetry must never crash the game */ }
     }
 
     /**
