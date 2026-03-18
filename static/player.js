@@ -168,6 +168,38 @@ function wordsMatch(spoken, target, targetPhonetic) {
 }
 
 /**
+ * Scored word matching. Returns { score, method } where:
+ *   score:  0.0 to 1.0
+ *   method: 'exact' | 'phonetic' | 'slang' | 'edit1' | 'edit2' | 'contraction' | 'none'
+ */
+function wordsMatchScore(spoken, target, targetPhonetic) {
+    // 1. Exact
+    if (spoken === target) return { score: 1.0, method: 'exact' };
+
+    // 2. Contraction (single-word)
+    if (contractionsMatch(spoken, target)) return { score: 1.0, method: 'contraction' };
+
+    // 3. Slang dictionary
+    if (slangMatch(spoken, target)) return { score: 0.9, method: 'slang' };
+
+    // 4. Phonetic match
+    var sp = _spokenLRU.get(spoken);
+    var tp = targetPhonetic || doubleMetaphone(target);
+    if (sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])))) {
+        return { score: 0.9, method: 'phonetic' };
+    }
+
+    // 5. Edit distance (only for words >= 3 chars)
+    if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
+        var dist = (Math.abs(spoken.length - target.length) <= 3) ? editDistance(spoken, target) : Infinity;
+        if (dist === 1) return { score: 0.75, method: 'edit1' };
+        if (dist === 2) return { score: 0.5, method: 'edit2' };
+    }
+
+    return { score: 0.0, method: 'none' };
+}
+
+/**
  * Encode a Float32Array of mono audio samples as a standard WAV buffer.
  * @param {Float32Array} float32 - Raw audio samples in [-1, 1]
  * @param {number} sampleRate - Sample rate (16000 for Whisper)
