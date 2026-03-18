@@ -356,8 +356,8 @@ class GameMode {
 
         // Current line tracking
         this.lineWords         = [];      // normalized words for active line
-        this.matchedSet        = new Set(); // indices of matched words in lineWords
-        this.vadMatchedSet  = new Set(); // indices matched via VAD (optimistic)
+        this.matchedSet        = new Map(); // word index → match score (0.0–1.0)
+        this.vadMatchedSet  = new Map(); // indices matched via VAD (optimistic)
         this.asrConfirmedSet = new Set(); // VAD-matched words later confirmed by ASR
         this.transcript        = '';      // accumulated final transcript (never reset)
         this.lineStartWordCount = 0;      // word count in transcript when current line started
@@ -413,8 +413,8 @@ class GameMode {
         this.active = true;
         this.activeLineIdx = -1;
         this.lineWords = [];
-        this.matchedSet = new Set();
-        this.vadMatchedSet = new Set();
+        this.matchedSet = new Map();
+        this.vadMatchedSet = new Map();
         this.asrConfirmedSet = new Set();
         this.transcript = '';
         this.lineStartWordCount = 0;
@@ -520,19 +520,21 @@ class GameMode {
             self._matchPrevLine(self.transcript + interim, 'track1');
 
             // Match primary transcript
-            var unionSet = new Set();
-            self._collectMatches(self.transcript + interim, unionSet);
+            var unionMap = new Map();
+            self._collectMatches(self.transcript + interim, unionMap);
 
             // Union with alternative transcripts from latest result
             var latest = e.results[e.results.length - 1];
             for (var a = 1; a < latest.length; a++) {
-                self._collectMatches(self.transcript + latest[a].transcript, unionSet);
+                self._collectMatches(self.transcript + latest[a].transcript, unionMap);
             }
 
-            // Sticky: once matched, stay matched. Prevents interim→final regression
-            // where a word flashes green then reverts to grey.
-            unionSet.forEach(i => {
-                self.matchedSet.add(i);
+            // Sticky: once matched, stay matched. Only upgrade scores, never downgrade.
+            unionMap.forEach(function(score, i) {
+                var existing = self.matchedSet.get(i);
+                if (existing === undefined || score > existing) {
+                    self.matchedSet.set(i, score);
+                }
                 if (self.vadMatchedSet.has(i)) self.asrConfirmedSet.add(i);
             });
             self._updateWordSpans();
@@ -551,7 +553,7 @@ class GameMode {
                     lineIdx:     self.activeLineIdx,
                     targets:     self.lineWords.slice(),
                     spokenWindow: spokenFull.slice(scanFrom, scanFrom + 20),
-                    matchedIdxs: [...unionSet],
+                    matchedIdxs: [...unionMap.keys()],
                     hotIdx:      self.hotWordIndex,
                     hotWindow:   self.hotWordIndex >= 0 && self.wordTimings[self.hotWordIndex]
                                     ? [self.wordTimings[self.hotWordIndex].windowStart.toFixed(2),
@@ -714,7 +716,7 @@ class GameMode {
             var targetPhonetic = prev.wordTimings && prev.wordTimings[li] ? prev.wordTimings[li].phonetic : undefined;
             for (var si = cursor; si < Math.min(cursor + driftWindow, spoken.length); si++) {
                 if (wordsMatch(spoken[si], target, targetPhonetic)) {
-                    prev.matchedSet.add(li);
+                    prev.matchedSet.set(li, 1.0);
                     cursor = si + 1;
                     anyMatched = true;
                     // Light the span green on the previous line
@@ -734,9 +736,10 @@ class GameMode {
     _collectMatchesWhisper(transcript) {
         if (this.lineWords.length === 0) return;
         const spoken = normalizeWords(transcript);
-        const whisperSet = new Set();
+        const whisperMap = new Map();
         const windowSize = getSpokenWindowSize((this.wordTimings && this.wordTimings.tempoClass) || 'normal');
-        let spokenIdx = Math.max(0, spoken.length - windowSize);
+        var maxWindow = this.lineWords.length * 3;
+        let spokenIdx = Math.max(0, spoken.length - Math.min(windowSize, maxWindow));
         var now = audio.currentTime;
         var driftWindow = this.currentParams.driftTrack2;
         for (let li = 0; li < this.lineWords.length; li++) {
@@ -747,30 +750,35 @@ class GameMode {
             const targetPhonetic = this.wordTimings[li] ? this.wordTimings[li].phonetic : undefined;
             for (let si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
-                if (wordsMatch(spoken[si], target, targetPhonetic)) {
-                    whisperSet.add(li);
-                    spokenIdx = si + 1;
-                    break;
-                }
+
                 var consumed = multiWordContractionMatch(spoken, si, target);
                 if (consumed > 0) {
-                    whisperSet.add(li);
+                    whisperMap.set(li, 1.0);
                     spokenIdx = si + consumed;
                     break;
                 }
                 var pm = phraseMatch(spoken, si, this.lineWords, li);
                 if (pm) {
-                    for (var pt = 0; pt < pm.targetConsumed; pt++) { whisperSet.add(li + pt); }
+                    for (var pt = 0; pt < pm.targetConsumed; pt++) { whisperMap.set(li + pt, 1.0); }
                     spokenIdx = si + pm.spokenConsumed;
                     li += pm.targetConsumed - 1;
                     break;
                 }
+                var result = wordsMatchScore(spoken[si], target, targetPhonetic);
+                if (result.score > 0) {
+                    whisperMap.set(li, result.score);
+                    spokenIdx = si + 1;
+                    break;
+                }
             }
         }
-        whisperSet.forEach(i => {
-            this.matchedSet.add(i);
+        whisperMap.forEach(function(score, i) {
+            var existing = this.matchedSet.get(i);
+            if (existing === undefined || score > existing) {
+                this.matchedSet.set(i, score);
+            }
             if (this.vadMatchedSet.has(i)) this.asrConfirmedSet.add(i);
-        });
+        }.bind(this));
         this._updateWordSpans();
 
         // Match against previous line during overlap zone (Track 2)
@@ -797,7 +805,7 @@ class GameMode {
             this.prevLine = {
                 lineIdx:                this.activeLineIdx,
                 lineWords:              this.lineWords.slice(),
-                matchedSet:             new Set(this.matchedSet),
+                matchedSet:             new Map(this.matchedSet),
                 lineStartWordCount:     this.lineStartWordCount,
                 lineStartTranscriptPos: this.lineStartTranscriptPos,
                 wordTimings:            this.wordTimings,
@@ -848,8 +856,8 @@ class GameMode {
         this._lineStartAudioTime = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
         this.lineStartWordCount = normalizeWords(this.transcript).length;
         this.lineStartTranscriptPos = this.lineStartWordCount;
-        this.matchedSet = new Set();
-        this.vadMatchedSet = new Set();
+        this.matchedSet = new Map();
+        this.vadMatchedSet = new Map();
         this.asrConfirmedSet = new Set();
         this.whisperBuffer = '';
 
@@ -901,11 +909,13 @@ class GameMode {
         }
     }
 
-    _collectMatches(transcript, resultSet) {
+    _collectMatches(transcript, resultMap) {
         if (this.lineWords.length === 0) return;
         var spoken = normalizeWords(transcript);
         var windowSize = getSpokenWindowSize((this.wordTimings && this.wordTimings.tempoClass) || 'normal');
-        var spokenIdx = Math.max(this.lineStartTranscriptPos, spoken.length - windowSize);
+        // Sliding window: cap spoken scan to lineWords.length * 3
+        var maxWindow = this.lineWords.length * 3;
+        var spokenIdx = Math.max(this.lineStartTranscriptPos, spoken.length - Math.min(windowSize, maxWindow));
         var now = audio.currentTime;
         var driftWindow = this.currentParams.driftTrack1;
         for (var li = 0; li < this.lineWords.length; li++) {
@@ -916,37 +926,51 @@ class GameMode {
             var targetPhonetic = this.wordTimings[li] ? this.wordTimings[li].phonetic : undefined;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
-                if (wordsMatch(spoken[si], target, targetPhonetic)) {
-                    resultSet.add(li);
-                    this._logMatch(spoken[si], target, 'exact', 0, true, 1.0, true, si);
-                    spokenIdx = si + 1;
-                    break;
-                }
+
+                // Try multi-word contraction first (consumes multiple spoken words)
                 var consumed = multiWordContractionMatch(spoken, si, target);
                 if (consumed > 0) {
-                    resultSet.add(li);
+                    resultMap.set(li, 1.0);
                     this._logMatch(spoken[si], target, 'contraction', 0, false, 1.0, true, si);
                     spokenIdx = si + consumed;
                     break;
                 }
+
+                // Try phrase match (consumes multiple target or spoken words)
                 var pm = phraseMatch(spoken, si, this.lineWords, li);
                 if (pm) {
-                    for (var pt = 0; pt < pm.targetConsumed; pt++) { resultSet.add(li + pt); }
+                    for (var pt = 0; pt < pm.targetConsumed; pt++) { resultMap.set(li + pt, 1.0); }
                     this._logMatch(spoken[si], this.lineWords[li], 'phrase', 0, false, 1.0, true, si);
                     spokenIdx = si + pm.spokenConsumed;
                     li += pm.targetConsumed - 1;
                     break;
                 }
-                // Log unmatched attempt for this (spokenWord, targetWord) pair
+
+                // Scored single-word match
+                var result = wordsMatchScore(spoken[si], target, targetPhonetic);
+                if (result.score > 0) {
+                    // Only upgrade, never downgrade a previously matched word
+                    var prev = resultMap.get(li);
+                    if (prev === undefined || result.score > prev) {
+                        resultMap.set(li, result.score);
+                    }
+                    this._logMatch(spoken[si], target, result.method,
+                        result.method === 'edit1' ? 1 : result.method === 'edit2' ? 2 : 0,
+                        result.method === 'phonetic', result.score, true, si);
+                    spokenIdx = si + 1;
+                    break;
+                }
+
+                // Log unmatched attempt
                 this._logMatch(spoken[si], target, 'none', -1, false, 0.0, false, si);
             }
         }
     }
 
     _matchTranscript(transcript) {
-        var unionSet = new Set();
-        this._collectMatches(transcript, unionSet);
-        this.matchedSet = unionSet;
+        var unionMap = new Map();
+        this._collectMatches(transcript, unionMap);
+        this.matchedSet = unionMap;
         this._updateWordSpans();
     }
 
@@ -1031,8 +1055,8 @@ class GameMode {
         // mark the hot word as hit immediately without waiting for ASR.
         if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad) {
             if (!this.matchedSet.has(newHot)) {
-                this.matchedSet.add(newHot);
-                this.vadMatchedSet.add(newHot);
+                this.matchedSet.set(newHot, 1.0);
+                this.vadMatchedSet.set(newHot, 1.0);
                 this._updateWordSpans();
             }
         }
@@ -1068,7 +1092,7 @@ class GameMode {
                         if (!phonetic) continue; // skip edit-distance-only matches when silent
                     }
                 }
-                this.matchedSet.add(this.hotWordIndex);
+                this.matchedSet.set(this.hotWordIndex, 1.0);
                 if (this.vadMatchedSet.has(this.hotWordIndex)) this.asrConfirmedSet.add(this.hotWordIndex);
                 return true;
             }
