@@ -341,6 +341,7 @@ class GameMode {
 
         // Diagnostic
         this._dbBuf = [];
+        this._telemetry = null;   // populated by _initTelemetry() when debug mode is on
 
         // Predictive timing state
         this.allWordTimings = [];    // interpolated word timings for all lines
@@ -385,6 +386,7 @@ class GameMode {
         this._lastResultTime = Date.now();
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
+        if (window._kDebug) this._initTelemetry();
         for (var li = 0; li < this.allWordTimings.length; li++) {
             var lt = this.allWordTimings[li];
             var relClass = classifyLineTempoRelative(lt.wps || 0, this.songTempoProfile);
@@ -1104,6 +1106,30 @@ class GameMode {
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────
+
+    /**
+     * Initialise the telemetry log for this session.
+     * Called from startGame() when debug mode is active.
+     */
+    _initTelemetry() {
+        var sd = {};
+        try { sd = JSON.parse(sessionStorage.getItem('songData') || '{}'); } catch (e) {}
+        var title = (sd.artist && sd.title) ? sd.artist + ' — ' + sd.title : (document.title || 'unknown');
+        this._telemetry = {
+            meta: {
+                songTitle:        title,
+                songDurationMs:   (audio && isFinite(audio.duration)) ? Math.round(audio.duration * 1000) : null,
+                lrcLines:         lyrics.length,
+                whisperAvailable: !!(this._whisperStream),
+                browserLang:      (this.recognition && this.recognition.lang) || navigator.language || 'unknown',
+                startedAt:        new Date().toISOString(),
+                gameVersion:      '1.0'
+            },
+            asr:         [],
+            matches:     [],
+            transitions: []
+        };
+    }
 
     /**
      * Log a debug event to the ring buffer, console, and HUD.
