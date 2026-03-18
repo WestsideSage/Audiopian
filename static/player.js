@@ -1120,8 +1120,8 @@ class GameMode {
                 songTitle:        title,
                 songDurationMs:   (audio && isFinite(audio.duration)) ? Math.round(audio.duration * 1000) : null,
                 lrcLines:         lyrics.length,
-                whisperAvailable: !!(this._whisperStream),
-                browserLang:      (this.recognition && this.recognition.lang) || navigator.language || 'unknown',
+                whisperAvailable: null,   // updated at download time when Whisper state is known
+                browserLang:      navigator.language || 'unknown',
                 startedAt:        new Date().toISOString(),
                 gameVersion:      '1.0'
             },
