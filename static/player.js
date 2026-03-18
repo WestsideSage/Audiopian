@@ -342,6 +342,7 @@ class GameMode {
         // Diagnostic
         this._dbBuf = [];
         this._telemetry = null;   // populated by _initTelemetry() when debug mode is on
+        this._lineStartAudioTime = null;
 
         // Predictive timing state
         this.allWordTimings = [];    // interpolated word timings for all lines
@@ -383,6 +384,7 @@ class GameMode {
         this.bestStreak = 0;
         this.whisperBuffer = '';
         this.prevLine = null;
+        this._lineStartAudioTime = 0;
         this._lastResultTime = Date.now();
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
@@ -785,10 +787,21 @@ class GameMode {
                 transcriptTail: normalizeWords(this.transcript).slice(-8).join(' '),
                 interim:       this.latestInterim,
             });
+            this._logTransition(
+                _dbgFromIdx,
+                lineIdx,
+                'score',       // default trigger — time-gate advances also pass through here
+                _dbgFromText,
+                this.matchedSet.size,
+                this.lineWords.length,
+                this.lineWords.filter(function(w, i) { return !this.matchedSet.has(i); }.bind(this)),
+                this._lineStartAudioTime
+            );
         }
 
         // --- Set up new line ---
         this.activeLineIdx = lineIdx;
+        this._lineStartAudioTime = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
         this.lineStartWordCount = normalizeWords(this.transcript).length;
         this.lineStartTranscriptPos = this.lineStartWordCount;
         this.matchedSet = new Set();
@@ -1184,6 +1197,61 @@ class GameMode {
                 score:         score,
                 matched:       matched,
                 windowPosition: windowPosition
+            });
+        } catch (e) { /* telemetry must never crash the game */ }
+    }
+
+    /**
+     * Record a line advance event to the telemetry log.
+     * @param {number} fromIdx
+     * @param {number} toIdx
+     * @param {string} trigger  'score' | 'time' | 'forced'
+     * @param {string} fromText
+     * @param {number} matchedWords
+     * @param {number} totalWords
+     * @param {string[]} missedWords
+     * @param {number} lineStartAudioTime  audio.currentTime when this line started
+     */
+    _logTransition(fromIdx, toIdx, trigger, fromText, matchedWords, totalWords, missedWords, lineStartAudioTime) {
+        if (!this._telemetry) return;
+        try {
+            var tempoClass = 'medium';
+            if (fromIdx >= 0 && this.allWordTimings[fromIdx]) {
+                tempoClass = this.allWordTimings[fromIdx].vadTempoClass || 'medium';
+            }
+            var nowAudio   = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
+            var timeSpentMs = lineStartAudioTime != null
+                ? Math.round((nowAudio - lineStartAudioTime) * 1000)
+                : null;
+
+            // Expected duration = next LRC timestamp minus this line's timestamp
+            var expectedMs = null;
+            if (fromIdx >= 0 && fromIdx + 1 < lyrics.length) {
+                expectedMs = Math.round((lyrics[fromIdx + 1].time - lyrics[fromIdx].time) * 1000);
+            }
+
+            var earlyMs = null;
+            var lateMs  = null;
+            if (timeSpentMs != null && expectedMs != null) {
+                var diff = timeSpentMs - expectedMs;
+                if (diff < 0) earlyMs = Math.abs(diff);
+                else if (diff > 0) lateMs = diff;
+            }
+
+            this._telemetry.transitions.push({
+                ts:           parseFloat((performance.now() / 1000).toFixed(3)),
+                fromIdx:      fromIdx,
+                toIdx:        toIdx,
+                fromText:     fromText || '',
+                trigger:      trigger,
+                matchedWords: matchedWords,
+                totalWords:   totalWords,
+                missedWords:  missedWords || [],
+                timeSpentMs:  timeSpentMs,
+                lineTempo:    tempoClass,
+                expectedTimeMs: expectedMs,
+                earlyMs:      earlyMs,
+                lateMs:       lateMs
             });
         } catch (e) { /* telemetry must never crash the game */ }
     }
