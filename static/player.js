@@ -365,12 +365,14 @@ class GameMode {
         this.latestInterim     = '';      // most recent interim, used to anchor fast-song lines
 
         // Scoring
-        this.totalWords   = 0;
-        this.matchedWords = 0;
-        this.linesScored  = 0;
-        this.perfectLines = 0;
-        this.currentStreak = 0;
-        this.bestStreak   = 0;
+        this.totalWords      = 0;
+        this.matchedWords    = 0;
+        this.weightedTotal   = 0;
+        this.weightedMatched = 0;
+        this.linesScored     = 0;
+        this.perfectLines    = 0;
+        this.currentStreak   = 0;
+        this.bestStreak      = 0;
 
         // Recognition watchdog
         this._lastResultTime = 0;
@@ -420,12 +422,14 @@ class GameMode {
         this.lineStartWordCount = 0;
         this.lineStartTranscriptPos = 0;
         this.latestInterim = '';
-        this.totalWords = 0;
-        this.matchedWords = 0;
-        this.linesScored = 0;
-        this.perfectLines = 0;
-        this.currentStreak = 0;
-        this.bestStreak = 0;
+        this.totalWords      = 0;
+        this.matchedWords    = 0;
+        this.weightedTotal   = 0;
+        this.weightedMatched = 0;
+        this.linesScored     = 0;
+        this.perfectLines    = 0;
+        this.currentStreak   = 0;
+        this.bestStreak      = 0;
         this.whisperBuffer = '';
         this.prevLine = null;
         this._lineStartAudioTime = 0;
@@ -1112,7 +1116,25 @@ class GameMode {
         const total = lineWords.length;
         if (total === 0) return;
 
-        const matched = matchedSet.size;
+        // Compute weighted score
+        var wordTimings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
+            ? this.allWordTimings[lineIdx] : [];
+        var weightedTotal = 0;
+        var weightedMatched = 0;
+        for (var i = 0; i < lineWords.length; i++) {
+            var weight = (wordTimings[i] && wordTimings[i].weight) || 1.0;
+            weightedTotal += weight;
+            var matchScore = matchedSet.get ? matchedSet.get(i) : (matchedSet.has(i) ? 1.0 : 0);
+            if (matchScore > 0) {
+                weightedMatched += weight * matchScore;
+            }
+        }
+
+        // For display: count matched words (any score > 0)
+        var matched = 0;
+        for (var j = 0; j < lineWords.length; j++) {
+            if (matchedSet.has(j)) matched++;
+        }
 
         // Mark unmatched spans as red
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
@@ -1131,8 +1153,10 @@ class GameMode {
             setTimeout(() => flash.remove(), 1300);
         }
 
-        this.totalWords   += total;
-        this.matchedWords += matched;
+        this.weightedTotal   += weightedTotal;
+        this.weightedMatched += weightedMatched;
+        this.totalWords      += total;
+        this.matchedWords    += matched;
         this.linesScored++;
 
         if (matched === total) {
@@ -1147,8 +1171,8 @@ class GameMode {
     }
 
     _updateRunningScore() {
-        if (this.totalWords === 0) return;
-        const pct = Math.round((this.matchedWords / this.totalWords) * 100);
+        if (this.weightedTotal === 0) return;
+        const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
         document.getElementById('score-pct').textContent = pct + '%';
     }
 
@@ -1472,7 +1496,7 @@ class GameMode {
 
     showEndModal() {
         if (!this.active || this.totalWords === 0) return;
-        const pct = Math.round((this.matchedWords / this.totalWords) * 100);
+        const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
         document.getElementById('modalScore').textContent = pct + '%';
         document.getElementById('modalWords').textContent = `${this.matchedWords}/${this.totalWords}`;
         document.getElementById('modalLines').textContent = `${this.perfectLines}/${this.linesScored}`;
