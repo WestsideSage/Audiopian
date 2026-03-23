@@ -389,6 +389,9 @@ class GameMode {
         this.currentStreak   = 0;
         this.bestStreak      = 0;
 
+        // ASR activity tracking (zero-ASR line fencing)
+        this.lineHadAsrEvent = false;
+
         // Recognition watchdog
         this._lastResultTime = 0;
         this._watchdogInterval = null;
@@ -519,6 +522,7 @@ class GameMode {
 
         this.recognition.onresult = function(e) {
             self._lastResultTime = Date.now();
+            self.lineHadAsrEvent = true;
             var interim = '';
             var finalText = '';
             for (var i = e.resultIndex; i < e.results.length; i++) {
@@ -686,6 +690,7 @@ class GameMode {
             const data = await resp.json();
             if (data.transcript && this.active) {
                 this.whisperBuffer = (this.whisperBuffer + ' ' + data.transcript).trim();
+                this.lineHadAsrEvent = true;
                 this._collectMatchesWhisper(this.whisperBuffer);
             }
             if (data.words && data.words.length > 0 && this.active) {
@@ -708,7 +713,7 @@ class GameMode {
 
         // Score the previous line with its final match state
         if (prev.lineWords.length > 0) {
-            this._scoreLine(prev.lineIdx, prev.lineWords, prev.matchedSet);
+            this._scoreLine(prev.lineIdx, prev.lineWords, prev.matchedSet, prev.lineHadAsrEvent);
         }
     }
 
@@ -835,6 +840,7 @@ class GameMode {
                 params:                 this.currentParams,
                 overlapEnd:             performance.now() + (overlapDuration * 1000),
                 whisperBuffer:          this.whisperBuffer,
+                lineHadAsrEvent:        this.lineHadAsrEvent,
             };
 
             // Schedule finalization after overlap + score delay
@@ -896,6 +902,7 @@ class GameMode {
         this.matchedSet = new Map();
         this.vadMatchedSet = new Map();
         this.asrConfirmedSet = new Set();
+        this.lineHadAsrEvent = false;
         this.whisperBuffer = '';
         this._telemetryLoggedMatches = new Set();
 
@@ -1146,13 +1153,16 @@ class GameMode {
      * Score an outgoing line. Accepts explicit params so delayed calls can pass
      * a snapshot rather than relying on this.* (which will have advanced by then).
      */
-    _scoreLine(lineIdx, lineWords, matchedSet) {
+    _scoreLine(lineIdx, lineWords, matchedSet, lineHadAsrEvent) {
         lineIdx    = (lineIdx    !== undefined) ? lineIdx    : this.activeLineIdx;
         lineWords  = (lineWords  !== undefined) ? lineWords  : this.lineWords;
         matchedSet = (matchedSet !== undefined) ? matchedSet : this.matchedSet;
 
         const total = lineWords.length;
         if (total === 0) return;
+
+        // Zero-ASR line fencing: skip scoring for lines with no ASR activity
+        if (lineHadAsrEvent === false) return;
 
         // Compute weighted score
         var wordTimings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
@@ -1220,7 +1230,7 @@ class GameMode {
      * after the line change (the last-word timing race) can still be captured.
      * Any newly-matched words are lit green before scoring.
      */
-    _lateScoreLine(lineIdx, lineWords, matchedSet, lineStartWordCount) {
+    _lateScoreLine(lineIdx, lineWords, matchedSet, lineStartWordCount, lineHadAsrEvent) {
         if (lineWords.length === 0) return;
 
         const spokenNow = normalizeWords(this.transcript);
@@ -1263,7 +1273,7 @@ class GameMode {
             }
         }
 
-        this._scoreLine(lineIdx, lineWords, matchedSet);
+        this._scoreLine(lineIdx, lineWords, matchedSet, lineHadAsrEvent);
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────
@@ -1782,9 +1792,10 @@ audio.addEventListener('ended', function() {
             var _lastLineWords = gameMode.lineWords.slice();
             var _lastLineStart = gameMode.lineStartWordCount;
             var _lastMatched   = new Map(gameMode.matchedSet);
+            var _lastHadAsr    = gameMode.lineHadAsrEvent;
             setTimeout(function() {
                 gameMode._lateScoreLine(
-                    _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart
+                    _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart, _lastHadAsr
                 );
             }, 800);
         }
