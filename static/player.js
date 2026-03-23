@@ -786,7 +786,11 @@ class GameMode {
                 var result = wordsMatchScore(spoken[si], target, targetPhonetic);
                 if (result.score > 0) {
                     whisperMap.set(li, result.score);
-                    spokenIdx = si + 1;
+                    // If the next target word is the same, allow reusing this spoken position
+                    var nextTarget = (li + 1 < this.lineWords.length) ? this.lineWords[li + 1] : null;
+                    if (nextTarget !== target) {
+                        spokenIdx = si + 1;
+                    }
                     break;
                 }
             }
@@ -991,7 +995,11 @@ class GameMode {
                     this._logMatch(spoken[si], target, result.method,
                         result.method === 'edit1' ? 1 : result.method === 'edit2' ? 2 : 0,
                         result.method === 'phonetic', result.score, true, si);
-                    spokenIdx = si + 1;
+                    // If the next target word is the same, allow reusing this spoken position
+                    var nextTarget = (li + 1 < this.lineWords.length) ? this.lineWords[li + 1] : null;
+                    if (nextTarget !== target) {
+                        spokenIdx = si + 1;
+                    }
                     break;
                 }
 
@@ -1238,7 +1246,11 @@ class GameMode {
                             matchedSet.add(li); // fallback for Set
                         }
                     }
-                    spokenIdx = si + 1;
+                    // If the next target word is the same, allow reusing this spoken position
+                    var nextTarget = (li + 1 < lineWords.length) ? lineWords[li + 1] : null;
+                    if (nextTarget !== target) {
+                        spokenIdx = si + 1;
+                    }
                     // Light the span green — this word just arrived late
                     const allLines = lyricsScroll.querySelectorAll('.lyric-line');
                     const lineEl   = allLines[lineIdx];
