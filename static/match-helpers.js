@@ -60,6 +60,10 @@ var CONTRACTION_MAP = {
     'bout':    'about',
     'ops':     'opposition',
     'lil':     'little',
+    'whatchu': 'what you',
+    'getchu':  'get you',
+    'gotchu':  'got you',
+    'letchu':  'let you',
 };
 
 // --- Slang / ASR-mishearing dictionary ---
@@ -70,10 +74,17 @@ var SLANG_MAP = {};
     var pairs = [
         // Profanity ASR sanitization
         ['nigga', 'n***a'], ['nigga', 'ninja'], ['nigga', 'miga'],
-        ['niggas', 'ninjas'], ['shit', 'shoot'], ['shit', 'ship'],
-        ['fuck', 'fudge'], ['fuck', 'fk'], ['fuckin', 'freaking'],
-        ['fucking', 'freaking'], ['ass', 'as'], ['bitch', 'beach'],
+        ['nigga', 'neighbor'], ['niggas', 'ninjas'], ['niggas', 'neighbors'],
+        ['shit', 'shoot'], ['shit', 'ship'], ['shit', 'sht'], ['shit', 's***'], ['shit', 'sit'],
+        ['fuck', 'fudge'], ['fuck', 'fk'], ['fuck', 'duck'], ['fuck', 'f***'],
+        ['fuckin', 'freaking'], ['fucking', 'freaking'],
+        ['fucking', 'ducking'], ['fucking', 'f***ing'], ['fucking', 'fing'],
+        ['fucked', 'ducked'], ['fucked', 'f***ed'],
+        ['ass', 'as'], ['ass', 'a**'],
+        ['bitch', 'beach'], ['bitch', 'b***h'], ['bitch', 'witch'],
         ['bitches', 'beaches'], ['damn', 'dang'], ['hell', 'heck'],
+        ['hoe', 'ho'], ['hoes', 'hos'],
+        ['dick', 'rick'], ['dick', 'd***'],
         // Common ASR mishearings
         ['ya', 'you'], ['yo', 'you'], ['yuh', 'yeah'],
         ['nah', 'no'], ['na', 'no'], ['aye', 'hey'],
@@ -92,8 +103,14 @@ var SLANG_MAP = {};
         ['ayy', 'hey'], ['ey', 'hey'], ['ay', 'hey'],
         ['woo', 'whoo'], ['woah', 'whoa'],
         // Numbers / abbreviations
-        ['2', 'two'], ['to', 'two'], ['too', 'two'],
-        ['4', 'four'], ['for', 'four'],
+        ['0', 'zero'], ['1', 'one'], ['2', 'two'], ['3', 'three'],
+        ['4', 'four'], ['5', 'five'], ['6', 'six'], ['7', 'seven'],
+        ['8', 'eight'], ['9', 'nine'], ['10', 'ten'],
+        ['11', 'eleven'], ['12', 'twelve'], ['13', 'thirteen'],
+        ['20', 'twenty'], ['30', 'thirty'], ['38', 'thirtyeight'],
+        ['40', 'forty'], ['48', 'fortyeight'], ['50', 'fifty'],
+        ['100', 'hundred'], ['911', 'nineoneone'],
+        ['to', 'two'], ['too', 'two'], ['for', 'four'],
     ];
     for (var i = 0; i < pairs.length; i++) {
         var a = pairs[i][0], b = pairs[i][1];
