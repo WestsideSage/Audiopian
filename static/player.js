@@ -228,7 +228,7 @@ function encodeWav(float32, sampleRate) {
 }
 
 function normalizeWord(w) {
-    return w.toLowerCase().replace(/[''`,.!?;:\-"*]/g, '').trim();
+    return w.toLowerCase().replace(/[''`,.!?;:\-"*()]/g, '').trim();
 }
 
 function normalizeWords(text) {
@@ -917,7 +917,7 @@ class GameMode {
         }
 
         var rawWords = lineText.split(' ');
-        this.lineWords = rawWords.map(function(w) { return normalizeWord(w); });
+        this.lineWords = rawWords.map(function(w) { return normalizeWord(w); }).filter(function(w) { return w.length > 0; });
 
         // Reset spans to grey for new active line
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
@@ -1754,7 +1754,7 @@ audio.addEventListener('ended', function() {
             var _lastLineIdx   = gameMode.activeLineIdx;
             var _lastLineWords = gameMode.lineWords.slice();
             var _lastLineStart = gameMode.lineStartWordCount;
-            var _lastMatched   = new Set(gameMode.matchedSet);
+            var _lastMatched   = new Map(gameMode.matchedSet);
             setTimeout(function() {
                 gameMode._lateScoreLine(
                     _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart
