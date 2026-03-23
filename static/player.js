@@ -176,6 +176,15 @@ function wordsMatchScore(spoken, target, targetPhonetic) {
     // 1. Exact
     if (spoken === target) return { score: 1.0, method: 'exact' };
 
+    // 1b. -in/-ing suffix normalization ("livin"↔"living", "smokin"↔"smoking")
+    if (spoken.length >= 4 && target.length >= 4) {
+        var sBase = spoken.endsWith('ing') ? spoken.slice(0, -3) :
+                    (spoken.endsWith('in') ? spoken.slice(0, -2) : null);
+        var tBase = target.endsWith('ing') ? target.slice(0, -3) :
+                    (target.endsWith('in') ? target.slice(0, -2) : null);
+        if (sBase && tBase && sBase === tBase) return { score: 1.0, method: 'exact' };
+    }
+
     // 2. Contraction (single-word)
     if (contractionsMatch(spoken, target)) return { score: 1.0, method: 'contraction' };
 
