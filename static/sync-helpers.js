@@ -43,6 +43,21 @@ function getOverlapDuration(tempoClass) {
 }
 
 /**
+ * Return adjusted overlap duration for short lines.
+ * Short slow lines (≤3 words) get 50% more overlap time.
+ * @param {'slow'|'normal'|'fast'} tempoClass
+ * @param {number} wordCount - number of words on the line
+ * @returns {number}
+ */
+function getAdjustedOverlapDuration(tempoClass, wordCount) {
+    var base = getOverlapDuration(tempoClass);
+    if (tempoClass === 'slow' && wordCount <= 3) {
+        return base * 1.5;
+    }
+    return base;
+}
+
+/**
  * Return late-score delay (seconds) measured from end of overlap zone.
  * @param {'slow'|'normal'|'fast'} tempoClass
  * @returns {number}
@@ -120,5 +135,5 @@ function getSpokenWindowSize(tempoClass) {
 
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getScoreDelay, getChunkSamples, computeSongTempoProfile, classifyLineTempoRelative, getSpokenWindowSize };
+    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getAdjustedOverlapDuration, getScoreDelay, getChunkSamples, computeSongTempoProfile, classifyLineTempoRelative, getSpokenWindowSize };
 }

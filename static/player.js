@@ -337,7 +337,7 @@ function interpolateWordTimings(lyricsArr) {
             // entire phrase is matchable as soon as the line activates.
             // Normal/fast lines keep per-word gates for positional accuracy.
             var wStart = tempoClass === 'slow'
-                ? lineStart + params.windowStart
+                ? lineStart + (words.length <= 3 ? -0.5 : params.windowStart)
                 : estimatedTime + params.windowStart;
             var timing = {
                 word: normalizeWord(words[wi]),
@@ -827,7 +827,7 @@ class GameMode {
         // Create overlay for the outgoing line (if it had words to match)
         if (this.activeLineIdx >= 0 && this.lineWords.length > 0) {
             var outgoingTempoClass = (this.wordTimings && this.wordTimings.tempoClass) || 'normal';
-            var overlapDuration = getOverlapDuration(outgoingTempoClass);
+            var overlapDuration = getAdjustedOverlapDuration(outgoingTempoClass, this.lineWords.length);
             var scoreDelay = getScoreDelay(outgoingTempoClass);
 
             this.prevLine = {
