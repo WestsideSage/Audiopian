@@ -300,10 +300,8 @@ function classifyWord(normalizedWord, inParentheses) {
 }
 
 function maxEditDistance(len) {
-    if (len <= 0) return 1;
     if (len <= 6) return 1;
-    if (len <= 9) return 2;
-    return 3;
+    return 2;
 }
 
 function skipFuzzyMatch(word) {

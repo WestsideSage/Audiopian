@@ -191,18 +191,24 @@ function wordsMatchScore(spoken, target, targetPhonetic) {
     // 3. Slang dictionary
     if (slangMatch(spoken, target)) return { score: 0.9, method: 'slang' };
 
-    // 4. Phonetic match
-    var sp = _spokenLRU.get(spoken);
-    var tp = targetPhonetic || doubleMetaphone(target);
-    if (sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])))) {
-        return { score: 0.9, method: 'phonetic' };
+    // 4. Phonetic match (guarded: both ≥3 chars, same first letter or both ≥5 chars)
+    if (spoken.length >= 3 && target.length >= 3) {
+        var sp = _spokenLRU.get(spoken);
+        var tp = targetPhonetic || doubleMetaphone(target);
+        if (sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])))) {
+            var sameFirst = spoken[0] === target[0];
+            var bothLong = spoken.length >= 5 && target.length >= 5 && Math.abs(spoken.length - target.length) <= 2;
+            if (sameFirst || bothLong) {
+                return { score: 0.8, method: 'phonetic' };
+            }
+        }
     }
 
     // 5. Edit distance (only for words >= 3 chars)
     if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
         var dist = (Math.abs(spoken.length - target.length) <= 3) ? editDistance(spoken, target) : Infinity;
         if (dist === 1) return { score: 0.75, method: 'edit1' };
-        if (dist === 2) return { score: 0.5, method: 'edit2' };
+        if (dist === 2) return { score: 0.4, method: 'edit2' };
     }
 
     return { score: 0.0, method: 'none' };
