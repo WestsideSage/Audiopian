@@ -156,14 +156,30 @@ var _spokenLRU = new MetaphoneLRU(50);
 
 function wordsMatch(spoken, target, targetPhonetic) {
     if (spoken === target) return true;
-    var sp = _spokenLRU.get(spoken);
-    var tp = targetPhonetic || doubleMetaphone(target);
-    if (sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])))) return true;
+    // -in/-ing suffix normalization
+    if (spoken.length >= 4 && target.length >= 4) {
+        var sBase = spoken.endsWith('ing') ? spoken.slice(0, -3) :
+                    (spoken.endsWith('in') ? spoken.slice(0, -2) : null);
+        var tBase = target.endsWith('ing') ? target.slice(0, -3) :
+                    (target.endsWith('in') ? target.slice(0, -2) : null);
+        if (sBase && tBase && sBase.length >= 3 && sBase === tBase) return true;
+    }
+    if (contractionsMatch(spoken, target)) return true;
+    if (slangMatch(spoken, target)) return true;
+    // Phonetic match (guarded: both ≥3 chars, same first letter or both ≥5 chars)
+    if (spoken.length >= 3 && target.length >= 3) {
+        var sp = _spokenLRU.get(spoken);
+        var tp = targetPhonetic || doubleMetaphone(target);
+        if (sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])))) {
+            var sameFirst = spoken[0] === target[0];
+            var bothLong = spoken.length >= 5 && target.length >= 5 && Math.abs(spoken.length - target.length) <= 2;
+            if (sameFirst || bothLong) return true;
+        }
+    }
     if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
         var maxDist = maxEditDistance(Math.min(spoken.length, target.length));
         if (Math.abs(spoken.length - target.length) <= maxDist && editDistance(spoken, target) <= maxDist) return true;
     }
-    if (contractionsMatch(spoken, target)) return true;
     return false;
 }
 
@@ -182,7 +198,7 @@ function wordsMatchScore(spoken, target, targetPhonetic) {
                     (spoken.endsWith('in') ? spoken.slice(0, -2) : null);
         var tBase = target.endsWith('ing') ? target.slice(0, -3) :
                     (target.endsWith('in') ? target.slice(0, -2) : null);
-        if (sBase && tBase && sBase === tBase) return { score: 1.0, method: 'exact' };
+        if (sBase && tBase && sBase.length >= 3 && sBase === tBase) return { score: 1.0, method: 'exact' };
     }
 
     // 2. Contraction (single-word)
@@ -1642,7 +1658,7 @@ function renderLyricsGameMode() {
         el.className = 'lyric-line';
         el.dataset.index = i;
 
-        const words = line.text.split(' ');
+        const words = line.text.split(' ').filter(function(w) { return normalizeWord(w).length > 0; });
         words.forEach((word, wi) => {
             const span = document.createElement('span');
             span.className = 'word-span';
