@@ -1021,7 +1021,7 @@ class GameMode {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
         if (lines[lineIdx]) {
             lines[lineIdx].querySelectorAll('.word-span').forEach(function(s) {
-                s.classList.remove('matched', 'missed', 'asr-confirmed');
+                s.classList.remove('matched', 'matched-partial', 'missed', 'asr-confirmed');
             });
         }
     }
@@ -1102,9 +1102,10 @@ class GameMode {
 
         const spans = lineEl.querySelectorAll('.word-span');
         spans.forEach((span, wi) => {
-            span.classList.remove('matched', 'missed');
-            if (this.matchedSet.has(wi)) {
-                span.classList.add('matched');
+            span.classList.remove('matched', 'matched-partial', 'missed');
+            var _wScore = this.matchedSet.get(wi);
+            if (_wScore !== undefined) {
+                span.classList.add(_wScore >= 0.75 ? 'matched' : 'matched-partial');
                 // Only add asr-confirmed if not already present — avoids replaying the animation
                 if (this.asrConfirmedSet.has(wi) && !span.classList.contains('asr-confirmed')) {
                     span.classList.add('asr-confirmed');
@@ -1341,12 +1342,15 @@ class GameMode {
                     if (nextTarget !== target) {
                         spokenIdx = si + 1;
                     }
-                    // Light the span green — this word just arrived late
+                    // Light the span — this word just arrived late
                     const allLines = lyricsScroll.querySelectorAll('.lyric-line');
                     const lineEl   = allLines[lineIdx];
                     if (lineEl) {
                         const span = lineEl.querySelectorAll('.word-span')[li];
-                        if (span) { span.classList.remove('missed'); span.classList.add('matched'); }
+                        if (span) {
+                            span.classList.remove('missed');
+                            span.classList.add(result.score >= 0.75 ? 'matched' : 'matched-partial');
+                        }
                     }
                     break;
                 }
