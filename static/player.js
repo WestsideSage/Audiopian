@@ -968,7 +968,10 @@ class GameMode {
             if (existing === undefined || score > existing) {
                 this.matchedSet.set(i, score);
             }
-            if (this.vadMatchedSet.has(i)) this.asrConfirmedSet.add(i);
+            if (this.vadMatchedSet.has(i) && !this.asrConfirmedSet.has(i)) {
+                this.asrConfirmedSet.add(i);
+                this._logPromotion('whisper', i, score);
+            }
         }.bind(this));
         this._updateWordSpans();
 
@@ -1441,6 +1444,10 @@ class GameMode {
                         } else {
                             matchedSet.add(li); // fallback for Set
                         }
+                    }
+                    // Promote VAD word to ASR-confirmed if late ASR just matched it
+                    if (vadMatchedSet && vadMatchedSet.has(li) && asrConfirmedSet && !asrConfirmedSet.has(li)) {
+                        asrConfirmedSet.add(li);
                     }
                     // If the next target word is the same, allow reusing this spoken position
                     var nextTarget = (li + 1 < lineWords.length) ? lineWords[li + 1] : null;
