@@ -429,6 +429,23 @@ class GameMode {
         this.whisperBuffer  = '';
         this._whisperInFlight = 0;
 
+        // Whisper server state (populated from /whisper-status at game start)
+        this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null };
+
+        // Whisper client track state (populated by _startWhisperTrack outcome)
+        this._whisperTrackStatus  = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0 };
+
+        // Whisper chunk telemetry counters
+        this._chunksDispatched          = 0;
+        this._chunksSucceeded           = 0;
+        this._chunksFailed503           = 0;
+        this._chunksFailed500           = 0;
+        this._chunksDroppedWhileLoading = 0;
+        this._chunksFailedNetwork       = 0;
+        this._whisperResponses          = 0;
+        this._whisperResponsesWithWords = 0;
+        this._whisperWordsTotal         = 0;
+
         // Diagnostic
         this._dbBuf = [];
         this._telemetry = null;   // populated by _initTelemetry() when debug mode is on
@@ -506,6 +523,20 @@ class GameMode {
         renderLyricsGameMode();
         this._setupRecognition();
         this._startWhisperTrack(); // async — Track 2 starts in background
+
+        // Fetch server Whisper state and store for telemetry and HUD
+        fetch('/whisper-status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                this._whisperServerStatus = {
+                    state:     data.status || 'unknown',
+                    reason:    data.error  || null,
+                    checkedAt: Date.now(),
+                };
+            }.bind(this))
+            .catch(function() {
+                this._whisperServerStatus = { state: 'error', reason: 'status fetch failed', checkedAt: Date.now() };
+            }.bind(this));
 
         document.getElementById('score-display').style.display = 'flex';
         document.getElementById('score-pct').textContent = '0%';
@@ -688,7 +719,9 @@ class GameMode {
     }
 
     async _startWhisperTrack() {
+        this._whisperTrackStatus.startAttempts++;
         try {
+            this._whisperTrackStatus.state = 'starting';
             this._whisperStream = await navigator.mediaDevices.getUserMedia({
                 audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
             });
@@ -718,8 +751,12 @@ class GameMode {
                 }
             };
             src.connect(this._whisperNode);
+            this._whisperTrackStatus.state = 'ready';
         } catch (err) {
-            console.warn('[Whisper track] unavailable — running on Track 1 only:', err.message);
+            this._whisperTrackStatus.state = 'error';
+            this._whisperTrackStatus.reason = err.message || String(err);
+            this._whisperTrackStatus.startFailures++;
+            console.warn('[Whisper track] unavailable:', this._whisperTrackStatus.reason);
             this._whisperStream = null;
             this._whisperCtx    = null;
             this._whisperNode   = null;
