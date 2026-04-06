@@ -1288,7 +1288,7 @@ class GameMode {
         this.matchedWords    += matched;
         this.linesScored++;
 
-        if (matched === total) {
+        if (weightedTotal > 0 && weightedMatched >= weightedTotal * 0.9) {
             this.perfectLines++;
             this.currentStreak++;
             if (this.currentStreak > this.bestStreak) this.bestStreak = this.currentStreak;
