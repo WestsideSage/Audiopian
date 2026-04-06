@@ -1748,6 +1748,16 @@ class GameMode {
         const vadHits = this.vadMatchedSet ? this.vadMatchedSet.size : 0;
         const confirmed = this.asrConfirmedSet ? this.asrConfirmedSet.size : 0;
         html += `<div class="dbg-row"><span class="dbg-label">VAD   </span>hits:${vadHits} | asr-conf:${confirmed}/${this.lineWords.length}</div>`;
+        // Whisper server + track state
+        const wSrv   = (this._whisperServerStatus && this._whisperServerStatus.state) || 'unknown';
+        const wTrk   = (this._whisperTrackStatus  && this._whisperTrackStatus.state)  || 'idle';
+        const wDisp  = this._chunksDispatched          || 0;
+        const wOk    = this._chunksSucceeded           || 0;
+        const w503   = this._chunksFailed503           || 0;
+        const w500   = this._chunksFailed500           || 0;
+        const wNet   = this._chunksFailedNetwork       || 0;
+        const wDrop  = this._chunksDroppedWhileLoading || 0;
+        html += `<div class="dbg-row"><span class="dbg-label">Whisp </span>srv:${wSrv} trk:${wTrk} | sent:${wDisp} ok:${wOk} 503:${w503} 500:${w500} net:${wNet} drop:${wDrop}</div>`;
 
         // Overlap state
         const overlapActive = this.prevLine && performance.now() < this.prevLine.overlapEnd;
