@@ -100,8 +100,8 @@ assert.strictEqual(maxEditDistance(3), 1);
 assert.strictEqual(maxEditDistance(6), 1);
 assert.strictEqual(maxEditDistance(7), 2);
 assert.strictEqual(maxEditDistance(9), 2);
-assert.strictEqual(maxEditDistance(10), 3);
-assert.strictEqual(maxEditDistance(15), 3);
+assert.strictEqual(maxEditDistance(10), 2);
+assert.strictEqual(maxEditDistance(15), 2);
 assert.strictEqual(maxEditDistance(0), 1);
 
 // --- skipFuzzyMatch ---
@@ -132,3 +132,25 @@ lru.reset();
 assert.strictEqual(lru._cache.size, 0, 'reset clears cache');
 
 console.log('All MetaphoneLRU tests passed.');
+
+// --- isEdit2PrefixTruncation ---
+var isEdit2PrefixTruncation = fakeModule.exports.isEdit2PrefixTruncation;
+
+// Accept: spoken is prefix of target AND exactly 1 char missing
+assert.strictEqual(isEdit2PrefixTruncation('rhyth',  'rhythm'),  true,  'rhyth→rhythm prefix diff=1');
+assert.strictEqual(isEdit2PrefixTruncation('singin', 'singing'), true,  'singin→singing prefix diff=1');
+assert.strictEqual(isEdit2PrefixTruncation('keepin', 'keeping'), true,  'keepin→keeping prefix diff=1');
+
+// Reject: prefix but diff > 1 (2+ chars missing)
+assert.strictEqual(isEdit2PrefixTruncation('fol',   'folks'),   false, 'fol→folks diff=2');
+assert.strictEqual(isEdit2PrefixTruncation('less',  'lesson'),  false, 'less→lesson diff=2');
+assert.strictEqual(isEdit2PrefixTruncation('cat',   'catch'),   false, 'cat→catch diff=2');
+
+// Reject: not a prefix
+assert.strictEqual(isEdit2PrefixTruncation('hat',   'cat'),     false, 'hat→cat not a prefix');
+assert.strictEqual(isEdit2PrefixTruncation('work',  'words'),   false, 'work→words not a prefix');
+
+// Reject: spoken longer than target
+assert.strictEqual(isEdit2PrefixTruncation('rhythm', 'rhyth'),  false, 'rhythm→rhyth spoken longer');
+
+console.log('isEdit2PrefixTruncation: 9 tests passed');

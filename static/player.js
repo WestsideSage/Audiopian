@@ -9,6 +9,13 @@ const noLyricsEl = document.getElementById('no-lyrics');
 let lyrics = [];
 let currentLineIndex = -1;
 
+// Derive a stable per-song key for localStorage (offset, etc.)
+function _songKey() {
+    var sd = JSON.parse(sessionStorage.getItem('songData') || '{}');
+    var key = (sd.artist || '') + '::' + (sd.title || '');
+    return key || '_unknown';
+}
+
 // --- Game mode utilities ---
 
 // --- Phonetic + fuzzy matching ---
@@ -178,7 +185,10 @@ function wordsMatch(spoken, target, targetPhonetic) {
     }
     if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
         var maxDist = maxEditDistance(Math.min(spoken.length, target.length));
-        if (Math.abs(spoken.length - target.length) <= maxDist && editDistance(spoken, target) <= maxDist) return true;
+        var edDist  = (Math.abs(spoken.length - target.length) <= maxDist)
+                      ? editDistance(spoken, target) : Infinity;
+        if (edDist === 1) return true;
+        if (edDist === 2 && isEdit2PrefixTruncation(spoken, target)) return true;
     }
     return false;
 }
@@ -224,7 +234,7 @@ function wordsMatchScore(spoken, target, targetPhonetic) {
     if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
         var dist = (Math.abs(spoken.length - target.length) <= 3) ? editDistance(spoken, target) : Infinity;
         if (dist === 1) return { score: 0.75, method: 'edit1' };
-        if (dist === 2) return { score: 0.4, method: 'edit2' };
+        if (dist === 2 && isEdit2PrefixTruncation(spoken, target)) return { score: 0.4, method: 'edit2' };
     }
 
     return { score: 0.0, method: 'none' };
@@ -439,6 +449,7 @@ class GameMode {
         this.currentParams = getWindowParams('normal'); // adaptive window params for active line
 
         this.lrcOffset = 0;   // seconds to add to all LRC timestamps (positive = delay lyrics)
+        this._suspended = false;
 
         // Soft boundary: previous line overlay during overlap zone
         this.prevLine = null;  // { lineIdx, lineWords, matchedSet, lineStartWordCount, lineStartTranscriptPos, wordTimings, params, overlapEnd, whisperBuffer }
@@ -447,6 +458,7 @@ class GameMode {
     start() {
         if (this.active) return;
         this.active = true;
+        this._suspended = false;
         this.activeLineIdx = -1;
         this.lineWords = [];
         this.matchedSet = new Map();
@@ -477,9 +489,8 @@ class GameMode {
             lt.useVad = (relClass !== 'slow');
             lt.vadTempoClass = relClass;
         }
-        // Restore per-video LRC offset from localStorage
-        var _vid = new URLSearchParams(window.location.search).get('v') || '';
-        this.lrcOffset = parseFloat(localStorage.getItem('lrcOffset_' + _vid) || '0');
+        // Restore per-song LRC offset from localStorage
+        this.lrcOffset = parseFloat(localStorage.getItem('lrcOffset_' + _songKey()) || '0');
         _updateOffsetDisplay();
         this.wordTimings = [];
         this.hotWordIndex = -1;
@@ -519,6 +530,48 @@ class GameMode {
         document.getElementById('score-display').style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
+    }
+
+    /**
+     * Suspend judging (on pause). Stops recognition and VAD but keeps game active.
+     */
+    suspend() {
+        if (!this.active || this._suspended) return;
+        this._suspended = true;
+        if (this.recognition) {
+            try { this.recognition.stop(); } catch(e) {}
+        }
+        this.isSpeaking = false;
+    }
+
+    /**
+     * Resume judging (on play after pause). Restarts recognition.
+     */
+    resume() {
+        if (!this.active || !this._suspended) return;
+        this._suspended = false;
+        if (this.recognition) {
+            try { this.recognition.start(); } catch(e) {}
+        }
+    }
+
+    /**
+     * Handle seek/skip during game mode. Resets current line scoring state
+     * so that pre-seek transcript doesn't count toward the new position.
+     */
+    onSeek() {
+        if (!this.active) return;
+        // Discard current line's match state — it will be re-established
+        // when updateLyrics fires and calls setActiveLine for the new position.
+        this.matchedSet = new Map();
+        this.vadMatchedSet = new Map();
+        this.asrConfirmedSet = new Set();
+        this.lineStartWordCount = normalizeWords(this.transcript).length;
+        this.lineStartTranscriptPos = this.lineStartWordCount;
+        this.hotWordIndex = -1;
+        this.whisperBuffer = '';
+        this.prevLine = null;   // discard any pending overlap scoring
+        this._updateWordSpans();
     }
 
     _setupRecognition() {
@@ -729,7 +782,8 @@ class GameMode {
 
         // Score the previous line with its final match state
         if (prev.lineWords.length > 0) {
-            this._scoreLine(prev.lineIdx, prev.lineWords, prev.matchedSet, prev.lineHadAsrEvent);
+            this._scoreLine(prev.lineIdx, prev.lineWords, prev.matchedSet, prev.lineHadAsrEvent,
+                            prev.vadMatchedSet, prev.asrConfirmedSet);
         }
     }
 
@@ -850,6 +904,8 @@ class GameMode {
                 lineIdx:                this.activeLineIdx,
                 lineWords:              this.lineWords.slice(),
                 matchedSet:             new Map(this.matchedSet),
+                vadMatchedSet:          new Map(this.vadMatchedSet),
+                asrConfirmedSet:        new Set(this.asrConfirmedSet),
                 lineStartWordCount:     this.lineStartWordCount,
                 lineStartTranscriptPos: this.lineStartTranscriptPos,
                 wordTimings:            this.wordTimings,
@@ -1118,7 +1174,7 @@ class GameMode {
 
         // VAD optimistic scoring: if this line uses VAD mode and mic is active,
         // mark the hot word as hit immediately without waiting for ASR.
-        if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad) {
+        if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad && !this._suspended) {
             if (!this.matchedSet.has(newHot)) {
                 this.matchedSet.set(newHot, 1.0);
                 this.vadMatchedSet.set(newHot, 1.0);
@@ -1169,10 +1225,12 @@ class GameMode {
      * Score an outgoing line. Accepts explicit params so delayed calls can pass
      * a snapshot rather than relying on this.* (which will have advanced by then).
      */
-    _scoreLine(lineIdx, lineWords, matchedSet, lineHadAsrEvent) {
+    _scoreLine(lineIdx, lineWords, matchedSet, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet) {
         lineIdx    = (lineIdx    !== undefined) ? lineIdx    : this.activeLineIdx;
         lineWords  = (lineWords  !== undefined) ? lineWords  : this.lineWords;
         matchedSet = (matchedSet !== undefined) ? matchedSet : this.matchedSet;
+        vadMatchedSet    = vadMatchedSet    || this.vadMatchedSet;
+        asrConfirmedSet  = asrConfirmedSet  || this.asrConfirmedSet;
 
         const total = lineWords.length;
         if (total === 0) return;
@@ -1189,6 +1247,10 @@ class GameMode {
             var weight = (wordTimings[i] && wordTimings[i].weight) || 1.0;
             weightedTotal += weight;
             var matchScore = matchedSet.get ? matchedSet.get(i) : (matchedSet.has(i) ? 1.0 : 0);
+            // Downgrade VAD-only hits that were never confirmed by ASR
+            if (matchScore > 0 && vadMatchedSet && vadMatchedSet.has(i) && !asrConfirmedSet.has(i)) {
+                matchScore = 0.25;
+            }
             if (matchScore > 0) {
                 weightedMatched += weight * matchScore;
             }
@@ -1246,7 +1308,7 @@ class GameMode {
      * after the line change (the last-word timing race) can still be captured.
      * Any newly-matched words are lit green before scoring.
      */
-    _lateScoreLine(lineIdx, lineWords, matchedSet, lineStartWordCount, lineHadAsrEvent) {
+    _lateScoreLine(lineIdx, lineWords, matchedSet, lineStartWordCount, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet) {
         if (lineWords.length === 0) return;
 
         const spokenNow = normalizeWords(this.transcript);
@@ -1289,7 +1351,7 @@ class GameMode {
             }
         }
 
-        this._scoreLine(lineIdx, lineWords, matchedSet, lineHadAsrEvent);
+        this._scoreLine(lineIdx, lineWords, matchedSet, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet);
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────
@@ -1675,7 +1737,7 @@ function renderLyricsGameMode() {
 function updateLyrics() {
     if (lyrics.length === 0) return;
 
-    const t = audio.currentTime;
+    const t = audio.currentTime - (gameMode ? gameMode.lrcOffset : 0);
     let idx = -1;
     for (let i = 0; i < lyrics.length; i++) {
         if (lyrics[i].time <= t) idx = i;
@@ -1719,15 +1781,23 @@ function togglePlay() {
     if (audio.paused) {
         audio.play();
         playBtn.textContent = '⏸';
+        if (gameMode.active) gameMode.resume();
     } else {
         audio.pause();
         playBtn.textContent = '▶';
+        if (gameMode.active) gameMode.suspend();
     }
 }
 
 // Skip ±10s
-function skipBack() { audio.currentTime = Math.max(0, audio.currentTime - 10); }
-function skipFwd() { audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 10); }
+function skipBack() {
+    audio.currentTime = Math.max(0, audio.currentTime - 10);
+    if (gameMode.active) gameMode.onSeek();
+}
+function skipFwd() {
+    audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 10);
+    if (gameMode.active) gameMode.onSeek();
+}
 
 // Seek bar
 audio.addEventListener('timeupdate', () => {
@@ -1739,6 +1809,7 @@ audio.addEventListener('timeupdate', () => {
 seekBar.addEventListener('input', () => {
     if (audio.duration) {
         audio.currentTime = (seekBar.value / 100) * audio.duration;
+        if (gameMode.active) gameMode.onSeek();
     }
 });
 
@@ -1754,16 +1825,14 @@ function _updateOffsetDisplay() {
 document.getElementById('offsetMinus').addEventListener('click', function() {
     if (!gameMode) return;
     gameMode.lrcOffset = Math.max(-10, gameMode.lrcOffset - 0.5);
-    var vid = new URLSearchParams(window.location.search).get('v') || '';
-    localStorage.setItem('lrcOffset_' + vid, gameMode.lrcOffset);
+    localStorage.setItem('lrcOffset_' + _songKey(), gameMode.lrcOffset);
     _updateOffsetDisplay();
 });
 
 document.getElementById('offsetPlus').addEventListener('click', function() {
     if (!gameMode) return;
     gameMode.lrcOffset = Math.min(10, gameMode.lrcOffset + 0.5);
-    var vid = new URLSearchParams(window.location.search).get('v') || '';
-    localStorage.setItem('lrcOffset_' + vid, gameMode.lrcOffset);
+    localStorage.setItem('lrcOffset_' + _songKey(), gameMode.lrcOffset);
     _updateOffsetDisplay();
 });
 
@@ -1809,9 +1878,12 @@ audio.addEventListener('ended', function() {
             var _lastLineStart = gameMode.lineStartWordCount;
             var _lastMatched   = new Map(gameMode.matchedSet);
             var _lastHadAsr    = gameMode.lineHadAsrEvent;
+            var _lastVadMatched = new Map(gameMode.vadMatchedSet);
+            var _lastAsrConfirmed = new Set(gameMode.asrConfirmedSet);
             setTimeout(function() {
                 gameMode._lateScoreLine(
-                    _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart, _lastHadAsr
+                    _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart, _lastHadAsr,
+                    _lastVadMatched, _lastAsrConfirmed
                 );
             }, 800);
         }
@@ -1972,6 +2044,7 @@ function toggleGameMode() {
 
 function replayGame() {
     document.getElementById('gameModal').style.display = 'none';
+    gameMode.stop();  // reset active flag so start() doesn't no-op
     audio.currentTime = 0;
     audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
     gameMode.start();

@@ -350,6 +350,21 @@ MetaphoneLRU.prototype.reset = function() {
     this._cache.clear();
 };
 
+/**
+ * Returns true only when the spoken word is a pure ASR trailing-truncation of the target:
+ * target must start with spoken AND exactly 1 trailing character is missing.
+ * Used to gate edit-distance-2 matches so false positives like "less→lesson" are rejected
+ * while genuine truncations like "singin→singing" are accepted.
+ * @param {string} spoken
+ * @param {string} target
+ * @returns {boolean}
+ */
+function isEdit2PrefixTruncation(spoken, target) {
+    if (spoken.length >= target.length) return false;       // spoken must be shorter
+    if (target.length - spoken.length !== 1) return false; // exactly 1 char missing
+    return target.startsWith(spoken);
+}
+
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -369,5 +384,6 @@ if (typeof module !== 'undefined' && module.exports) {
         ADLIB_WORDS: ADLIB_WORDS,
         WORD_WEIGHTS: WORD_WEIGHTS,
         classifyWord: classifyWord,
+        isEdit2PrefixTruncation: isEdit2PrefixTruncation,
     };
 }
