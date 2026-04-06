@@ -464,6 +464,7 @@ class GameMode {
         this.matchedSet = new Map();
         this.vadMatchedSet = new Map();
         this.asrConfirmedSet = new Set();
+        this._lineComparisonCount = 0;   // total word comparisons attempted this line
         this.transcript = '';
         this.lineStartWordCount = 0;
         this.lineStartTranscriptPos = 0;
@@ -640,7 +641,7 @@ class GameMode {
                     finalText: finalText || null,
                     interim:   interim   || null,
                 });
-                self._logAsr(finalText ? 'final' : 'interim', finalText || interim, []);
+                self._logAsr(finalText ? 'final' : 'interim', finalText || interim, [], 'browser_sr');
                 self._debugLog('MATCH', {
                     lineIdx:     self.activeLineIdx,
                     targets:     self.lineWords.slice(),
@@ -761,6 +762,7 @@ class GameMode {
                 this.whisperBuffer = (this.whisperBuffer + ' ' + data.transcript).trim();
                 this.lineHadAsrEvent = true;
                 this._collectMatchesWhisper(this.whisperBuffer);
+                this._logAsr('final', data.transcript, data.words || [], 'whisper');
             }
             if (data.words && data.words.length > 0 && this.active) {
                 this._lastWhisperWords = data.words;
@@ -975,6 +977,7 @@ class GameMode {
         this.vadMatchedSet = new Map();
         this.asrConfirmedSet = new Set();
         this.lineHadAsrEvent = false;
+        this._lineComparisonCount = 0;
         this.whisperBuffer = '';
         this._telemetryLoggedMatches = new Set();
 
@@ -1043,6 +1046,7 @@ class GameMode {
             var targetPhonetic = this.wordTimings[li] ? this.wordTimings[li].phonetic : undefined;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
                 if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
+                this._lineComparisonCount++;
 
                 // Try multi-word contraction first (consumes multiple spoken words)
                 var consumed = multiWordContractionMatch(spoken, si, target);
@@ -1182,6 +1186,11 @@ class GameMode {
                 this.vadMatchedSet.set(newHot, 0.25);
                 this.lineHadAsrEvent = true;             // VAD activity counts as "user was trying"
                 this._updateWordSpans();
+                this._logMatch(
+                    this.wordTimings[newHot] ? this.wordTimings[newHot].word : '',
+                    this.lineWords[newHot] || '',
+                    'vad-provisional', -1, false, 0.25, true, newHot
+                );
             }
         }
     }
@@ -1217,7 +1226,12 @@ class GameMode {
                     }
                 }
                 this.matchedSet.set(this.hotWordIndex, 1.0);
-                if (this.vadMatchedSet.has(this.hotWordIndex)) this.asrConfirmedSet.add(this.hotWordIndex);
+                if (this.vadMatchedSet.has(this.hotWordIndex)) {
+                    this.asrConfirmedSet.add(this.hotWordIndex);
+                    this._logMatch(
+                        spoken[i], target, 'vad-confirmed', -1, false, 1.0, true, this.hotWordIndex
+                    );
+                }
                 return true;
             }
         }
@@ -1392,7 +1406,7 @@ class GameMode {
      * @param {string} text
      * @param {Array} wordTimestamps  - Whisper word-level timestamps or []
      */
-    _logAsr(type, text, wordTimestamps) {
+    _logAsr(type, text, wordTimestamps, source) {
         if (!this._telemetry) return;
         try {
             var tempoClass = 'medium';
@@ -1403,7 +1417,8 @@ class GameMode {
                 ts:             parseFloat((performance.now() / 1000).toFixed(3)),
                 lineIdx:        this.activeLineIdx,
                 lineTempo:      tempoClass,
-                type:           type,
+                type:           type,                           // still 'final' | 'interim'
+                source:         source || 'browser_sr',        // 'browser_sr' | 'whisper'
                 text:           text || '',
                 wordTimestamps: wordTimestamps || []
             });
@@ -1416,6 +1431,7 @@ class GameMode {
     _logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
         if (!this._telemetry) return;
         if (!window._kDebug) return;
+        if (score <= 0) return;   // suppress noise — log only successful matches
 
         // Smart filtering: only log first-time matches for words already confirmed matched.
         // Skip redundant re-checks for words already confirmed matched.
@@ -1523,7 +1539,8 @@ class GameMode {
                 lineTempo:    tempoClass,
                 expectedTimeMs: expectedMs,
                 earlyMs:      earlyMs,
-                lateMs:       lateMs
+                lateMs:       lateMs,
+                totalComparisons: this._lineComparisonCount,
             });
         } catch (e) { /* telemetry must never crash the game */ }
     }

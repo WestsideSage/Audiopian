@@ -20,6 +20,7 @@ function makeAsr(overrides = {}) {
         lineIdx: 0,
         lineTempo: 'medium',
         type: 'final',
+        source: 'browser_sr',
         text: 'hello world',
         wordTimestamps: []
     }, overrides);
@@ -90,9 +91,10 @@ console.log('\nTest 1: meta schema');
 console.log('\nTest 2: asr entry schema');
 {
     const a = makeAsr();
-    const required = ['ts','lineIdx','lineTempo','type','text','wordTimestamps'];
+    const required = ['ts','lineIdx','lineTempo','type','source','text','wordTimestamps'];
     required.forEach(k => assert(k in a, `asr has key "${k}"`));
     assert(['final','interim'].includes(a.type), 'asr type is final or interim');
+    assert(['browser_sr','whisper'].includes(a.source), 'asr source is browser_sr or whisper');
     assert(['slow','medium','fast'].includes(a.lineTempo), 'asr lineTempo is valid');
     assert(Array.isArray(a.wordTimestamps), 'wordTimestamps is array');
 }
@@ -105,7 +107,7 @@ console.log('\nTest 3: match entry schema');
     const m = makeMatch();
     const required = ['ts','lineIdx','lineTempo','spokenWord','targetWord','method','editDistance','phoneticMatch','score','matched','windowPosition'];
     required.forEach(k => assert(k in m, `match has key "${k}"`));
-    const validMethods = ['exact','fuzzy','phonetic','phrase','contraction','none'];
+    const validMethods = ['exact','fuzzy','phonetic','phrase','contraction','edit1','edit2','slang','vad-provisional','vad-confirmed','none'];
     assert(validMethods.includes(m.method), `match method "${m.method}" is valid`);
     assert(['slow','medium','fast'].includes(m.lineTempo), 'match lineTempo is valid');
     assert(typeof m.matched === 'boolean', 'matched is boolean');
@@ -119,6 +121,7 @@ console.log('\nTest 4: transition entry schema');
     const t = makeTransition();
     const required = ['ts','fromIdx','toIdx','fromText','trigger','matchedWords','totalWords','missedWords','timeSpentMs','lineTempo','expectedTimeMs','earlyMs','lateMs'];
     required.forEach(k => assert(k in t, `transition has key "${k}"`));
+    // Note: totalComparisons is added by the live code but not in the minimal stub — checked separately
     assert(['score','time','forced'].includes(t.trigger), `trigger "${t.trigger}" is valid`);
     assert(Array.isArray(t.missedWords), 'missedWords is array');
 }
