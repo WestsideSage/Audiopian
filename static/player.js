@@ -780,7 +780,30 @@ class GameMode {
         }
     }
 
+    /** Poll /whisper-status and update _whisperServerStatus. Returns a Promise. */
+    _checkWhisperServerStatus() {
+        return fetch('/whisper-status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                this._whisperServerStatus = {
+                    state:     data.status || 'unknown',
+                    reason:    data.error  || null,
+                    checkedAt: Date.now(),
+                };
+            }.bind(this))
+            .catch(function() { /* silent — best effort */ }.bind(this));
+    }
+
     async _sendChunkToWhisper(float32) {
+        // Circuit breaker: if server said it's loading, drop chunk and poll instead
+        if (this._whisperServerStatus.state === 'loading') {
+            this._chunksDroppedWhileLoading++;
+            // Poll once per dropped chunk (rate-limited by chunk cadence ~2s)
+            this._checkWhisperServerStatus();
+            return;
+        }
+
+        this._chunksDispatched++;
         this._whisperInFlight++;
         const wav = encodeWav(float32, 16000);
         try {
@@ -791,21 +814,49 @@ class GameMode {
             const resp = await fetch('/transcribe', {
                 method: 'POST',
                 body: wav,
-                headers: headers
+                headers: headers,
             });
-            if (!resp.ok) return;
+
+            if (resp.status === 503) {
+                this._chunksFailed503++;
+                // Enter circuit-breaker: server model not ready, pause dispatch
+                this._whisperServerStatus.state = 'loading';
+                this._checkWhisperServerStatus(); // async poll to detect when ready
+                return;
+            }
+            if (resp.status === 500) {
+                this._chunksFailed500++;
+                console.warn('[Whisper] transcription error (500) — continuing');
+                return;
+            }
+            if (!resp.ok) {
+                this._chunksFailed500++;
+                console.warn('[Whisper] unexpected HTTP', resp.status);
+                return;
+            }
+
             const data = await resp.json();
+            this._chunksSucceeded++;
+            this._whisperServerStatus.state = 'ready'; // confirmed working
+
             if (data.transcript && this.active) {
                 this.whisperBuffer = (this.whisperBuffer + ' ' + data.transcript).trim();
                 this.lineHadAsrEvent = true;
                 this._collectMatchesWhisper(this.whisperBuffer);
                 this._logAsr('final', data.transcript, data.words || [], 'whisper');
+                this._whisperResponses++;
+                if (data.words && data.words.length > 0) {
+                    this._whisperResponsesWithWords++;
+                    this._whisperWordsTotal += data.words.length;
+                }
             }
             if (data.words && data.words.length > 0 && this.active) {
                 this._lastWhisperWords = data.words;
             }
-        } catch (_) { /* fire-and-forget */ }
-        finally {
+        } catch (_err) {
+            this._chunksFailedNetwork++;
+            /* fire-and-forget — network errors are expected on flaky connections */
+        } finally {
             this._whisperInFlight = Math.max(0, this._whisperInFlight - 1);
         }
     }
