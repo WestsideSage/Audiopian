@@ -187,7 +187,7 @@ def _make_wav(num_samples=32000, sample_rate=16000):
     return buf.getvalue()
 
 
-def test_transcribe_returns_transcript(client):
+def test_transcribe_returns_transcript(client, monkeypatch):
     """Valid WAV body → 200 with transcript key."""
     mock_model = MagicMock()
     mock_segment = MagicMock()
@@ -195,42 +195,52 @@ def test_transcribe_returns_transcript(client):
     mock_segment.words = []
     mock_model.transcribe.return_value = ([mock_segment], None)
 
-    with patch('app.get_whisper_model', return_value=mock_model):
+    _app_module._whisper_state = 'ready'
+    monkeypatch.setattr(_app_module, '_whisper_model', mock_model)
+    try:
         resp = client.post('/transcribe', data=_make_wav(),
                            content_type='audio/wav')
+    finally:
+        _app_module._whisper_state = 'idle'
 
     assert resp.status_code == 200
     data = json.loads(resp.data)
     assert data['transcript'] == 'hello world'
 
 
-def test_transcribe_empty_body_returns_empty(client):
-    """Body shorter than 100 bytes → 200 with empty transcript, no model call."""
-    with patch('app.get_whisper_model') as mock_get:
+def test_transcribe_empty_body_returns_empty(client, monkeypatch):
+    """Body shorter than 100 bytes → 200 with empty transcript (model is not called)."""
+    mock_model = MagicMock()
+    _app_module._whisper_state = 'ready'
+    monkeypatch.setattr(_app_module, '_whisper_model', mock_model)
+    try:
         resp = client.post('/transcribe', data=b'tooshort',
                            content_type='audio/wav')
-
+    finally:
+        _app_module._whisper_state = 'idle'
     assert resp.status_code == 200
     data = json.loads(resp.data)
     assert data['transcript'] == ''
-    mock_get.assert_not_called()
+    mock_model.transcribe.assert_not_called()
 
 
-def test_transcribe_whisper_exception_returns_503(client):
-    """If the model raises, return 503 with empty transcript."""
+def test_transcribe_whisper_exception_returns_500(client, monkeypatch):
+    """If the model raises during transcription, return 500 (not 503)."""
     mock_model = MagicMock()
     mock_model.transcribe.side_effect = RuntimeError('CUDA OOM')
 
-    with patch('app.get_whisper_model', return_value=mock_model):
+    _app_module._whisper_state = 'ready'
+    monkeypatch.setattr(_app_module, '_whisper_model', mock_model)
+    try:
         resp = client.post('/transcribe', data=_make_wav(),
                            content_type='audio/wav')
+    finally:
+        _app_module._whisper_state = 'idle'
 
-    assert resp.status_code == 503
-    data = json.loads(resp.data)
-    assert data['transcript'] == ''
+    assert resp.status_code == 500
 
 
-def test_transcribe_with_hint(client):
+def test_transcribe_with_hint(client, monkeypatch):
     """When hint is provided via header, it should be passed as initial_prompt."""
     mock_model = MagicMock()
     mock_segment = MagicMock()
@@ -238,17 +248,21 @@ def test_transcribe_with_hint(client):
     mock_segment.words = []
     mock_model.transcribe.return_value = ([mock_segment], None)
 
-    with patch('app.get_whisper_model', return_value=mock_model):
+    _app_module._whisper_state = 'ready'
+    monkeypatch.setattr(_app_module, '_whisper_model', mock_model)
+    try:
         resp = client.post('/transcribe', data=_make_wav(),
                            content_type='audio/wav',
                            headers={'X-Lyric-Hint': 'gonna be alright'})
+    finally:
+        _app_module._whisper_state = 'idle'
 
     assert resp.status_code == 200
     call_kwargs = mock_model.transcribe.call_args
     assert call_kwargs[1].get('initial_prompt') == 'gonna be alright'
 
 
-def test_transcribe_without_hint(client):
+def test_transcribe_without_hint(client, monkeypatch):
     """Without hint header, initial_prompt should not be passed."""
     mock_model = MagicMock()
     mock_segment = MagicMock()
@@ -256,16 +270,20 @@ def test_transcribe_without_hint(client):
     mock_segment.words = []
     mock_model.transcribe.return_value = ([mock_segment], None)
 
-    with patch('app.get_whisper_model', return_value=mock_model):
+    _app_module._whisper_state = 'ready'
+    monkeypatch.setattr(_app_module, '_whisper_model', mock_model)
+    try:
         resp = client.post('/transcribe', data=_make_wav(),
                            content_type='audio/wav')
+    finally:
+        _app_module._whisper_state = 'idle'
 
     assert resp.status_code == 200
     call_kwargs = mock_model.transcribe.call_args
     assert 'initial_prompt' not in call_kwargs[1] or call_kwargs[1]['initial_prompt'] is None
 
 
-def test_transcribe_returns_word_timestamps(client):
+def test_transcribe_returns_word_timestamps(client, monkeypatch):
     """Response should include words array with text, start, end."""
     mock_model = MagicMock()
     mock_segment = MagicMock()
@@ -281,9 +299,13 @@ def test_transcribe_returns_word_timestamps(client):
     mock_segment.words = [mock_word1, mock_word2]
     mock_model.transcribe.return_value = ([mock_segment], None)
 
-    with patch('app.get_whisper_model', return_value=mock_model):
+    _app_module._whisper_state = 'ready'
+    monkeypatch.setattr(_app_module, '_whisper_model', mock_model)
+    try:
         resp = client.post('/transcribe', data=_make_wav(),
                            content_type='audio/wav')
+    finally:
+        _app_module._whisper_state = 'idle'
 
     assert resp.status_code == 200
     data = json.loads(resp.data)
@@ -291,3 +313,75 @@ def test_transcribe_returns_word_timestamps(client):
     assert len(data['words']) == 2
     assert data['words'][0] == {'text': 'hello', 'start': 0.0, 'end': 0.5}
     assert data['words'][1] == {'text': 'world', 'start': 0.5, 'end': 1.0}
+
+
+# ---------------------------------------------------------------------------
+# /whisper-status tests
+# ---------------------------------------------------------------------------
+import app as _app_module
+
+def test_whisper_status_returns_loading(client):
+    original = _app_module._whisper_state
+    _app_module._whisper_state = 'loading'
+    try:
+        resp = client.get('/whisper-status')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['status'] == 'loading'
+        assert 'model' in data
+        assert 'device' in data
+        assert data['error'] is None
+    finally:
+        _app_module._whisper_state = original
+
+def test_whisper_status_returns_ready(client):
+    original = _app_module._whisper_state
+    _app_module._whisper_state = 'ready'
+    try:
+        resp = client.get('/whisper-status')
+        data = resp.get_json()
+        assert data['status'] == 'ready'
+        assert data['error'] is None
+    finally:
+        _app_module._whisper_state = original
+
+def test_whisper_status_returns_error_with_reason(client):
+    orig_state = _app_module._whisper_state
+    orig_err   = _app_module._whisper_error
+    _app_module._whisper_state = 'error'
+    _app_module._whisper_error = 'CUDA not available'
+    try:
+        resp = client.get('/whisper-status')
+        data = resp.get_json()
+        assert data['status'] == 'error'
+        assert 'CUDA' in data['error']
+    finally:
+        _app_module._whisper_state = orig_state
+        _app_module._whisper_error = orig_err
+
+
+# ---------------------------------------------------------------------------
+# /transcribe readiness gate + 503/500 split tests
+# ---------------------------------------------------------------------------
+def test_transcribe_returns_503_when_model_not_ready(client):
+    original = _app_module._whisper_state
+    _app_module._whisper_state = 'loading'
+    try:
+        resp = client.post('/transcribe', data=b'\x00' * 200,
+                           content_type='audio/wav')
+        assert resp.status_code == 503
+        data = resp.get_json()
+        assert data['status'] == 'loading'
+    finally:
+        _app_module._whisper_state = original
+
+def test_transcribe_returns_500_on_transcription_error(client, monkeypatch):
+    _app_module._whisper_state = 'ready'
+    bad_model = type('M', (), {'transcribe': staticmethod(lambda *a, **k: (_ for _ in ()).throw(RuntimeError('GPU OOM')))})()
+    monkeypatch.setattr(_app_module, '_whisper_model', bad_model)
+    try:
+        resp = client.post('/transcribe', data=b'\x00' * 200,
+                           content_type='audio/wav')
+        assert resp.status_code == 500
+    finally:
+        _app_module._whisper_state = 'idle'
