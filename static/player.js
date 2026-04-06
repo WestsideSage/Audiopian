@@ -486,7 +486,7 @@ class GameMode {
         for (var li = 0; li < this.allWordTimings.length; li++) {
             var lt = this.allWordTimings[li];
             var relClass = classifyLineTempoRelative(lt.wps || 0, this.songTempoProfile);
-            lt.useVad = (relClass !== 'slow');
+            lt.useVad = true; // all tempo classes get provisional VAD; slow lines use stricter energy gate in updateHotWord
             lt.vadTempoClass = relClass;
         }
         // Restore per-song LRC offset from localStorage
@@ -1136,7 +1136,8 @@ class GameMode {
     updateHotWord() {
         // Refresh isSpeaking from AnalyserNode — real-time, not tied to Whisper chunk rate
         var vadRms = this._readVadRms();
-        this.isSpeaking = vadRms > this._energyThreshold;
+        var _vadMultiplier = (this.wordTimings && this.wordTimings.vadTempoClass === 'slow') ? 1.3 : 1.0;
+        this.isSpeaking = vadRms > (this._energyThreshold * _vadMultiplier);
 
         // Baseline calibration during first 2s of playback
         if (!this._vadBaselineReady) {
@@ -1176,8 +1177,9 @@ class GameMode {
         // mark the hot word as hit immediately without waiting for ASR.
         if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad && !this._suspended) {
             if (!this.matchedSet.has(newHot)) {
-                this.matchedSet.set(newHot, 1.0);
-                this.vadMatchedSet.set(newHot, 1.0);
+                this.matchedSet.set(newHot, 0.25);       // provisional — shows amber; upgradeable by ASR
+                this.vadMatchedSet.set(newHot, 0.25);
+                this.lineHadAsrEvent = true;             // VAD activity counts as "user was trying"
                 this._updateWordSpans();
             }
         }
@@ -1193,7 +1195,7 @@ class GameMode {
      */
     _matchHotWord(transcript) {
         if (this.hotWordIndex < 0 || this.hotWordIndex >= this.lineWords.length) return false;
-        if (this.matchedSet.has(this.hotWordIndex)) return false; // already matched
+        if (this.asrConfirmedSet.has(this.hotWordIndex)) return false; // already fully confirmed by ASR
 
         var target = this.lineWords[this.hotWordIndex];
         var targetPhonetic = this.wordTimings[this.hotWordIndex] ? this.wordTimings[this.hotWordIndex].phonetic : undefined;
