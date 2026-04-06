@@ -1556,7 +1556,8 @@ class GameMode {
 
         // Smart filtering: only log first-time matches for words already confirmed matched.
         // Skip redundant re-checks for words already confirmed matched.
-        if (matched && this._telemetryLoggedMatches && this._telemetryLoggedMatches.has(this.activeLineIdx + ':' + targetWord)) {
+        // Exempt vad-confirmed — a promotion is a distinct event from the earlier provisional.
+        if (method !== 'vad-confirmed' && matched && this._telemetryLoggedMatches && this._telemetryLoggedMatches.has(this.activeLineIdx + ':' + targetWord)) {
             return;  // Already logged a match for this word on this line
         }
 
@@ -1681,6 +1682,21 @@ class GameMode {
             if (this._telemetry.meta.whisperAvailable === null) {
                 this._telemetry.meta.whisperAvailable = !!(this._whisperStream);
             }
+            // Richer Whisper observability fields (supplement, not replace, whisperAvailable)
+            this._telemetry.meta.whisperStatusAtStart  = this._whisperServerStatus ? Object.assign({}, this._whisperServerStatus) : null;
+            this._telemetry.meta.whisperStatusFinal    = { state: this._whisperServerStatus ? this._whisperServerStatus.state : 'unknown', reason: this._whisperServerStatus ? this._whisperServerStatus.reason : null };
+            this._telemetry.meta.whisperTrackStatus    = this._whisperTrackStatus ? Object.assign({}, this._whisperTrackStatus) : null;
+            this._telemetry.meta.whisperChunkCounters  = {
+                dispatched:          this._chunksDispatched          || 0,
+                succeeded:           this._chunksSucceeded           || 0,
+                failed503:           this._chunksFailed503           || 0,
+                failed500:           this._chunksFailed500           || 0,
+                failedNetwork:       this._chunksFailedNetwork       || 0,
+                droppedWhileLoading: this._chunksDroppedWhileLoading || 0,
+            };
+            this._telemetry.meta.whisperResponses          = this._whisperResponses          || 0;
+            this._telemetry.meta.whisperResponsesWithWords = this._whisperResponsesWithWords  || 0;
+            this._telemetry.meta.whisperWordsTotal         = this._whisperWordsTotal          || 0;
             var json = JSON.stringify(this._telemetry, null, 2);
             var ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
             var name = 'karaokee-telemetry-' + ts + '.json';

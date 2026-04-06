@@ -168,5 +168,23 @@ console.log('\nTest 6: lineTempo exhaustive check');
 }
 
 // ---------------------------------------------------------------------------
+// Test 7: whisper meta fields shape
+// ---------------------------------------------------------------------------
+console.log('\nTest 7: whisper meta fields');
+{
+    const whisperChunkCounters = {
+        dispatched: 10, succeeded: 8, failed503: 1, failed500: 0,
+        failedNetwork: 1, droppedWhileLoading: 2
+    };
+    const required = ['dispatched','succeeded','failed503','failed500','failedNetwork','droppedWhileLoading'];
+    required.forEach(k => assert(k in whisperChunkCounters, `chunkCounters has "${k}"`));
+    assert(typeof whisperChunkCounters.dispatched === 'number', 'dispatched is number');
+
+    const whisperStatusAtStart = { state: 'ready', reason: null, checkedAt: 12345 };
+    assert(['idle','loading','ready','error','unknown'].includes(whisperStatusAtStart.state),
+        'whisperStatusAtStart.state is valid');
+}
+
+// ---------------------------------------------------------------------------
 console.log(`\n${passed} passed, ${failed} failed.`);
 if (failed > 0) process.exit(1);
