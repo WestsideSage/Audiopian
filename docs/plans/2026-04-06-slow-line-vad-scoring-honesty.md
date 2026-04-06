@@ -4,268 +4,363 @@
 
 **Goal:** Fix slow-line scoring failures (mean 0.664), make green/amber/red visuals reflect actual match quality, tighten edit2 to prefix-truncation only, and make VAD hits visible in telemetry.
 
-**Architecture:** Four independent, targeted changes to `player.js`, `match-helpers.js`, and `player.html`. No structural rewrite. Each task is independently testable and committable. The provisional VAD infrastructure (vadMatchedSet, asrConfirmedSet, _scoreLine downgrade) from the previous session is already in place — we're extending it, not replacing it.
+**Architecture:** Six targeted changes to `player.js`, `match-helpers.js`, and `player.html`. No structural rewrite. The provisional VAD infrastructure (vadMatchedSet, asrConfirmedSet, _scoreLine downgrade) from a previous session is already in place — this plan extends it. Four pre-review bugs have been corrected from the original plan draft (test assertion wrong, `wordsMatch()` gap, `_matchHotWord` early-return kills ASR upgrade, `_logAsr` type semantics).
 
 **Tech Stack:** Vanilla JS frontend (player.js, match-helpers.js, player.html), Node.js CJS for unit tests (tests/test_match_helpers.cjs)
 
 ---
 
-## Task 1: Edit2 Prefix-Truncation Helper + Test (TDD)
+## Task 1: Fix Pre-existing Test Failure + Edit2 Tightening (TDD)
 
-**Context:** `wordsMatchScore()` in `static/player.js:234` currently accepts any edit-distance-2 match. We need to restrict it to cases where the spoken word is a prefix of the target AND at most 1 char is missing (pure ASR truncation). We extract this as a helper in `match-helpers.js` so it can be unit tested in Node.js.
+**Context:** `tests/test_match_helpers.cjs` currently fails before any new code is written. `maxEditDistance(10)` asserts `3` but the function correctly returns `2` (max is intentionally capped at 2 for word matching). Fix the wrong test assertion first. Then add `isEdit2PrefixTruncation` and apply it to **both** `wordsMatch()` and `wordsMatchScore()` — the plan originally only targeted `wordsMatchScore()`, leaving the hot-word and overlap paths (which use `wordsMatch()`) still permissive.
 
 **Files:**
-- Modify: `static/match-helpers.js` (add helper + export)
-- Modify: `tests/test_match_helpers.cjs` (add tests)
-- Modify: `static/player.js:234` (use helper)
+- Modify: `tests/test_match_helpers.cjs` (fix wrong assertion, add new tests)
+- Modify: `static/match-helpers.js` (add `isEdit2PrefixTruncation` + export)
+- Modify: `static/player.js:188` (`wordsMatch` edit2 branch)
+- Modify: `static/player.js:234` (`wordsMatchScore` edit2 branch)
 
 ---
 
-**Step 1: Write the failing tests in `tests/test_match_helpers.cjs`**
+**Step 1: Verify the pre-existing failure**
 
-Append to the end of the file (before any `console.log('All ... passed')` line):
-
-```js
-// --- isEdit2PrefixTruncation tests ---
-var isEdit2PrefixTruncation = fakeModule.exports.isEdit2PrefixTruncation;
-
-// Should accept: spoken is prefix, only 1 char missing
-assert.strictEqual(isEdit2PrefixTruncation('rhyth', 'rhythm'), true,  'rhyth→rhythm: prefix, diff=1');
-assert.strictEqual(isEdit2PrefixTruncation('singin', 'singing'), true, 'singin→singing: prefix, diff=1');
-
-// Should reject: diff > 1 (2+ chars missing)
-assert.strictEqual(isEdit2PrefixTruncation('fol',  'folks'),  false, 'fol→folks: prefix but diff=2');
-assert.strictEqual(isEdit2PrefixTruncation('less', 'lesson'), false, 'less→lesson: prefix but diff=2');
-
-// Should reject: not a prefix at all
-assert.strictEqual(isEdit2PrefixTruncation('cat',  'catch'),  false, 'cat→catch: NOT a prefix (c-a-t vs c-a-t-c-h, diff=2 but target.startsWith(spoken) is true... wait)');
+```bash
+node tests/test_match_helpers.cjs
 ```
 
-Wait — `catch`.startsWith(`cat`) is true, and diff is 2 (`cat`=3, `catch`=5). So `cat→catch` should be rejected by the diff=2 > 1 rule. Let fix the test comment:
+Expected: fails at `maxEditDistance(10)` — `2 !== 3`.
+
+---
+
+**Step 2: Fix the wrong assertion in `tests/test_match_helpers.cjs`**
+
+Find the `maxEditDistance` test block (around line 97). The function implementation in `match-helpers.js` is:
 
 ```js
-// --- isEdit2PrefixTruncation tests ---
+function maxEditDistance(len) {
+    if (len <= 6) return 1;
+    return 2;   // never returns 3 — the assertions for 10 and 15 are wrong
+}
+```
+
+Change the two wrong assertions:
+
+```js
+// BEFORE (wrong — function never returns 3):
+assert.strictEqual(maxEditDistance(10), 3);
+assert.strictEqual(maxEditDistance(15), 3);
+
+// AFTER (correct):
+assert.strictEqual(maxEditDistance(10), 2);
+assert.strictEqual(maxEditDistance(15), 2);
+```
+
+---
+
+**Step 3: Run test suite — expect pass now**
+
+```bash
+node tests/test_match_helpers.cjs
+```
+
+Expected: all existing tests pass.
+
+---
+
+**Step 4: Append new failing tests for `isEdit2PrefixTruncation`**
+
+Add to the end of `tests/test_match_helpers.cjs` (after all existing tests):
+
+```js
+// --- isEdit2PrefixTruncation ---
 var isEdit2PrefixTruncation = fakeModule.exports.isEdit2PrefixTruncation;
 
-// Accept: prefix AND diff === 1
+// Accept: spoken is prefix of target AND exactly 1 char missing
 assert.strictEqual(isEdit2PrefixTruncation('rhyth',  'rhythm'),  true,  'rhyth→rhythm prefix diff=1');
 assert.strictEqual(isEdit2PrefixTruncation('singin', 'singing'), true,  'singin→singing prefix diff=1');
 assert.strictEqual(isEdit2PrefixTruncation('keepin', 'keeping'), true,  'keepin→keeping prefix diff=1');
 
-// Reject: prefix but diff > 1
-assert.strictEqual(isEdit2PrefixTruncation('fol',   'folks'),   false, 'fol→folks prefix diff=2');
-assert.strictEqual(isEdit2PrefixTruncation('less',  'lesson'),  false, 'less→lesson prefix diff=2');
-assert.strictEqual(isEdit2PrefixTruncation('cat',   'catch'),   false, 'cat→catch prefix diff=2');
+// Reject: prefix but diff > 1 (2+ chars missing)
+assert.strictEqual(isEdit2PrefixTruncation('fol',   'folks'),   false, 'fol→folks diff=2');
+assert.strictEqual(isEdit2PrefixTruncation('less',  'lesson'),  false, 'less→lesson diff=2');
+assert.strictEqual(isEdit2PrefixTruncation('cat',   'catch'),   false, 'cat→catch diff=2');
 
 // Reject: not a prefix
 assert.strictEqual(isEdit2PrefixTruncation('hat',   'cat'),     false, 'hat→cat not a prefix');
 assert.strictEqual(isEdit2PrefixTruncation('work',  'words'),   false, 'work→words not a prefix');
 
-// Reject: spoken longer than target (no truncation)
+// Reject: spoken longer than target
 assert.strictEqual(isEdit2PrefixTruncation('rhythm', 'rhyth'),  false, 'rhythm→rhyth spoken longer');
 
 console.log('isEdit2PrefixTruncation: 9 tests passed');
 ```
 
-**Step 2: Run to verify tests FAIL**
+---
+
+**Step 5: Run to verify new tests FAIL**
 
 ```bash
 node tests/test_match_helpers.cjs
 ```
 
-Expected: `ReferenceError: isEdit2PrefixTruncation is not a function` or `TypeError`
+Expected: `TypeError: isEdit2PrefixTruncation is not a function` (or ReferenceError).
 
 ---
 
-**Step 3: Add the helper to `static/match-helpers.js`**
+**Step 6: Add helper to `static/match-helpers.js`**
 
-Find the end of the file just before the `if (typeof module !== 'undefined' && module.exports)` block and add:
+Find the end of `match-helpers.js` just before the `if (typeof module !== 'undefined' && module.exports)` block. Add:
 
 ```js
 /**
- * Returns true if spoken is a pure prefix-truncation of target:
- * the target starts with the spoken word AND only 1 trailing char is missing.
- * Used to gate edit-distance-2 matches to genuine ASR truncation artifacts.
- * @param {string} spoken - normalized spoken word
- * @param {string} target - normalized target lyric word
+ * Returns true only when the spoken word is a pure ASR trailing-truncation of the target:
+ * target must start with spoken AND exactly 1 trailing character is missing.
+ * Used to gate edit-distance-2 matches so false positives like "less→lesson" are rejected
+ * while genuine truncations like "singin→singing" are accepted.
+ * @param {string} spoken
+ * @param {string} target
  * @returns {boolean}
  */
 function isEdit2PrefixTruncation(spoken, target) {
-    if (spoken.length >= target.length) return false;          // spoken not shorter
-    if (target.length - spoken.length !== 1) return false;    // must be exactly 1 char missing
+    if (spoken.length >= target.length) return false;       // spoken must be shorter
+    if (target.length - spoken.length !== 1) return false; // exactly 1 char missing
     return target.startsWith(spoken);
 }
 ```
 
-Then add it to the exports object at the bottom:
-
-```js
-// Find:
-module.exports = { classifyTempo ... };
-// Add isEdit2PrefixTruncation to the export object
-```
-
-The existing export block is in `sync-helpers.js`, not `match-helpers.js`. In `match-helpers.js` find the export block (the `if (typeof module !== 'undefined' && module.exports)` section) and add `isEdit2PrefixTruncation` to it. If there is no export block, add:
+Then add `isEdit2PrefixTruncation` to the existing export object at the bottom of the file. The export block looks like:
 
 ```js
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-        CONTRACTION_MAP, REVERSE_CONTRACTION_MAP,
-        contractionsMatch, multiWordContractionMatch,
-        PHRASE_EQUIV_MAP, phraseMatch,
-        FILLER_WORDS, WORD_WEIGHTS,
-        slangMatch, classifyWord,
-        maxEditDistance, skipFuzzyMatch,
-        MetaphoneLRU,
-        isEdit2PrefixTruncation,
+        // ... existing exports ...
+        isEdit2PrefixTruncation,  // ADD THIS
     };
 }
 ```
 
-Check the actual export block in match-helpers.js first — add `isEdit2PrefixTruncation` to whatever is already there.
+---
 
-**Step 4: Run tests — expect pass**
+**Step 7: Run tests — expect 9 new tests pass**
 
 ```bash
 node tests/test_match_helpers.cjs
 ```
 
-Expected: `isEdit2PrefixTruncation: 9 tests passed` (plus all prior tests passing)
+Expected: all tests pass including `isEdit2PrefixTruncation: 9 tests passed`.
 
 ---
 
-**Step 5: Use the helper in `static/player.js:234`**
+**Step 8: Apply the guard in `wordsMatchScore()` (`static/player.js` ~line 234)**
 
-Find the edit-distance block in `wordsMatchScore()` (around line 231–235):
-
+Find:
 ```js
-// BEFORE:
 if (dist === 1) return { score: 0.75, method: 'edit1' };
 if (dist === 2) return { score: 0.4,  method: 'edit2' };
 ```
 
-Replace the `dist === 2` line only:
-
+Replace the `dist === 2` line:
 ```js
 if (dist === 1) return { score: 0.75, method: 'edit1' };
 if (dist === 2 && isEdit2PrefixTruncation(spoken, target)) return { score: 0.4, method: 'edit2' };
 ```
 
-`isEdit2PrefixTruncation` is already in scope because `match-helpers.js` is loaded before `player.js` in `player.html`. Verify the `<script>` load order in player.html — `match-helpers.js` must come first.
+---
 
-**Step 6: Run full test suite**
+**Step 9: Apply the guard in `wordsMatch()` (`static/player.js` ~line 186)**
+
+`wordsMatch()` is the boolean variant used by `_matchPrevLine` (line 809) and `_matchHotWord` (line 1203). It currently accepts any edit-distance-2 match without restriction. Find:
+
+```js
+if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
+    var maxDist = maxEditDistance(Math.min(spoken.length, target.length));
+    if (Math.abs(spoken.length - target.length) <= maxDist && editDistance(spoken, target) <= maxDist) return true;
+}
+```
+
+Replace:
+
+```js
+if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
+    var maxDist = maxEditDistance(Math.min(spoken.length, target.length));
+    var edDist  = (Math.abs(spoken.length - target.length) <= maxDist)
+                  ? editDistance(spoken, target) : Infinity;
+    if (edDist === 1) return true;
+    if (edDist === 2 && isEdit2PrefixTruncation(spoken, target)) return true;
+}
+```
+
+This makes the boolean path consistent with `wordsMatchScore()`.
+
+---
+
+**Step 10: Verify `isEdit2PrefixTruncation` is in scope**
+
+In `player.html`, check that `match-helpers.js` is loaded via `<script>` before `player.js`. If not, move it earlier. `isEdit2PrefixTruncation` is a plain function in global scope after match-helpers.js loads.
+
+---
+
+**Step 11: Run full test suite**
 
 ```bash
 node tests/test_match_helpers.cjs && python -m pytest tests/ -v
 ```
 
-Expected: all pass, 1 skipped
+Expected: all JS tests pass + 32 Python passed, 1 skipped.
 
-**Step 7: Commit**
+**Step 12: Commit**
 
 ```bash
 git add static/match-helpers.js static/player.js tests/test_match_helpers.cjs
-git commit -m "fix: tighten edit2 matching to prefix-truncation only
+git commit -m "fix: tighten edit2 to prefix-truncation only across all match paths
 
-Restricts edit-distance-2 matches to cases where the spoken word
-is a strict prefix of the target with exactly 1 trailing char missing.
-Eliminates false positives like less->lesson while preserving genuine
-ASR truncation artifacts like singin->singing."
+- Fix wrong test assertion: maxEditDistance returns 2 (not 3) for long words
+- Add isEdit2PrefixTruncation helper: accept edit2 only when spoken is a
+  prefix of target with exactly 1 trailing char missing
+- Apply guard to both wordsMatchScore() and wordsMatch() so hot-word,
+  overlap, and scored paths all reject the same false positives"
 ```
 
 ---
 
-## Task 2: Enable Provisional VAD for Slow Lines
+## Task 2: Enable VAD for Slow Lines + Fix Three Correctness Gaps
 
-**Context:** `static/player.js:486` sets `lt.useVad = (relClass !== 'slow')`, which disables all VAD credit for slow lines. This is the root cause of the 0.664 mean slow-line score. We remove the exclusion and add a 1.3× energy multiplier for slow lines to compensate for the greater noise risk on lines with long inter-word pauses.
+**Context:** Three code issues must be fixed together — they are all part of making slow-line VAD actually work:
+
+1. `lt.useVad = (relClass !== 'slow')` — slow lines have no VAD, root cause of 0.664 mean
+2. VAD hits never set `lineHadAsrEvent = true` — `_scoreLine` line 1236 skips any line where this is false, so VAD-only slow lines are silently scored as 0 even with hits in `matchedSet`
+3. `_matchHotWord()` line 1193 returns early if `matchedSet.has(hotWordIndex)` — once a word is provisionally VAD-matched (0.25 in matchedSet), ASR can never upgrade it to green because the function bails before doing any work
 
 **Files:**
-- Modify: `static/player.js:486` (useVad assignment)
-- Modify: `static/player.js` in `updateHotWord()` (energy threshold guard)
+- Modify: `static/player.js` — three locations
 
-No unit tests possible (browser AudioContext dependency). Verify via telemetry after implementation.
+No unit tests for browser AudioContext logic. Verify via manual smoke check and telemetry.
 
 ---
 
-**Step 1: Change VAD mode assignment at player.js:486**
+**Step 1: Change VAD mode assignment (~line 486)**
 
 Find:
 ```js
 lt.useVad = (relClass !== 'slow');
 ```
 
-Replace with:
+Replace:
 ```js
-lt.useVad = true; // all tempo classes get provisional VAD; slow lines use stricter energy gate below
+lt.useVad = true; // all tempo classes get provisional VAD; slow lines use stricter energy gate in updateHotWord
 ```
 
 ---
 
-**Step 2: Add slow-line energy multiplier in `updateHotWord()`**
+**Step 2: Add slow-line energy multiplier in `updateHotWord()` (~line 1136)**
 
-Find `updateHotWord()` (around line 1133). Find the line that reads:
+Find the line that sets `isSpeaking`:
 ```js
 this.isSpeaking = vadRms > this._energyThreshold;
 ```
 
-Replace it with:
-
+Replace:
 ```js
-var _slowMultiplier = (this.wordTimings && this.wordTimings.vadTempoClass === 'slow') ? 1.3 : 1.0;
-this.isSpeaking = vadRms > (this._energyThreshold * _slowMultiplier);
+var _vadMultiplier = (this.wordTimings && this.wordTimings.vadTempoClass === 'slow') ? 1.3 : 1.0;
+this.isSpeaking = vadRms > (this._energyThreshold * _vadMultiplier);
 ```
-
-This means slow lines require 30% more mic energy before a word is credited, reducing noise-triggered false positives on quiet sections.
 
 ---
 
-**Step 3: Run test suite (sanity check — no JS tests for this, but Python must still pass)**
+**Step 3: Set `lineHadAsrEvent = true` on VAD hit**
+
+In `updateHotWord()`, find the VAD optimistic scoring block:
+```js
+if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad && !this._suspended) {
+    if (!this.matchedSet.has(newHot)) {
+        this.matchedSet.set(newHot, 1.0);
+        this.vadMatchedSet.set(newHot, 1.0);
+        this._updateWordSpans();
+    }
+}
+```
+
+Replace the inner block only:
+```js
+if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad && !this._suspended) {
+    if (!this.matchedSet.has(newHot)) {
+        this.matchedSet.set(newHot, 0.25);       // provisional — shows amber; upgradeable by ASR
+        this.vadMatchedSet.set(newHot, 0.25);
+        this.lineHadAsrEvent = true;             // VAD activity counts as "user was trying"
+        this._updateWordSpans();
+    }
+}
+```
+
+Note: the score is stored as `0.25` (not `1.0`) so `_updateWordSpans` will immediately show amber for the provisional hit. The existing `_scoreLine` downgrade guard (checking `vadMatchedSet && !asrConfirmedSet`) remains correct — an unconfirmed VAD hit stays at 0.25 in the score.
+
+---
+
+**Step 4: Fix `_matchHotWord()` early return so ASR can upgrade provisional VAD hits**
+
+Find `_matchHotWord()` (~line 1191):
+```js
+_matchHotWord(transcript) {
+    if (this.hotWordIndex < 0 || this.hotWordIndex >= this.lineWords.length) return false;
+    if (this.matchedSet.has(this.hotWordIndex)) return false; // already matched
+```
+
+The second guard (`matchedSet.has`) prevents ASR from ever upgrading a VAD provisional hit — once 0.25 is in matchedSet, this bails immediately. Change it to only bail if already ASR-confirmed:
+
+```js
+_matchHotWord(transcript) {
+    if (this.hotWordIndex < 0 || this.hotWordIndex >= this.lineWords.length) return false;
+    if (this.asrConfirmedSet.has(this.hotWordIndex)) return false; // already fully confirmed by ASR
+```
+
+This allows the function to proceed and upgrade the matchedSet entry from 0.25 → 1.0 when ASR produces a match. The existing line `this.matchedSet.set(this.hotWordIndex, 1.0)` already handles the upgrade.
+
+---
+
+**Step 5: Run test suite**
 
 ```bash
 python -m pytest tests/ -v
 ```
 
-Expected: 32 passed, 1 skipped
+Expected: 32 passed, 1 skipped.
 
-**Step 4: Commit**
+**Step 6: Commit**
 
 ```bash
 git add static/player.js
-git commit -m "fix: enable provisional VAD for slow lines with stricter energy gate
+git commit -m "fix: enable provisional VAD for slow lines — three correctness gaps
 
-Slow lines previously had useVad=false, leaving them entirely dependent
-on ASR interim transcripts. 80/84 sub-50% lines in telemetry were slow.
-Now all lines get provisional VAD credit (0.25, shown as amber after
-next task). Slow lines apply a 1.3x energy multiplier to compensate for
-noise risk on lines with long inter-word pauses."
+- Enable useVad=true for all lines; slow lines get 1.3x energy threshold
+- VAD hits set lineHadAsrEvent=true so _scoreLine no longer skips lines
+  where ASR produced nothing but user was audibly singing
+- Store provisional VAD score as 0.25 (not 1.0) for immediate amber display
+- Fix _matchHotWord early return: check asrConfirmedSet not matchedSet,
+  so ASR can upgrade provisional 0.25 VAD hits to full green 1.0"
 ```
 
 ---
 
 ## Task 3: Two-Color Visual System (green / amber)
 
-**Context:** All matched words currently show identical green. We add amber (`matched-partial`) for words with score 0.25–0.74, so edit2 truncations and unconfirmed VAD hits are visually distinguished from fully correct matches.
-
-There are **four** places in player.js that set the `matched` class on word spans. All four need updating.
+**Context:** All matched words show identical green. Add amber (`matched-partial`) for words with score 0.25–0.74. There are four places in player.js that set the `matched` class — all need updating. CSS lives in `player.html` (inline styles), not `style.css`.
 
 **Files:**
-- Modify: `static/player.html` (add `.word-span.matched-partial` CSS, around line 123–139)
+- Modify: `static/player.html` (~line 123, inline `<style>`)
 - Modify: `static/player.js` — four locations
 
 ---
 
 **Step 1: Add amber CSS to `static/player.html`**
 
-Find the `.word-span.matched` block (around line 123):
-
+Find:
 ```css
 .word-span.matched {
     color: #00e676;
 }
 ```
 
-Add the new rule directly after it:
-
+Add directly after it:
 ```css
 .word-span.matched-partial {
     color: #f5a623;
@@ -275,9 +370,9 @@ Add the new rule directly after it:
 
 ---
 
-**Step 2: Update `_updateWordSpans()` — the primary render path (player.js ~line 1100)**
+**Step 2: Update `_updateWordSpans()` — primary render path (~line 1102)**
 
-Find the block:
+Find:
 ```js
 span.classList.remove('matched', 'missed');
 if (this.matchedSet.has(wi)) {
@@ -290,17 +385,12 @@ if (this.matchedSet.has(wi)) {
 }
 ```
 
-Replace with:
-
+Replace:
 ```js
 span.classList.remove('matched', 'matched-partial', 'missed');
-var _score = this.matchedSet.get(wi);
-if (_score !== undefined) {
-    if (_score >= 0.75) {
-        span.classList.add('matched');
-    } else {
-        span.classList.add('matched-partial');
-    }
+var _wScore = this.matchedSet.get(wi);
+if (_wScore !== undefined) {
+    span.classList.add(_wScore >= 0.75 ? 'matched' : 'matched-partial');
     if (this.asrConfirmedSet.has(wi) && !span.classList.contains('asr-confirmed')) {
         span.classList.add('asr-confirmed');
     }
@@ -311,15 +401,14 @@ if (_score !== undefined) {
 
 ---
 
-**Step 3: Update `_lateScoreLine()` — late-arriving word spans (player.js ~line 1344)**
+**Step 3: Update `_lateScoreLine()` span greening (~line 1344)**
 
-Find the block inside `_lateScoreLine` that lights spans green:
+Find (inside `_lateScoreLine`):
 ```js
 if (span) { span.classList.remove('missed'); span.classList.add('matched'); }
 ```
 
-Replace with:
-
+Replace:
 ```js
 if (span) {
     span.classList.remove('missed');
@@ -329,60 +418,65 @@ if (span) {
 
 ---
 
-**Step 4: Update the reset path in `stop()` / `renderLyricsGameMode()` (player.js ~line 1021)**
+**Step 4: Update the span reset in `renderLyricsGameMode()` / `stop()` (~line 1021)**
 
-Find the span reset loop (likely has `.remove('matched', 'missed', 'asr-confirmed')`):
+Find:
 ```js
 s.classList.remove('matched', 'missed', 'asr-confirmed');
 ```
 
-Add `matched-partial` to the remove list:
+Replace:
 ```js
 s.classList.remove('matched', 'matched-partial', 'missed', 'asr-confirmed');
 ```
 
-Search for all other `.classList.remove` calls referencing `'matched'` in player.js to ensure none are missed:
+Search for any other `.classList.remove` calls that reference `'matched'` and add `'matched-partial'` to them:
 ```bash
-grep -n "classList.remove.*matched\|classList.add.*matched" static/player.js
+grep -n "classList.remove.*matched" static/player.js
 ```
-For any remaining hardcoded `.add('matched')` that come from ASR-confirmed paths (like `_matchPrevLine` at line 818 which sets score 1.0 before adding the class), leave as `'matched'` — those are always full-credit.
 
 ---
 
-**Step 5: Run test suite**
+**Step 5: Verify `_matchPrevLine` hardcoded `'matched'` is correct**
+
+`_matchPrevLine` (~line 818) calls `prev.matchedSet.set(li, 1.0)` before `span.classList.add('matched')`. Since score is 1.0 ≥ 0.75, hardcoded `'matched'` is correct — leave it as-is.
+
+---
+
+**Step 6: Run test suite**
 
 ```bash
 python -m pytest tests/ -v
 ```
 
-Expected: 32 passed, 1 skipped
+Expected: 32 passed, 1 skipped.
 
-**Step 6: Commit**
+**Step 7: Commit**
 
 ```bash
 git add static/player.html static/player.js
 git commit -m "feat: two-color word feedback — green >=0.75, amber 0.25-0.74
 
-Green (matched) = exact, slang, contraction, phonetic, edit1, ASR-confirmed.
-Amber (matched-partial) = unconfirmed VAD provisional (0.25), edit2 prefix
-truncation (0.4). Users can now see the difference between a strong match
-and a marginal one without the score feeling arbitrary."
+Green = exact, slang, contraction, phonetic, edit1, ASR-confirmed VAD.
+Amber = unconfirmed VAD provisional (0.25), edit2 prefix truncation (0.4).
+Applied to all four span-update paths: _updateWordSpans, _lateScoreLine,
+renderLyricsGameMode reset, and span removal guards."
 ```
 
 ---
 
 ## Task 4: Fix "Perfect Line" Counter
 
-**Context:** `_scoreLine()` at player.js line 1285 counts a line as "perfect" when `matched === total`, where `matched` is a boolean count of any word in `matchedSet`. A line where every word is edit2 (0.4 weighted) shows as "perfect" at 40% weighted score. Fix: require ≥ 90% of weighted credit.
+**Context:** `_scoreLine()` counts a line as "perfect" using `matched === total` (boolean count of any matchedSet entry). A line where every word is amber (edit2, 0.4 each) incorrectly counts as perfect at 40% weighted score. Fix to require ≥ 90% weighted credit.
 
 **Files:**
-- Modify: `static/player.js:1285`
+- Modify: `static/player.js` (~line 1285)
 
 ---
 
-**Step 1: Find and update the perfect-line check**
+**Step 1: Find and update the condition in `_scoreLine()`**
 
-Find (around line 1285):
+Find:
 ```js
 if (matched === total) {
     this.perfectLines++;
@@ -393,8 +487,7 @@ if (matched === total) {
 }
 ```
 
-Replace the condition only:
-
+Replace the condition only (`weightedMatched` and `weightedTotal` are already computed above this block):
 ```js
 if (weightedTotal > 0 && weightedMatched >= weightedTotal * 0.9) {
     this.perfectLines++;
@@ -405,8 +498,6 @@ if (weightedTotal > 0 && weightedMatched >= weightedTotal * 0.9) {
 }
 ```
 
-Note: `weightedMatched` and `weightedTotal` are already computed in the lines above this block in `_scoreLine`. They are in scope. No new variables needed.
-
 ---
 
 **Step 2: Run test suite**
@@ -415,7 +506,7 @@ Note: `weightedMatched` and `weightedTotal` are already computed in the lines ab
 python -m pytest tests/ -v
 ```
 
-Expected: 32 passed, 1 skipped
+Expected: 32 passed, 1 skipped.
 
 **Step 3: Commit**
 
@@ -424,207 +515,243 @@ git add static/player.js
 git commit -m "fix: perfect-line counter requires 90% weighted score
 
 Previously counted any line as perfect if all words were in matchedSet,
-regardless of score. A line of all edit2 matches (0.4 each) would show
-as perfect at 40% weighted credit. Now requires weightedMatched >= 90%
-of weightedTotal — consistent with what the percentage score reflects."
+regardless of match quality. A line of all amber (0.4) words no longer
+counts as perfect. Consistent with what the percentage score reflects."
 ```
 
 ---
 
-## Task 5: VAD Telemetry Logging
+## Task 5: Telemetry Fixes
 
-**Context:** Three telemetry blind spots confirmed by Codex:
-1. VAD provisional hits produce zero match log entries (98.5% of logs are method:'none' noise)
-2. `_logMatch` is called with method:'none' for every failed comparison — pure noise
-3. Browser SR always logs empty `wordTimestamps: []` — can't distinguish Whisper contribution
+**Context:** Four telemetry issues:
+1. VAD provisional hits produce zero match log entries
+2. ASR confirmation of VAD hits can now log correctly (Task 2 fixed `_matchHotWord`)
+3. `_logAsr` `type` field is overloaded — Whisper should be a `source` field, not a `type` value (`test_telemetry.cjs` asserts `type` is `'final'|'interim'`)
+4. 98.5% of match records are `method:'none'` noise; replace per-record logging with a per-line `totalComparisons` counter in the transition log
 
 **Files:**
-- Modify: `static/player.js` — three locations
+- Modify: `static/player.js` — four locations
+- Modify: `tests/test_telemetry.cjs` (add `source` field assertion)
 
 ---
 
-**Step 1: Suppress `method:'none'` entries inside `_logMatch`**
+**Step 1: Log VAD provisional hits in `updateHotWord()`**
 
-Find `_logMatch` (around line 1407). It has this signature:
-```js
-_logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
-```
-
-At the very top of the function body, add an early return for non-matches:
-
-```js
-_logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
-    if (score <= 0) return;  // suppress noise — only log actual matches
-    // ... rest of existing body unchanged
-```
-
-This alone drops the 98.5% method:'none' ratio to near-zero.
-
----
-
-**Step 2: Log VAD provisional hits in `updateHotWord()`**
-
-Find the VAD optimistic scoring block (around line 1174):
-```js
-if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad && !this._suspended) {
-    if (!this.matchedSet.has(newHot)) {
-        this.matchedSet.set(newHot, 1.0);
-        this.vadMatchedSet.set(newHot, 1.0);
-        this._updateWordSpans();
-    }
-}
-```
-
-Note: this block still sets score 1.0 in `matchedSet` — the `_scoreLine` downgrade to 0.25 for unconfirmed VAD happens at scoring time. For visual consistency with the new two-color system, the provisional hit should be stored as 0.25 so `_updateWordSpans()` shows amber immediately.
-
-Replace the block:
+In the VAD scoring block (just updated in Task 2), add a `_logMatch` call after the matchedSet update:
 
 ```js
 if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad && !this._suspended) {
     if (!this.matchedSet.has(newHot)) {
-        this.matchedSet.set(newHot, 0.25);          // provisional — shows amber
+        this.matchedSet.set(newHot, 0.25);
         this.vadMatchedSet.set(newHot, 0.25);
+        this.lineHadAsrEvent = true;
         this._updateWordSpans();
-        this._logMatch(
+        this._logMatch(                                    // ADD THIS
             this.wordTimings[newHot] ? this.wordTimings[newHot].word : '',
             this.lineWords[newHot] || '',
-            'vad-provisional', -1, false, 0.25, true,
-            newHot
+            'vad-provisional', -1, false, 0.25, true, newHot
         );
     }
 }
 ```
 
-**Important:** The `_scoreLine` downgrade for unconfirmed VAD was previously written to check `vadMatchedSet.has(i)` and set score to 0.25. With the provisional value now stored as 0.25 rather than 1.0, the downgrade logic in `_scoreLine` still works correctly — unconfirmed VAD hits will have score 0.25 in both `matchedSet` and `vadMatchedSet`, so the downgrade is a no-op (0.25 stays 0.25). Verify by re-reading the `_scoreLine` downgrade block added in the previous session:
-
-```js
-// In _scoreLine (previously added):
-if (matchScore > 0 && vadMatchedSet && vadMatchedSet.has(i) && !asrConfirmedSet.has(i)) {
-    matchScore = 0.25;
-}
-```
-
-This is still correct and consistent.
-
 ---
 
-**Step 3: Log VAD confirmation in `_matchHotWord()`**
+**Step 2: Log VAD confirmation in `_matchHotWord()`**
 
-Find `_matchHotWord()` (around line 1215). Find the ASR confirmation block:
+Find (in `_matchHotWord`, now updated in Task 2):
 ```js
 this.matchedSet.set(this.hotWordIndex, 1.0);
 if (this.vadMatchedSet.has(this.hotWordIndex)) this.asrConfirmedSet.add(this.hotWordIndex);
 return true;
 ```
 
-Replace with:
-
+Replace:
 ```js
 this.matchedSet.set(this.hotWordIndex, 1.0);
 if (this.vadMatchedSet.has(this.hotWordIndex)) {
     this.asrConfirmedSet.add(this.hotWordIndex);
-    this._logMatch(
-        spoken[i],
-        target,
-        'vad-confirmed', -1, false, 1.0, true,
-        this.hotWordIndex
+    this._logMatch(                                        // ADD THIS
+        spoken[i], target, 'vad-confirmed', -1, false, 1.0, true, this.hotWordIndex
     );
 }
 return true;
 ```
 
+Note: `spoken` and `i` are in scope at this point in `_matchHotWord()` — `i` is the loop index from the `for` loop above.
+
 ---
 
-**Step 4: Pass Whisper word timestamps to `_logAsr`**
+**Step 3: Suppress `method:'none'` per-record logging; add `totalComparisons` to transition log**
 
-Find the Whisper response handler in `_startWhisperTrack()`. Search for the fetch('/transcribe') response handler. It will parse `{transcript, words}` from the JSON response. Find where `_logAsr` is called from the Whisper path (it may not be called at all — look for where `this.whisperBuffer` is updated after a Whisper response).
+Add an early return at the top of `_logMatch()` (~line 1407):
+```js
+_logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
+    if (score <= 0) return;   // suppress noise — log only successful matches
+    // ... rest of existing body unchanged
+```
 
-If `_logAsr` is not currently called from the Whisper path, add a call passing the `words` array from the response:
+This drops the 98.5% none-record ratio. To preserve a useful denominator, add a `totalComparisons` counter to the `GameMode` state:
+
+In `start()` (where scoring state is initialized), add:
+```js
+this._lineComparisonCount = 0;   // total word comparisons attempted this line
+```
+
+In `setActiveLine()` where the new line is set up (around line 974 where `matchedSet` is reset), reset it:
+```js
+this._lineComparisonCount = 0;
+```
+
+In `_collectMatches()` (wherever the word-comparison loop runs), increment it each iteration:
+```js
+this._lineComparisonCount++;
+```
+
+In `_logTransition()`, add `totalComparisons` to the transition entry:
+```js
+this._telemetry.transitions.push({
+    // ... existing fields ...
+    totalComparisons: this._lineComparisonCount,   // ADD THIS
+});
+```
+
+---
+
+**Step 4: Add `source` field to `_logAsr()` and wire Whisper**
+
+Change `_logAsr()` signature and body to include `source`:
 
 ```js
-// After parsing Whisper response as data = {transcript, words}:
-this._logAsr('whisper', data.transcript || '', data.words || []);
+_logAsr(type, text, wordTimestamps, source) {   // add source param
+    if (!this._telemetry) return;
+    try {
+        var tempoClass = 'medium';
+        if (this.activeLineIdx >= 0 && this.allWordTimings[this.activeLineIdx]) {
+            tempoClass = this.allWordTimings[this.activeLineIdx].vadTempoClass || 'medium';
+        }
+        this._telemetry.asr.push({
+            ts:             parseFloat((performance.now() / 1000).toFixed(3)),
+            lineIdx:        this.activeLineIdx,
+            lineTempo:      tempoClass,
+            type:           type,                           // still 'final' | 'interim'
+            source:         source || 'browser_sr',        // ADD: 'browser_sr' | 'whisper'
+            text:           text || '',
+            wordTimestamps: wordTimestamps || []
+        });
+    } catch (e) { /* telemetry must never crash the game */ }
+}
 ```
 
-If `_logAsr` IS already called from the Whisper path with `[]`, replace the `[]` with `data.words || []`.
+Update the browser SR call site (line 640) to explicitly pass source:
+```js
+self._logAsr(finalText ? 'final' : 'interim', finalText || interim, [], 'browser_sr');
+```
+
+In the Whisper response handler (around line 757 where `data.transcript` is used), add a `_logAsr` call:
+```js
+if (data.transcript && this.active) {
+    this.whisperBuffer = (this.whisperBuffer + ' ' + data.transcript).trim();
+    this.lineHadAsrEvent = true;
+    this._collectMatchesWhisper(this.whisperBuffer);
+    this._logAsr('final', data.transcript, data.words || [], 'whisper');  // ADD THIS
+}
+```
 
 ---
 
-**Step 5: Run test suite**
+**Step 5: Update telemetry test to assert `source` field**
 
-```bash
-python -m pytest tests/ -v && node tests/test_match_helpers.cjs && node tests/test_sync_helpers.cjs
+In `tests/test_telemetry.cjs`, find the ASR entry test (around line 90):
+```js
+const required = ['ts','lineIdx','lineTempo','type','text','wordTimestamps'];
+required.forEach(k => assert(k in a, `asr has key "${k}"`));
+assert(['final','interim'].includes(a.type), 'asr type is final or interim');
 ```
 
-Expected: 32 passed, 1 skipped + all JS tests pass
+Update:
+```js
+const required = ['ts','lineIdx','lineTempo','type','source','text','wordTimestamps'];
+required.forEach(k => assert(k in a, `asr has key "${k}"`));
+assert(['final','interim'].includes(a.type), 'asr type is final or interim');
+assert(['browser_sr','whisper'].includes(a.source), 'asr source is browser_sr or whisper');
+```
 
-**Step 6: Commit**
+Find the `makeAsr()` stub function that creates a test ASR entry and add `source: 'browser_sr'` to it.
+
+---
+
+**Step 6: Run all tests**
 
 ```bash
-git add static/player.js
-git commit -m "fix: telemetry logging — VAD events, suppress noise, Whisper timestamps
+node tests/test_match_helpers.cjs && node tests/test_sync_helpers.cjs && node tests/test_telemetry.cjs && python -m pytest tests/ -v
+```
 
-- Log vad-provisional (0.25) and vad-confirmed (1.0) as match events
-  so telemetry can show what fraction of scores come from VAD vs ASR
-- Store provisional VAD hits at 0.25 in matchedSet immediately so
-  _updateWordSpans shows amber (consistent with two-color system)
-- Suppress method:none entries in _logMatch (was 98.5% of all logs)
-- Pass Whisper word timestamps to _logAsr (was always empty array)"
+Expected: all pass.
+
+**Step 7: Commit**
+
+```bash
+git add static/player.js tests/test_telemetry.cjs
+git commit -m "fix: telemetry — VAD events, source field, suppress none noise
+
+- Log vad-provisional (0.25) and vad-confirmed (1.0) match events
+- Add source:'browser_sr'|'whisper' field to ASR log entries; keep
+  type:'final'|'interim' semantics unchanged (fixes schema violation)
+- Suppress per-word method:none records; add totalComparisons counter
+  to transition log for denominator without noise pollution
+- Update telemetry schema test to assert source field"
 ```
 
 ---
 
 ## Task 6: Final Verification
 
-**Step 1: Run the full test suite one last time**
-
-```bash
-python -m pytest tests/ -v
-```
-
-Expected output:
-```
-32 passed, 1 skipped
-```
-
-**Step 2: Run all JS tests**
+**Step 1: Run the full test suite**
 
 ```bash
 node tests/test_match_helpers.cjs
 node tests/test_sync_helpers.cjs
 node tests/test_telemetry.cjs
+python -m pytest tests/ -v
 ```
 
-Expected: all pass
+Expected: all JS suites pass, Python: 32 passed 1 skipped.
 
-**Step 3: Manual smoke check checklist**
+---
 
-Load a song and enter game mode. Verify:
+**Step 2: Manual smoke check**
 
-- [ ] Slow lines now show amber words when mic energy is detected (not all-white)
-- [ ] Fast/medium lines still go green as before
-- [ ] A word mumbled into the mic on a slow line shows amber (not green)
-- [ ] Singing a word clearly on a slow line — amber → green on ASR confirmation
-- [ ] Lyric words at the end of a line that ASR truncates show amber, not green
-- [ ] Completely wrong word stays white, then goes red at line end
-- [ ] "Perfect" count at end modal does not credit lines with all-amber words
-- [ ] Telemetry downloaded via D-key + button has `vad-provisional` and `vad-confirmed` entries
-- [ ] Telemetry has far fewer `method: "none"` entries than before
+Load a song with known slow lines and enter game mode. Verify:
 
-**Step 4: Commit if anything was tweaked during smoke check**
+- [ ] Slow lines show amber words when mic energy is detected (not all-white)
+- [ ] Singing a word clearly on a slow line: word goes amber → then green on ASR confirmation
+- [ ] Mumbling or humming produces amber, not green
+- [ ] Fast/medium lines behave as before
+- [ ] At line end: words genuinely wrong go red, ambiguous go amber, correct go green
+- [ ] "Perfect" count in end modal does not credit lines with all-amber words
+- [ ] Edit2 false positives (`less→lesson` style) no longer go green or amber — stay white/red
+- [ ] Telemetry download (D-key) contains `vad-provisional` and `vad-confirmed` entries
+- [ ] Telemetry ASR entries have `source: 'browser_sr'` field
+- [ ] Transition entries have `totalComparisons` field
+- [ ] Telemetry has far fewer `method:'none'` entries
+
+**Step 3: Commit any smoke-check corrections**
 
 ```bash
-git add -p  # stage only intentional changes
-git commit -m "fix: smoke-check corrections from manual testing"
+git add -p
+git commit -m "fix: smoke-check corrections"
 ```
 
 ---
 
-## Success Criteria (from design doc)
+## Success Criteria
 
-1. Slow-line mean weighted score improves from 0.664 toward 0.85+ on the same songs
+1. Slow-line mean weighted score improves from 0.664 toward 0.85+ on same songs
 2. Short line (≤ 3 words) failure rate drops from 40% below 50%
-3. All-green lines with fractional score (Cure For The Itch 96%) now show amber on partial-credit words
+3. All-green lines with fractional score (Cure For The Itch 96%) show amber on partial-credit words
 4. "Perfect" lines in end modal reflect actual ≥ 90% weighted accuracy
-5. Telemetry `method: "none"` ratio drops below 10% (from 98.5%)
-6. VAD hits appear as `vad-provisional` / `vad-confirmed` in match logs
+5. Telemetry `method:'none'` entries eliminated; `totalComparisons` field in transitions
+6. VAD events appear as `vad-provisional`/`vad-confirmed` in match logs
+7. ASR log entries have `source` field; `type` remains `'final'|'interim'`
+8. All JS and Python tests pass with zero pre-existing failures
