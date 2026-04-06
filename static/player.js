@@ -659,7 +659,10 @@ class GameMode {
                 if (existing === undefined || score > existing) {
                     self.matchedSet.set(i, score);
                 }
-                if (self.vadMatchedSet.has(i)) self.asrConfirmedSet.add(i);
+                if (self.vadMatchedSet.has(i) && !self.asrConfirmedSet.has(i)) {
+                    self.asrConfirmedSet.add(i);
+                    self._logPromotion('browser_sr', i, score);
+                }
             });
             self._updateWordSpans();
 
@@ -1484,6 +1487,7 @@ class GameMode {
             },
             asr:         [],
             matches:     [],
+            promotions:  [],   // VAD→ASR upgrade events (both browser SR and Whisper paths)
             transitions: []
         };
     }
@@ -1509,6 +1513,28 @@ class GameMode {
                 source:         source || 'browser_sr',        // 'browser_sr' | 'whisper'
                 text:           text || '',
                 wordTimestamps: wordTimestamps || []
+            });
+        } catch (e) { /* telemetry must never crash the game */ }
+    }
+
+    /**
+     * Record a VAD→ASR promotion event.
+     * Called when a word transitions from provisional VAD credit to ASR-confirmed.
+     * Uses wordIndex (not word string) as key to handle repeated words on a line.
+     * Not deduped — promotion events are inherently non-redundant (guarded by !asrConfirmedSet.has).
+     * @param {'browser_sr'|'whisper'} source
+     * @param {number} wordIndex   - index within lineWords
+     * @param {number} score       - the ASR match score that triggered promotion
+     */
+    _logPromotion(source, wordIndex, score) {
+        if (!this._telemetry) return;
+        try {
+            this._telemetry.promotions.push({
+                ts:        parseFloat((performance.now() / 1000).toFixed(3)),
+                lineIdx:   this.activeLineIdx,
+                wordIndex: wordIndex,
+                source:    source,
+                score:     score,
             });
         } catch (e) { /* telemetry must never crash the game */ }
     }

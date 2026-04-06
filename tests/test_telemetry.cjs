@@ -127,6 +127,20 @@ console.log('\nTest 4: transition entry schema');
 }
 
 // ---------------------------------------------------------------------------
+// Test 4b: promotions array schema
+// ---------------------------------------------------------------------------
+console.log('\nTest 4b: promotions entry schema');
+{
+    const p = {
+        ts: 2.50, lineIdx: 1, wordIndex: 3, source: 'browser_sr', score: 1.0
+    };
+    const required = ['ts', 'lineIdx', 'wordIndex', 'source', 'score'];
+    required.forEach(k => assert(k in p, `promotion has key "${k}"`));
+    assert(['browser_sr', 'whisper'].includes(p.source), 'promotion source valid');
+    assert(typeof p.wordIndex === 'number', 'wordIndex is number');
+}
+
+// ---------------------------------------------------------------------------
 // Test 5: 5000-entry cap logic
 // ---------------------------------------------------------------------------
 console.log('\nTest 5: 5000-entry cap');
