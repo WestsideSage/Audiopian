@@ -127,6 +127,20 @@ console.log('\nTest 4: transition entry schema');
 }
 
 // ---------------------------------------------------------------------------
+// Test 4b: promotions array schema
+// ---------------------------------------------------------------------------
+console.log('\nTest 4b: promotions entry schema');
+{
+    const p = {
+        ts: 2.50, lineIdx: 1, wordIndex: 3, source: 'browser_sr', score: 1.0
+    };
+    const required = ['ts', 'lineIdx', 'wordIndex', 'source', 'score'];
+    required.forEach(k => assert(k in p, `promotion has key "${k}"`));
+    assert(['browser_sr', 'whisper'].includes(p.source), 'promotion source valid');
+    assert(typeof p.wordIndex === 'number', 'wordIndex is number');
+}
+
+// ---------------------------------------------------------------------------
 // Test 5: 5000-entry cap logic
 // ---------------------------------------------------------------------------
 console.log('\nTest 5: 5000-entry cap');
@@ -151,6 +165,24 @@ console.log('\nTest 6: lineTempo exhaustive check');
 
     const bad = 'normal'; // old value that must NOT appear
     assert(!valid.has(bad), '"normal" is not a valid lineTempo value');
+}
+
+// ---------------------------------------------------------------------------
+// Test 7: whisper meta fields shape
+// ---------------------------------------------------------------------------
+console.log('\nTest 7: whisper meta fields');
+{
+    const whisperChunkCounters = {
+        dispatched: 10, succeeded: 8, failed503: 1, failed500: 0,
+        failedNetwork: 1, droppedWhileLoading: 2
+    };
+    const required = ['dispatched','succeeded','failed503','failed500','failedNetwork','droppedWhileLoading'];
+    required.forEach(k => assert(k in whisperChunkCounters, `chunkCounters has "${k}"`));
+    assert(typeof whisperChunkCounters.dispatched === 'number', 'dispatched is number');
+
+    const whisperStatusAtStart = { state: 'ready', reason: null, checkedAt: 12345 };
+    assert(['idle','loading','ready','error','unknown'].includes(whisperStatusAtStart.state),
+        'whisperStatusAtStart.state is valid');
 }
 
 // ---------------------------------------------------------------------------

@@ -429,6 +429,23 @@ class GameMode {
         this.whisperBuffer  = '';
         this._whisperInFlight = 0;
 
+        // Whisper server state (populated from /whisper-status at game start)
+        this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null };
+
+        // Whisper client track state (populated by _startWhisperTrack outcome)
+        this._whisperTrackStatus  = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0 };
+
+        // Whisper chunk telemetry counters
+        this._chunksDispatched          = 0;
+        this._chunksSucceeded           = 0;
+        this._chunksFailed503           = 0;
+        this._chunksFailed500           = 0;
+        this._chunksDroppedWhileLoading = 0;
+        this._chunksFailedNetwork       = 0;
+        this._whisperResponses          = 0;
+        this._whisperResponsesWithWords = 0;
+        this._whisperWordsTotal         = 0;
+
         // Diagnostic
         this._dbBuf = [];
         this._telemetry = null;   // populated by _initTelemetry() when debug mode is on
@@ -506,6 +523,20 @@ class GameMode {
         renderLyricsGameMode();
         this._setupRecognition();
         this._startWhisperTrack(); // async — Track 2 starts in background
+
+        // Fetch server Whisper state and store for telemetry and HUD
+        fetch('/whisper-status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                this._whisperServerStatus = {
+                    state:     data.status || 'unknown',
+                    reason:    data.error  || null,
+                    checkedAt: Date.now(),
+                };
+            }.bind(this))
+            .catch(function() {
+                this._whisperServerStatus = { state: 'error', reason: 'status fetch failed', checkedAt: Date.now() };
+            }.bind(this));
 
         document.getElementById('score-display').style.display = 'flex';
         document.getElementById('score-pct').textContent = '0%';
@@ -628,7 +659,10 @@ class GameMode {
                 if (existing === undefined || score > existing) {
                     self.matchedSet.set(i, score);
                 }
-                if (self.vadMatchedSet.has(i)) self.asrConfirmedSet.add(i);
+                if (self.vadMatchedSet.has(i) && !self.asrConfirmedSet.has(i)) {
+                    self.asrConfirmedSet.add(i);
+                    self._logPromotion('browser_sr', i, score);
+                }
             });
             self._updateWordSpans();
 
@@ -688,7 +722,9 @@ class GameMode {
     }
 
     async _startWhisperTrack() {
+        this._whisperTrackStatus.startAttempts++;
         try {
+            this._whisperTrackStatus.state = 'starting';
             this._whisperStream = await navigator.mediaDevices.getUserMedia({
                 audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
             });
@@ -718,8 +754,12 @@ class GameMode {
                 }
             };
             src.connect(this._whisperNode);
+            this._whisperTrackStatus.state = 'ready';
         } catch (err) {
-            console.warn('[Whisper track] unavailable — running on Track 1 only:', err.message);
+            this._whisperTrackStatus.state = 'error';
+            this._whisperTrackStatus.reason = err.message || String(err);
+            this._whisperTrackStatus.startFailures++;
+            console.warn('[Whisper track] unavailable:', this._whisperTrackStatus.reason);
             this._whisperStream = null;
             this._whisperCtx    = null;
             this._whisperNode   = null;
@@ -743,7 +783,30 @@ class GameMode {
         }
     }
 
+    /** Poll /whisper-status and update _whisperServerStatus. Returns a Promise. */
+    _checkWhisperServerStatus() {
+        return fetch('/whisper-status')
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                this._whisperServerStatus = {
+                    state:     data.status || 'unknown',
+                    reason:    data.error  || null,
+                    checkedAt: Date.now(),
+                };
+            }.bind(this))
+            .catch(function() { /* silent — best effort */ }.bind(this));
+    }
+
     async _sendChunkToWhisper(float32) {
+        // Circuit breaker: if server said it's loading, drop chunk and poll instead
+        if (this._whisperServerStatus.state === 'loading') {
+            this._chunksDroppedWhileLoading++;
+            // Poll once per dropped chunk (rate-limited by chunk cadence ~2s)
+            this._checkWhisperServerStatus();
+            return;
+        }
+
+        this._chunksDispatched++;
         this._whisperInFlight++;
         const wav = encodeWav(float32, 16000);
         try {
@@ -754,21 +817,49 @@ class GameMode {
             const resp = await fetch('/transcribe', {
                 method: 'POST',
                 body: wav,
-                headers: headers
+                headers: headers,
             });
-            if (!resp.ok) return;
+
+            if (resp.status === 503) {
+                this._chunksFailed503++;
+                // Enter circuit-breaker: server model not ready, pause dispatch
+                this._whisperServerStatus.state = 'loading';
+                this._checkWhisperServerStatus(); // async poll to detect when ready
+                return;
+            }
+            if (resp.status === 500) {
+                this._chunksFailed500++;
+                console.warn('[Whisper] transcription error (500) — continuing');
+                return;
+            }
+            if (!resp.ok) {
+                this._chunksFailed500++;
+                console.warn('[Whisper] unexpected HTTP', resp.status);
+                return;
+            }
+
             const data = await resp.json();
+            this._chunksSucceeded++;
+            this._whisperServerStatus.state = 'ready'; // confirmed working
+
             if (data.transcript && this.active) {
                 this.whisperBuffer = (this.whisperBuffer + ' ' + data.transcript).trim();
                 this.lineHadAsrEvent = true;
                 this._collectMatchesWhisper(this.whisperBuffer);
                 this._logAsr('final', data.transcript, data.words || [], 'whisper');
+                this._whisperResponses++;
+                if (data.words && data.words.length > 0) {
+                    this._whisperResponsesWithWords++;
+                    this._whisperWordsTotal += data.words.length;
+                }
             }
             if (data.words && data.words.length > 0 && this.active) {
                 this._lastWhisperWords = data.words;
             }
-        } catch (_) { /* fire-and-forget */ }
-        finally {
+        } catch (_err) {
+            this._chunksFailedNetwork++;
+            /* fire-and-forget — network errors are expected on flaky connections */
+        } finally {
             this._whisperInFlight = Math.max(0, this._whisperInFlight - 1);
         }
     }
@@ -877,7 +968,10 @@ class GameMode {
             if (existing === undefined || score > existing) {
                 this.matchedSet.set(i, score);
             }
-            if (this.vadMatchedSet.has(i)) this.asrConfirmedSet.add(i);
+            if (this.vadMatchedSet.has(i) && !this.asrConfirmedSet.has(i)) {
+                this.asrConfirmedSet.add(i);
+                this._logPromotion('whisper', i, score);
+            }
         }.bind(this));
         this._updateWordSpans();
 
@@ -1351,6 +1445,10 @@ class GameMode {
                             matchedSet.add(li); // fallback for Set
                         }
                     }
+                    // Promote VAD word to ASR-confirmed if late ASR just matched it
+                    if (vadMatchedSet && vadMatchedSet.has(li) && asrConfirmedSet && !asrConfirmedSet.has(li)) {
+                        asrConfirmedSet.add(li);
+                    }
                     // If the next target word is the same, allow reusing this spoken position
                     var nextTarget = (li + 1 < lineWords.length) ? lineWords[li + 1] : null;
                     if (nextTarget !== target) {
@@ -1396,6 +1494,7 @@ class GameMode {
             },
             asr:         [],
             matches:     [],
+            promotions:  [],   // VAD→ASR upgrade events (both browser SR and Whisper paths)
             transitions: []
         };
     }
@@ -1426,6 +1525,28 @@ class GameMode {
     }
 
     /**
+     * Record a VAD→ASR promotion event.
+     * Called when a word transitions from provisional VAD credit to ASR-confirmed.
+     * Uses wordIndex (not word string) as key to handle repeated words on a line.
+     * Not deduped — promotion events are inherently non-redundant (guarded by !asrConfirmedSet.has).
+     * @param {'browser_sr'|'whisper'} source
+     * @param {number} wordIndex   - index within lineWords
+     * @param {number} score       - the ASR match score that triggered promotion
+     */
+    _logPromotion(source, wordIndex, score) {
+        if (!this._telemetry) return;
+        try {
+            this._telemetry.promotions.push({
+                ts:        parseFloat((performance.now() / 1000).toFixed(3)),
+                lineIdx:   this.activeLineIdx,
+                wordIndex: wordIndex,
+                source:    source,
+                score:     score,
+            });
+        } catch (e) { /* telemetry must never crash the game */ }
+    }
+
+    /**
      * Record a single word-match attempt to the telemetry log.
      */
     _logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
@@ -1435,7 +1556,8 @@ class GameMode {
 
         // Smart filtering: only log first-time matches for words already confirmed matched.
         // Skip redundant re-checks for words already confirmed matched.
-        if (matched && this._telemetryLoggedMatches && this._telemetryLoggedMatches.has(this.activeLineIdx + ':' + targetWord)) {
+        // Exempt vad-confirmed — a promotion is a distinct event from the earlier provisional.
+        if (method !== 'vad-confirmed' && matched && this._telemetryLoggedMatches && this._telemetryLoggedMatches.has(this.activeLineIdx + ':' + targetWord)) {
             return;  // Already logged a match for this word on this line
         }
 
@@ -1560,6 +1682,21 @@ class GameMode {
             if (this._telemetry.meta.whisperAvailable === null) {
                 this._telemetry.meta.whisperAvailable = !!(this._whisperStream);
             }
+            // Richer Whisper observability fields (supplement, not replace, whisperAvailable)
+            this._telemetry.meta.whisperStatusAtStart  = this._whisperServerStatus ? Object.assign({}, this._whisperServerStatus) : null;
+            this._telemetry.meta.whisperStatusFinal    = { state: this._whisperServerStatus ? this._whisperServerStatus.state : 'unknown', reason: this._whisperServerStatus ? this._whisperServerStatus.reason : null };
+            this._telemetry.meta.whisperTrackStatus    = this._whisperTrackStatus ? Object.assign({}, this._whisperTrackStatus) : null;
+            this._telemetry.meta.whisperChunkCounters  = {
+                dispatched:          this._chunksDispatched          || 0,
+                succeeded:           this._chunksSucceeded           || 0,
+                failed503:           this._chunksFailed503           || 0,
+                failed500:           this._chunksFailed500           || 0,
+                failedNetwork:       this._chunksFailedNetwork       || 0,
+                droppedWhileLoading: this._chunksDroppedWhileLoading || 0,
+            };
+            this._telemetry.meta.whisperResponses          = this._whisperResponses          || 0;
+            this._telemetry.meta.whisperResponsesWithWords = this._whisperResponsesWithWords  || 0;
+            this._telemetry.meta.whisperWordsTotal         = this._whisperWordsTotal          || 0;
             var json = JSON.stringify(this._telemetry, null, 2);
             var ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
             var name = 'karaokee-telemetry-' + ts + '.json';
@@ -1660,6 +1797,16 @@ class GameMode {
         const vadHits = this.vadMatchedSet ? this.vadMatchedSet.size : 0;
         const confirmed = this.asrConfirmedSet ? this.asrConfirmedSet.size : 0;
         html += `<div class="dbg-row"><span class="dbg-label">VAD   </span>hits:${vadHits} | asr-conf:${confirmed}/${this.lineWords.length}</div>`;
+        // Whisper server + track state
+        const wSrv   = (this._whisperServerStatus && this._whisperServerStatus.state) || 'unknown';
+        const wTrk   = (this._whisperTrackStatus  && this._whisperTrackStatus.state)  || 'idle';
+        const wDisp  = this._chunksDispatched          || 0;
+        const wOk    = this._chunksSucceeded           || 0;
+        const w503   = this._chunksFailed503           || 0;
+        const w500   = this._chunksFailed500           || 0;
+        const wNet   = this._chunksFailedNetwork       || 0;
+        const wDrop  = this._chunksDroppedWhileLoading || 0;
+        html += `<div class="dbg-row"><span class="dbg-label">Whisp </span>srv:${wSrv} trk:${wTrk} | sent:${wDisp} ok:${wOk} 503:${w503} 500:${w500} net:${wNet} drop:${wDrop}</div>`;
 
         // Overlap state
         const overlapActive = this.prevLine && performance.now() < this.prevLine.overlapEnd;
