@@ -7,10 +7,12 @@ from downloader import extract_metadata, download_audio, AUDIO_PATH, search_yout
 from lyrics import fetch_lyrics
 from vocal_remover import separate, INSTRUMENTAL_PATH
 
-app = Flask(__name__, static_folder="static", static_url_path="/static")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+app = Flask(__name__, static_folder=os.path.join(_HERE, "static"), static_url_path="/static")
 
 separation_state = {"status": "idle"}
 separation_gen = 0  # incremented on each new song load; threads check before writing state
+_last_duration = 0  # cached from last /load for use in /retry-lyrics
 
 _whisper_model = None
 _whisper_lock = _threading.Lock()
@@ -32,12 +34,12 @@ def get_whisper_model():
 
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    return send_from_directory(os.path.join(_HERE, "static"), "index.html")
 
 
 @app.route("/player")
 def player():
-    return send_from_directory("static", "player.html")
+    return send_from_directory(os.path.join(_HERE, "static"), "player.html")
 
 
 @app.route("/load", methods=["POST"])
@@ -81,7 +83,9 @@ def load():
     # threading.Thread(target=run, daemon=True).start()
     # --- re-enable block end ---
 
-    lyrics = fetch_lyrics(title, artist)
+    global _last_duration
+    _last_duration = meta.get("duration", 0)
+    lyrics = fetch_lyrics(title, artist, duration=_last_duration)
     response = {
         "title": title,
         "artist": artist,
@@ -109,7 +113,7 @@ def retry_lyrics():
     artist = (data or {}).get("artist", "").strip()
     if not title or not artist:
         return jsonify({"error": "Title and artist required"}), 400
-    lyrics = fetch_lyrics(title, artist)
+    lyrics = fetch_lyrics(title, artist, duration=_last_duration)
     if not lyrics:
         return jsonify({"lyrics": [], "lyricsError": "Still no lyrics found."}), 200
     return jsonify({"lyrics": lyrics})
