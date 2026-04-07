@@ -14,22 +14,42 @@ separation_state = {"status": "idle"}
 separation_gen = 0  # incremented on each new song load; threads check before writing state
 _last_duration = 0  # cached from last /load for use in /retry-lyrics
 
-_whisper_model = None
-_whisper_lock = _threading.Lock()
+_whisper_model  = None
+_whisper_state  = 'idle'    # 'idle' | 'loading' | 'ready' | 'error'
+_whisper_error  = None      # full traceback string when state == 'error'
+_whisper_lock   = _threading.Lock()
+_prewarm_once   = False     # ensures prewarm thread fires only once per process
 
 
-def get_whisper_model():
-    """Lazy-load faster-whisper large-v3-turbo on CUDA. Thread-safe."""
-    global _whisper_model
-    with _whisper_lock:
-        if _whisper_model is None:
-            from faster_whisper import WhisperModel
-            _whisper_model = WhisperModel(
-                "large-v3-turbo",
-                device="cuda",
-                compute_type="float16"
-            )
-    return _whisper_model
+def _prewarm_whisper():
+    """Load the Whisper model in a background thread. Updates module state."""
+    global _whisper_model, _whisper_state, _whisper_error
+    try:
+        _whisper_state = 'loading'
+        app.logger.info('Whisper: loading large-v3-turbo on cuda ...')
+        from faster_whisper import WhisperModel
+        model = WhisperModel('large-v3-turbo', device='cuda', compute_type='float16')
+        with _whisper_lock:
+            _whisper_model = model
+            _whisper_state = 'ready'
+        app.logger.info('Whisper: model ready')
+    except Exception:
+        import traceback as _tb
+        _whisper_state = 'error'
+        _whisper_error = _tb.format_exc()
+        app.logger.exception('Whisper: model failed to load')
+
+
+@app.before_request
+def _ensure_prewarm():
+    """Fire prewarm on first HTTP request. Runs only in the serving process,
+    so Werkzeug's debug reloader parent (which never serves requests) stays clean."""
+    global _prewarm_once
+    if not _prewarm_once:
+        with _whisper_lock:
+            if not _prewarm_once:
+                _prewarm_once = True
+                threading.Thread(target=_prewarm_whisper, daemon=True).start()
 
 
 @app.route("/")
@@ -145,40 +165,52 @@ def separate_status():
     return jsonify(resp)
 
 
+@app.route('/whisper-status')
+def whisper_status():
+    return jsonify(
+        status=_whisper_state,
+        error=_whisper_error,
+        model='large-v3-turbo',
+        device='cuda',
+    )
+
+
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
     """Accept a raw WAV body, transcribe with Whisper, return {transcript, words}."""
+    # Strict readiness gate: never touch the model object if not confirmed ready
+    if _whisper_state != 'ready':
+        return jsonify(error='model not ready', status=_whisper_state), 503
+
     wav_bytes = request.data
     if len(wav_bytes) < 100:
         return jsonify(transcript='', words=[])
+
     try:
-        model = get_whisper_model()
         audio_buf = io.BytesIO(wav_bytes)
-
         hint = request.headers.get('X-Lyric-Hint')
-
         kwargs = dict(language='en', beam_size=1, word_timestamps=True)
         if hint:
             kwargs['initial_prompt'] = hint
 
-        segments, _ = model.transcribe(audio_buf, **kwargs)
+        segments, _ = _whisper_model.transcribe(audio_buf, **kwargs)
         segments = list(segments)
 
         text = ' '.join(s.text for s in segments).strip()
-
         words = []
         for seg in segments:
             if seg.words:
                 for w in seg.words:
                     words.append({
-                        'text': w.word.strip(),
+                        'text':  w.word.strip(),
                         'start': round(w.start, 3),
-                        'end': round(w.end, 3),
+                        'end':   round(w.end,   3),
                     })
 
         return jsonify(transcript=text, words=words)
     except Exception:
-        return jsonify(transcript='', words=[]), 503
+        app.logger.exception('Whisper transcription error on current request')
+        return jsonify(transcript='', words=[]), 500
 
 
 @app.route("/instrumental")
