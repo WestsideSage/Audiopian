@@ -8,6 +8,10 @@ from lyrics import fetch_lyrics
 _HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(_HERE, "static"), static_url_path="/static")
 
+WHISPER_MODEL   = os.environ.get('WHISPER_MODEL',   'large-v3-turbo')
+WHISPER_DEVICE  = os.environ.get('WHISPER_DEVICE',  'cuda')
+WHISPER_COMPUTE = os.environ.get('WHISPER_COMPUTE', 'float16')
+
 _last_duration = 0  # cached from last /load for use in /retry-lyrics
 _duration_lock  = threading.Lock()
 
@@ -23,9 +27,9 @@ def _prewarm_whisper():
     global _whisper_model, _whisper_state, _whisper_error
     try:
         _whisper_state = 'loading'
-        app.logger.info('Whisper: loading large-v3-turbo on cuda ...')
+        app.logger.info('Whisper: loading %s on %s ...', WHISPER_MODEL, WHISPER_DEVICE)
         from faster_whisper import WhisperModel
-        model = WhisperModel('large-v3-turbo', device='cuda', compute_type='float16')
+        model = WhisperModel(WHISPER_MODEL, device=WHISPER_DEVICE, compute_type=WHISPER_COMPUTE)
         with _whisper_lock:
             _whisper_model = model
             _whisper_state = 'ready'
@@ -123,8 +127,8 @@ def whisper_status():
     return jsonify(
         status=_whisper_state,
         error=_whisper_error,
-        model='large-v3-turbo',
-        device='cuda',
+        model=WHISPER_MODEL,
+        device=WHISPER_DEVICE,
     )
 
 
