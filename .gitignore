@@ -12,3 +12,10 @@ env/
 *.egg-info/
 dist/
 build/
+output_telemetry/
+*.log
+.idea/
+.vscode/
+*.swp
+*.swo
+node_modules/
