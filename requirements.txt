@@ -2,5 +2,4 @@ flask
 yt-dlp
 requests
 pytest
-demucs
 faster-whisper

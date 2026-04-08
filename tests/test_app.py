@@ -69,27 +69,6 @@ def test_retry_lyrics_missing_params(client):
     assert resp.status_code == 400
 
 
-def test_separate_starts_processing(client):
-    with patch("app.separate") as mock_sep:
-        mock_sep.return_value = "/fake/instrumental.wav"
-        resp = client.post("/separate")
-    assert resp.status_code == 200
-    data = json.loads(resp.data)
-    assert data["status"] == "processing"
-
-
-def test_separate_status_returns_state(client):
-    import app as app_module
-    app_module.separation_state["status"] = "done"
-    resp = client.get("/separate-status")
-    assert resp.status_code == 200
-    data = json.loads(resp.data)
-    assert data["status"] == "done"
-    assert data["audioUrl"] == "/instrumental"
-    # Reset
-    app_module.separation_state["status"] = "idle"
-
-
 def test_search_returns_results(client):
     with patch("app.search_youtube") as mock_search:
         mock_search.return_value = [
@@ -106,69 +85,6 @@ def test_search_returns_results(client):
 def test_search_missing_query(client):
     resp = client.get("/search")
     assert resp.status_code == 400
-
-
-def test_load_does_not_trigger_separation_when_disabled(client):
-    """Vocal separation is temporarily disabled — POST /load should leave status idle
-    and not start any background thread.
-    TODO: rename back to test_load_triggers_separation_automatically and restore
-    assertions when re-enabling separation."""
-    import app as app_module
-    app_module.separation_state["status"] = "idle"
-    with patch("app.extract_metadata") as mock_meta, \
-         patch("app.download_audio") as mock_dl, \
-         patch("app.fetch_lyrics") as mock_lyrics, \
-         patch("threading.Thread") as mock_thread:
-        mock_meta.return_value = {"title": "Test", "artist": "Artist"}
-        mock_dl.return_value = "/fake/path"
-        mock_lyrics.return_value = []
-        resp = client.post("/load", json={"url": "https://youtube.com/watch?v=fake"})
-    assert resp.status_code == 200
-    assert not mock_thread.called, "Thread should NOT start while separation is disabled"
-    assert app_module.separation_state["status"] == "idle"
-
-
-@pytest.mark.skip(reason="Vocal separation disabled temporarily — re-enable with separation thread")
-def test_stale_separation_thread_does_not_overwrite_new_song_status(client):
-    """When a second song is loaded, the first song's separation thread completing
-    should NOT set separation_state to 'done' (stale generation must be ignored)."""
-    import app as app_module
-
-    run_fns = []
-
-    def fake_thread(target=None, daemon=None):
-        run_fns.append(target)
-        return MagicMock()
-
-    # Load Song A
-    with patch("app.extract_metadata") as meta, \
-         patch("app.download_audio"), \
-         patch("app.fetch_lyrics") as lyrics, \
-         patch("threading.Thread", side_effect=fake_thread):
-        meta.return_value = {"title": "Song A", "artist": "Artist A"}
-        lyrics.return_value = []
-        client.post("/load", json={"url": "https://youtube.com/watch?v=a"})
-
-    # Load Song B (should increment generation counter)
-    with patch("app.extract_metadata") as meta, \
-         patch("app.download_audio"), \
-         patch("app.fetch_lyrics") as lyrics, \
-         patch("threading.Thread", side_effect=fake_thread):
-        meta.return_value = {"title": "Song B", "artist": "Artist B"}
-        lyrics.return_value = []
-        client.post("/load", json={"url": "https://youtube.com/watch?v=b"})
-
-    assert len(run_fns) == 2, "Two threads should have been created"
-
-    # Song A's thread completes (stale) — must NOT set status to 'done'
-    with patch("app.separate"):
-        run_fns[0]()
-
-    assert app_module.separation_state["status"] == "processing", \
-        "Stale thread should not have set status='done' after a newer song was loaded"
-
-    # Cleanup
-    app_module.separation_state["status"] = "idle"
 
 
 import struct

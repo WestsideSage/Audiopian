@@ -1,23 +1,19 @@
 import io
 import os
 import threading
-import threading as _threading
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from downloader import extract_metadata, download_audio, AUDIO_PATH, search_youtube
 from lyrics import fetch_lyrics
-from vocal_remover import separate, INSTRUMENTAL_PATH
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(_HERE, "static"), static_url_path="/static")
 
-separation_state = {"status": "idle"}
-separation_gen = 0  # incremented on each new song load; threads check before writing state
 _last_duration = 0  # cached from last /load for use in /retry-lyrics
 
 _whisper_model  = None
 _whisper_state  = 'idle'    # 'idle' | 'loading' | 'ready' | 'error'
 _whisper_error  = None      # full traceback string when state == 'error'
-_whisper_lock   = _threading.Lock()
+_whisper_lock   = threading.Lock()
 _prewarm_once   = False     # ensures prewarm thread fires only once per process
 
 
@@ -82,27 +78,6 @@ def load():
     except Exception as e:
         return jsonify({"error": f"Could not download audio: {str(e)}"}), 400
 
-    # Vocal separation disabled for rapid testing — re-enable by restoring the block below.
-    separation_state["status"] = "idle"
-    separation_state.pop("error", None)
-    # --- re-enable block start ---
-    # global separation_gen
-    # separation_gen += 1
-    # my_gen = separation_gen
-    # separation_state["status"] = "processing"
-    # separation_state.pop("error", None)
-    # def run():
-    #     try:
-    #         separate(AUDIO_PATH)
-    #         if separation_gen == my_gen:
-    #             separation_state["status"] = "done"
-    #     except Exception as e:
-    #         if separation_gen == my_gen:
-    #             separation_state["status"] = "error"
-    #             separation_state["error"] = str(e)
-    # threading.Thread(target=run, daemon=True).start()
-    # --- re-enable block end ---
-
     global _last_duration
     _last_duration = meta.get("duration", 0)
     lyrics = fetch_lyrics(title, artist, duration=_last_duration)
@@ -137,33 +112,6 @@ def retry_lyrics():
     if not lyrics:
         return jsonify({"lyrics": [], "lyricsError": "Still no lyrics found."}), 200
     return jsonify({"lyrics": lyrics})
-
-@app.route("/separate", methods=["POST"])
-def start_separate():
-    separation_state["status"] = "processing"
-
-    def run():
-        try:
-            separate(AUDIO_PATH)
-            separation_state["status"] = "done"
-        except Exception as e:
-            separation_state["status"] = "error"
-            separation_state["error"] = str(e)
-
-    threading.Thread(target=run, daemon=True).start()
-    return jsonify({"status": "processing"})
-
-
-@app.route("/separate-status")
-def separate_status():
-    status = separation_state.get("status", "idle")
-    resp = {"status": status}
-    if status == "done":
-        resp["audioUrl"] = "/instrumental"
-    if status == "error":
-        resp["error"] = separation_state.get("error", "Unknown error")
-    return jsonify(resp)
-
 
 @app.route('/whisper-status')
 def whisper_status():
@@ -211,13 +159,6 @@ def transcribe():
     except Exception:
         app.logger.exception('Whisper transcription error on current request')
         return jsonify(transcript='', words=[]), 500
-
-
-@app.route("/instrumental")
-def instrumental():
-    if not os.path.exists(INSTRUMENTAL_PATH):
-        return jsonify({"error": "No instrumental available"}), 404
-    return send_file(INSTRUMENTAL_PATH, mimetype="audio/wav")
 
 
 @app.route("/search")
