@@ -1,5 +1,8 @@
+import logging
 import re
 import requests
+
+log = logging.getLogger(__name__)
 
 
 def parse_lrc(lrc_text: str) -> list[dict]:
@@ -90,4 +93,5 @@ def fetch_lyrics(title: str, artist: str, duration: int = 0) -> list[dict]:
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[0][1]
     except Exception:
+        log.exception("Failed to fetch lyrics for %s - %s", title, artist)
         return []
