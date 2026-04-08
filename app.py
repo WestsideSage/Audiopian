@@ -9,6 +9,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(_HERE, "static"), static_url_path="/static")
 
 _last_duration = 0  # cached from last /load for use in /retry-lyrics
+_duration_lock  = threading.Lock()
 
 _whisper_model  = None
 _whisper_state  = 'idle'    # 'idle' | 'loading' | 'ready' | 'error'
@@ -79,8 +80,10 @@ def load():
         return jsonify({"error": f"Could not download audio: {str(e)}"}), 400
 
     global _last_duration
-    _last_duration = meta.get("duration", 0)
-    lyrics = fetch_lyrics(title, artist, duration=_last_duration)
+    with _duration_lock:
+        _last_duration = meta.get("duration", 0)
+        duration = _last_duration
+    lyrics = fetch_lyrics(title, artist, duration=duration)
     response = {
         "title": title,
         "artist": artist,
@@ -108,7 +111,9 @@ def retry_lyrics():
     artist = (data or {}).get("artist", "").strip()
     if not title or not artist:
         return jsonify({"error": "Title and artist required"}), 400
-    lyrics = fetch_lyrics(title, artist, duration=_last_duration)
+    with _duration_lock:
+        duration = _last_duration
+    lyrics = fetch_lyrics(title, artist, duration=duration)
     if not lyrics:
         return jsonify({"lyrics": [], "lyricsError": "Still no lyrics found."}), 200
     return jsonify({"lyrics": lyrics})
@@ -171,4 +176,4 @@ def search():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=os.environ.get("FLASK_DEBUG", "0") == "1", port=5000)
