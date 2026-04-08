@@ -237,8 +237,10 @@ def test_transcribe_returns_word_timestamps(client, monkeypatch):
 import app as _app_module
 
 def test_whisper_status_returns_loading(client):
-    original = _app_module._whisper_state
+    orig_state = _app_module._whisper_state
+    orig_error = _app_module._whisper_error
     _app_module._whisper_state = 'loading'
+    _app_module._whisper_error = None
     try:
         resp = client.get('/whisper-status')
         assert resp.status_code == 200
@@ -248,18 +250,22 @@ def test_whisper_status_returns_loading(client):
         assert 'device' in data
         assert data['error'] is None
     finally:
-        _app_module._whisper_state = original
+        _app_module._whisper_state = orig_state
+        _app_module._whisper_error = orig_error
 
 def test_whisper_status_returns_ready(client):
-    original = _app_module._whisper_state
+    orig_state = _app_module._whisper_state
+    orig_error = _app_module._whisper_error
     _app_module._whisper_state = 'ready'
+    _app_module._whisper_error = None
     try:
         resp = client.get('/whisper-status')
         data = resp.get_json()
         assert data['status'] == 'ready'
         assert data['error'] is None
     finally:
-        _app_module._whisper_state = original
+        _app_module._whisper_state = orig_state
+        _app_module._whisper_error = orig_error
 
 def test_whisper_status_returns_error_with_reason(client):
     orig_state = _app_module._whisper_state
