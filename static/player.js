@@ -2070,49 +2070,7 @@ function initPrepOverlay() {
         document.getElementById('prepSongTitle').textContent =
             sd.artist + ' \u2014 ' + sd.title;
     }
-    // Vocal separation disabled — skip overlay immediately.
-    // To re-enable: replace skipPrep() with pollPrep() and restore the timer block.
     skipPrep();
-    // --- re-enable block start ---
-    // var startTime = Date.now();
-    // prepTimer = setInterval(function() {
-    //     var elapsed = Math.floor((Date.now() - startTime) / 1000);
-    //     var m = Math.floor(elapsed / 60);
-    //     var s = (elapsed % 60).toString().padStart(2, '0');
-    //     var el = document.getElementById('prepStatus');
-    //     if (el) el.textContent = 'Preparing audio\u2026 (' + m + ':' + s + ')';
-    // }, 1000);
-    // pollPrep();
-    // --- re-enable block end ---
-}
-
-function pollPrep() {
-    fetch('/separate-status')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            if (data.status === 'done') {
-                finishPrep(true);
-            } else if (data.status === 'error') {
-                finishPrep(false);
-            } else {
-                setTimeout(pollPrep, 2000);
-            }
-        })
-        .catch(function() { setTimeout(pollPrep, 2000); });
-}
-
-function finishPrep(success) {
-    clearInterval(prepTimer);
-    if (success) {
-        instrumentalReady = true;
-    }
-    overlayDismissed = true;
-    var overlay = document.getElementById('prepOverlay');
-    overlay.style.opacity = '0';
-    setTimeout(function() {
-        overlay.style.display = 'none';
-        audio.play().then(function() { playBtn.textContent = '\u23F8'; }).catch(function() {});
-    }, 400);
 }
 
 function skipPrep() {
@@ -2124,90 +2082,14 @@ function skipPrep() {
 
 initPrepOverlay();
 
-// Vocal removal toggle
-let instrumentalReady = false;
-let usingInstrumental = false;
-const vocalBtn = document.getElementById('vocalBtn');
-
-function toggleVocals() {
-    if (usingInstrumental) {
-        // Switch back to full mix
-        const pos = audio.currentTime;
-        audio.src = '/audio?t=' + Date.now();
-        audio.load();
-        audio.addEventListener('canplay', () => {
-            audio.currentTime = pos;
-            audio.play().catch(() => {});
-        }, { once: true });
-        usingInstrumental = false;
-        vocalBtn.textContent = '🎤 Remove Vocals';
-        return;
-    }
-
-    if (instrumentalReady) {
-        // Already processed — just switch
-        switchToInstrumental();
-        return;
-    }
-
-    // Start processing
-    vocalBtn.textContent = '⏳ Processing...';
-    vocalBtn.disabled = true;
-
-    fetch('/separate', { method: 'POST' })
-        .then(() => pollSeparation())
-        .catch(() => {
-            vocalBtn.textContent = '🎤 Remove Vocals';
-            vocalBtn.disabled = false;
-        });
-}
-
-function pollSeparation() {
-    fetch('/separate-status')
-        .then(r => r.json())
-        .then(data => {
-            if (data.status === 'done') {
-                instrumentalReady = true;
-                switchToInstrumental();
-            } else if (data.status === 'error') {
-                vocalBtn.textContent = '❌ Failed';
-                vocalBtn.disabled = false;
-            } else {
-                setTimeout(pollSeparation, 2000);
-            }
-        });
-}
-
-function switchToInstrumental() {
-    const pos = audio.currentTime;
-    audio.src = '/instrumental?t=' + Date.now();
-    audio.load();
-    audio.addEventListener('canplay', () => {
-        audio.currentTime = pos;
-        audio.play().catch(() => {});
-    }, { once: true });
-    usingInstrumental = true;
-    vocalBtn.textContent = '🎵 Full Mix';
-    vocalBtn.disabled = false;
-}
-
 function toggleGameMode() {
     if (lyrics.length === 0) {
         alert('No lyrics available for this song \u2014 game mode requires synced lyrics.');
         return;
     }
-    // Vocal separation disabled — removed instrumentalReady guard and auto-switch.
-    // To re-enable: restore the two blocks marked below.
     if (gameMode.active) {
         gameMode.stop();
     } else {
-        // --- re-enable block start (auto-switch to instrumental) ---
-        // if (!instrumentalReady) {
-        //     alert('Vocal separation is still processing. Please wait or click Skip.');
-        //     return;
-        // }
-        // if (!usingInstrumental) { toggleVocals(); }
-        // --- re-enable block end ---
         gameMode.start();
     }
 }
