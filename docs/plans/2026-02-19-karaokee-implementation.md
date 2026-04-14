@@ -1,0 +1,1096 @@
+# Karaokee Implementation Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+
+**Goal:** Build a personal desktop karaoke app that takes a YouTube URL, downloads the audio, fetches synced lyrics, and plays them with classic karaoke line-highlighting in a browser UI.
+
+**Architecture:** Python Flask backend on localhost:5000 serves a plain HTML/CSS/JS frontend. yt-dlp downloads YouTube audio to a temp file; lrclib.net provides free LRC timed lyrics searched by song title + artist. The browser `<audio>` element handles playback while JS polls currentTime to sync lyric highlighting.
+
+**Tech Stack:** Python 3.x, Flask, yt-dlp, requests, plain HTML/CSS/JS (no frontend framework)
+
+---
+
+## Prerequisites
+
+Before starting, ensure Python 3.8+ is installed. Then install dependencies:
+
+```bash
+cd C:/GPT5-Projects/Karaokee
+pip install flask yt-dlp requests pytest
+```
+
+---
+
+### Task 1: Project Scaffold
+
+**Files:**
+- Create: `requirements.txt`
+- Create: `app.py`
+- Create: `.gitignore`
+- Create: `temp/.gitkeep`
+- Create: `static/.gitkeep`
+- Create: `tests/__init__.py`
+
+**Step 1: Create `requirements.txt`**
+
+```
+flask
+yt-dlp
+requests
+pytest
+```
+
+**Step 2: Create `.gitignore`**
+
+```
+temp/
+__pycache__/
+*.pyc
+.env
+```
+
+**Step 3: Create minimal `app.py` (just enough to confirm Flask runs)**
+
+```python
+from flask import Flask
+
+app = Flask(__name__, static_folder='static', static_url_path='/static')
+
+@app.route('/')
+def index():
+    return 'Karaokee is running'
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
+```
+
+**Step 4: Create `tests/__init__.py`**
+
+Empty file — just `touch tests/__init__.py` or create it empty.
+
+**Step 5: Run Flask to verify it starts**
+
+```bash
+python app.py
+```
+Expected: `* Running on http://127.0.0.1:5000` — visit in browser, see "Karaokee is running".
+Stop with Ctrl+C.
+
+**Step 6: Commit**
+
+```bash
+git init
+git add requirements.txt app.py .gitignore tests/__init__.py
+git commit -m "feat: initial project scaffold"
+```
+
+---
+
+### Task 2: LRC Parsing (`lyrics.py`)
+
+LRC files use timestamps like `[01:23.45] Some lyric line`. We need to parse these into `[{time: float, text: str}]`.
+
+**Files:**
+- Create: `lyrics.py`
+- Create: `tests/test_lyrics.py`
+
+**Step 1: Write the failing tests**
+
+Create `tests/test_lyrics.py`:
+
+```python
+from lyrics import parse_lrc, fetch_lyrics
+
+
+def test_parse_lrc_basic():
+    lrc = "[00:10.00] Hello world\n[00:20.50] Goodbye world"
+    result = parse_lrc(lrc)
+    assert result == [
+        {"time": 10.0, "text": "Hello world"},
+        {"time": 20.5, "text": "Goodbye world"},
+    ]
+
+
+def test_parse_lrc_skips_metadata():
+    lrc = "[ti:My Song]\n[ar:Artist]\n[00:05.00] First line"
+    result = parse_lrc(lrc)
+    assert result == [{"time": 5.0, "text": "First line"}]
+
+
+def test_parse_lrc_empty():
+    assert parse_lrc("") == []
+
+
+def test_parse_lrc_ignores_blank_text():
+    lrc = "[00:01.00] \n[00:02.00] Real line"
+    result = parse_lrc(lrc)
+    assert result == [{"time": 2.0, "text": "Real line"}]
+```
+
+**Step 2: Run tests to verify they fail**
+
+```bash
+pytest tests/test_lyrics.py -v
+```
+Expected: `ModuleNotFoundError: No module named 'lyrics'`
+
+**Step 3: Create `lyrics.py` with `parse_lrc`**
+
+```python
+import re
+import requests
+
+
+def parse_lrc(lrc_text: str) -> list[dict]:
+    """Parse LRC format string into list of {time: float, text: str} dicts."""
+    lines = []
+    pattern = re.compile(r'^\[(\d+):(\d+\.\d+)\]\s*(.*)$')
+    for line in lrc_text.splitlines():
+        match = pattern.match(line.strip())
+        if match:
+            minutes = int(match.group(1))
+            seconds = float(match.group(2))
+            text = match.group(3).strip()
+            if text:
+                lines.append({"time": minutes * 60 + seconds, "text": text})
+    return lines
+
+
+def fetch_lyrics(title: str, artist: str) -> list[dict]:
+    """Search lrclib.net for timed lyrics. Returns parsed list or empty list."""
+    try:
+        query = f"{title} {artist}".strip()
+        resp = requests.get(
+            "https://lrclib.net/api/search",
+            params={"q": query},
+            timeout=10
+        )
+        resp.raise_for_status()
+        results = resp.json()
+        for result in results:
+            lrc = result.get("syncedLyrics") or result.get("plainLyrics", "")
+            if lrc:
+                parsed = parse_lrc(lrc)
+                if parsed:
+                    return parsed
+        return []
+    except Exception:
+        return []
+```
+
+**Step 4: Run tests to verify they pass**
+
+```bash
+pytest tests/test_lyrics.py -v
+```
+Expected: 4 PASSED
+
+**Step 5: Commit**
+
+```bash
+git add lyrics.py tests/test_lyrics.py
+git commit -m "feat: add LRC parsing and lrclib.net lyrics fetcher"
+```
+
+---
+
+### Task 3: YouTube Downloader (`downloader.py`)
+
+**Files:**
+- Create: `downloader.py`
+- Create: `tests/test_downloader.py`
+
+**Step 1: Write the failing tests**
+
+Create `tests/test_downloader.py`:
+
+```python
+from unittest.mock import patch, MagicMock
+from downloader import extract_metadata, download_audio
+
+
+def test_extract_metadata_returns_title_and_artist():
+    mock_info = {
+        "title": "Bohemian Rhapsody",
+        "artist": "Queen",
+        "uploader": "Queen Official",
+    }
+    with patch("downloader.yt_dlp.YoutubeDL") as MockYDL:
+        instance = MockYDL.return_value.__enter__.return_value
+        instance.extract_info.return_value = mock_info
+        result = extract_metadata("https://youtube.com/watch?v=fake")
+    assert result["title"] == "Bohemian Rhapsody"
+    assert result["artist"] == "Queen"
+
+
+def test_extract_metadata_falls_back_to_uploader():
+    mock_info = {
+        "title": "Some Song",
+        "uploader": "FallbackChannel",
+    }
+    with patch("downloader.yt_dlp.YoutubeDL") as MockYDL:
+        instance = MockYDL.return_value.__enter__.return_value
+        instance.extract_info.return_value = mock_info
+        result = extract_metadata("https://youtube.com/watch?v=fake")
+    assert result["artist"] == "FallbackChannel"
+```
+
+**Step 2: Run tests to verify they fail**
+
+```bash
+pytest tests/test_downloader.py -v
+```
+Expected: `ModuleNotFoundError: No module named 'downloader'`
+
+**Step 3: Create `downloader.py`**
+
+```python
+import os
+import yt_dlp
+
+
+TEMP_DIR = os.path.join(os.path.dirname(__file__), "temp")
+AUDIO_PATH = os.path.join(TEMP_DIR, "audio.webm")
+
+
+def extract_metadata(url: str) -> dict:
+    """Extract title and artist from a YouTube URL without downloading."""
+    ydl_opts = {"quiet": True, "skip_download": True}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    return {
+        "title": info.get("title", "Unknown Title"),
+        "artist": info.get("artist") or info.get("uploader", "Unknown Artist"),
+    }
+
+
+def download_audio(url: str) -> str:
+    """Download audio from YouTube URL to temp/audio.webm. Returns file path."""
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": AUDIO_PATH,
+        "quiet": True,
+        "overwrites": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+    return AUDIO_PATH
+```
+
+**Step 4: Run tests to verify they pass**
+
+```bash
+pytest tests/test_downloader.py -v
+```
+Expected: 2 PASSED
+
+**Step 5: Commit**
+
+```bash
+git add downloader.py tests/test_downloader.py
+git commit -m "feat: add yt-dlp audio downloader and metadata extractor"
+```
+
+---
+
+### Task 4: Flask Routes (`app.py`)
+
+Wire up the backend routes: `POST /load`, `GET /audio`, `GET /lyrics`.
+
+**Files:**
+- Modify: `app.py`
+- Create: `tests/test_app.py`
+
+**Step 1: Write the failing tests**
+
+Create `tests/test_app.py`:
+
+```python
+import json
+import pytest
+from unittest.mock import patch
+from app import app
+
+
+@pytest.fixture
+def client():
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        yield client
+
+
+def test_index_returns_200(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+
+
+def test_load_missing_url(client):
+    resp = client.post("/load", json={})
+    assert resp.status_code == 400
+    data = json.loads(resp.data)
+    assert "error" in data
+
+
+def test_load_success(client):
+    with patch("app.extract_metadata") as mock_meta, \
+         patch("app.download_audio") as mock_dl, \
+         patch("app.fetch_lyrics") as mock_lyrics:
+        mock_meta.return_value = {"title": "Test Song", "artist": "Test Artist"}
+        mock_dl.return_value = "/fake/path/audio.webm"
+        mock_lyrics.return_value = [{"time": 1.0, "text": "Hello"}]
+        resp = client.post("/load", json={"url": "https://youtube.com/watch?v=fake"})
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["title"] == "Test Song"
+    assert data["artist"] == "Test Artist"
+    assert data["lyrics"] == [{"time": 1.0, "text": "Hello"}]
+    assert data["audioUrl"] == "/audio"
+
+
+def test_load_no_lyrics(client):
+    with patch("app.extract_metadata") as mock_meta, \
+         patch("app.download_audio") as mock_dl, \
+         patch("app.fetch_lyrics") as mock_lyrics:
+        mock_meta.return_value = {"title": "Obscure Song", "artist": "Nobody"}
+        mock_dl.return_value = "/fake/path/audio.webm"
+        mock_lyrics.return_value = []
+        resp = client.post("/load", json={"url": "https://youtube.com/watch?v=fake"})
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["lyrics"] == []
+    assert "lyricsError" in data
+```
+
+**Step 2: Run tests to verify they fail**
+
+```bash
+pytest tests/test_app.py -v
+```
+Expected: failures due to missing routes.
+
+**Step 3: Replace `app.py` with full implementation**
+
+```python
+import os
+from flask import Flask, request, jsonify, send_file, send_from_directory
+
+from downloader import extract_metadata, download_audio, AUDIO_PATH
+from lyrics import fetch_lyrics
+
+app = Flask(__name__, static_folder='static', static_url_path='/static')
+
+
+@app.route('/')
+def index():
+    return send_from_directory('static', 'index.html')
+
+
+@app.route('/player')
+def player():
+    return send_from_directory('static', 'player.html')
+
+
+@app.route('/load', methods=['POST'])
+def load():
+    data = request.get_json()
+    url = (data or {}).get('url', '').strip()
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
+
+    try:
+        meta = extract_metadata(url)
+    except Exception as e:
+        return jsonify({"error": f"Could not load video: {str(e)}"}), 400
+
+    title = (data.get('title') or meta['title']).strip()
+    artist = (data.get('artist') or meta['artist']).strip()
+
+    try:
+        download_audio(url)
+    except Exception as e:
+        return jsonify({"error": f"Could not download audio: {str(e)}"}), 400
+
+    lyrics = fetch_lyrics(title, artist)
+    response = {
+        "title": title,
+        "artist": artist,
+        "audioUrl": "/audio",
+        "lyrics": lyrics,
+    }
+    if not lyrics:
+        response["lyricsError"] = "No lyrics found. Edit artist/title and retry."
+
+    return jsonify(response)
+
+
+@app.route('/audio')
+def audio():
+    if not os.path.exists(AUDIO_PATH):
+        return jsonify({"error": "No audio loaded"}), 404
+    return send_file(AUDIO_PATH, mimetype='audio/webm')
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
+```
+
+**Step 4: Run tests to verify they pass**
+
+```bash
+pytest tests/test_app.py -v
+```
+Expected: 4 PASSED
+
+**Step 5: Commit**
+
+```bash
+git add app.py tests/test_app.py
+git commit -m "feat: add Flask routes for /load and /audio"
+```
+
+---
+
+### Task 5: Setup Screen (`static/index.html` + `static/style.css`)
+
+**Files:**
+- Create: `static/index.html`
+- Create: `static/style.css`
+
+**Step 1: Create `static/style.css`**
+
+```css
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: #0d0d0d;
+    color: #f0f0f0;
+    font-family: 'Segoe UI', sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+.card {
+    background: #1a1a2e;
+    border-radius: 12px;
+    padding: 40px;
+    width: 480px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+
+h1 {
+    font-size: 2rem;
+    text-align: center;
+    margin-bottom: 32px;
+    color: #e040fb;
+}
+
+label {
+    display: block;
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-bottom: 6px;
+}
+
+input[type="text"] {
+    width: 100%;
+    padding: 10px 14px;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 8px;
+    color: #f0f0f0;
+    font-size: 0.95rem;
+    margin-bottom: 18px;
+}
+
+input[type="text"]:focus {
+    outline: none;
+    border-color: #e040fb;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    background: #e040fb;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.2s;
+}
+
+button:hover { background: #c026d3; }
+button:disabled { background: #555; cursor: not-allowed; }
+
+#status {
+    margin-top: 16px;
+    text-align: center;
+    font-size: 0.9rem;
+    min-height: 1.2em;
+    color: #aaa;
+}
+
+#status.error { color: #f87171; }
+#status.success { color: #4ade80; }
+```
+
+**Step 2: Create `static/index.html`**
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Karaokee</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="card">
+        <h1>🎤 Karaokee</h1>
+
+        <label for="url">YouTube URL</label>
+        <input type="text" id="url" placeholder="https://youtube.com/watch?v=..." />
+
+        <label for="artist">Artist <span style="color:#666">(auto-filled)</span></label>
+        <input type="text" id="artist" placeholder="Artist name" />
+
+        <label for="title">Title <span style="color:#666">(auto-filled)</span></label>
+        <input type="text" id="title" placeholder="Song title" />
+
+        <button id="loadBtn" onclick="loadSong()">Load Song</button>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const loadBtn = document.getElementById('loadBtn');
+
+        async function loadSong() {
+            const url = document.getElementById('url').value.trim();
+            if (!url) { setStatus('Please enter a YouTube URL.', 'error'); return; }
+
+            loadBtn.disabled = true;
+            setStatus('Fetching metadata...', '');
+
+            // First: get metadata only (fast)
+            const metaResp = await fetch('/load', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            });
+
+            if (!metaResp.ok) {
+                const err = await metaResp.json();
+                setStatus(err.error || 'Failed to load song.', 'error');
+                loadBtn.disabled = false;
+                return;
+            }
+
+            const data = await metaResp.json();
+
+            // Auto-fill artist/title if blank
+            if (!document.getElementById('artist').value) {
+                document.getElementById('artist').value = data.artist;
+            }
+            if (!document.getElementById('title').value) {
+                document.getElementById('title').value = data.title;
+            }
+
+            if (data.lyricsError) {
+                setStatus(data.lyricsError, 'error');
+                loadBtn.disabled = false;
+                return;
+            }
+
+            setStatus('Ready! Loading player...', 'success');
+
+            // Store song data for player page
+            sessionStorage.setItem('songData', JSON.stringify(data));
+            window.location.href = '/player';
+        }
+
+        function setStatus(msg, type) {
+            statusEl.textContent = msg;
+            statusEl.className = type;
+        }
+
+        // Allow Enter key to trigger load
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Enter') loadSong();
+        });
+    </script>
+</body>
+</html>
+```
+
+**Step 3: Run Flask and manually verify the setup screen**
+
+```bash
+python app.py
+```
+Open `http://localhost:5000` — should see the dark-themed setup card with URL/Artist/Title fields and Load Song button.
+
+**Step 4: Commit**
+
+```bash
+git add static/index.html static/style.css
+git commit -m "feat: add setup screen UI"
+```
+
+---
+
+### Task 6: Karaoke Player Screen (`static/player.html` + `static/player.js`)
+
+**Files:**
+- Create: `static/player.html`
+- Create: `static/player.js`
+
+**Step 1: Create `static/player.html`**
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Karaokee — Player</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body { display: block; padding: 0; }
+
+        .player-header {
+            display: flex;
+            align-items: center;
+            padding: 16px 24px;
+            background: #1a1a2e;
+            border-bottom: 1px solid #2a2a4a;
+        }
+
+        .back-btn {
+            width: auto;
+            padding: 8px 16px;
+            font-size: 0.85rem;
+            margin-right: 16px;
+        }
+
+        .song-title {
+            font-size: 1.1rem;
+            color: #e040fb;
+            font-weight: 600;
+        }
+
+        #lyrics-container {
+            height: calc(100vh - 140px);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 24px;
+            position: relative;
+        }
+
+        #lyrics-scroll {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 18px;
+            transition: transform 0.3s ease;
+        }
+
+        .lyric-line {
+            font-size: 1.6rem;
+            color: #555;
+            text-align: center;
+            transition: color 0.2s, font-size 0.2s;
+            padding: 4px 0;
+        }
+
+        .lyric-line.active {
+            color: #e040fb;
+            font-size: 1.9rem;
+            font-weight: 700;
+        }
+
+        .lyric-line.upcoming {
+            color: #888;
+        }
+
+        #no-lyrics {
+            color: #555;
+            font-size: 1.2rem;
+            text-align: center;
+            display: none;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #1a1a2e;
+            border-top: 1px solid #2a2a4a;
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .ctrl-btn {
+            width: auto;
+            padding: 8px 14px;
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+
+        #seek {
+            flex: 1;
+            accent-color: #e040fb;
+        }
+
+        #volume {
+            width: 80px;
+            accent-color: #e040fb;
+        }
+
+        #time-display {
+            font-size: 0.85rem;
+            color: #aaa;
+            flex-shrink: 0;
+            min-width: 90px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="player-header">
+        <button class="back-btn ctrl-btn" onclick="window.location.href='/'">← Back</button>
+        <div class="song-title" id="song-title">Loading...</div>
+    </div>
+
+    <div id="lyrics-container">
+        <div id="lyrics-scroll"></div>
+        <div id="no-lyrics">♪ No synced lyrics available ♪</div>
+    </div>
+
+    <div class="controls">
+        <button class="ctrl-btn" id="skipBackBtn" onclick="skipBack()">⏮</button>
+        <button class="ctrl-btn" id="playBtn" onclick="togglePlay()">▶</button>
+        <button class="ctrl-btn" id="skipFwdBtn" onclick="skipFwd()">⏭</button>
+        <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
+        <div id="time-display">0:00 / 0:00</div>
+        <span style="font-size:0.8rem;color:#aaa">🔊</span>
+        <input type="range" id="volume" min="0" max="1" step="0.05" value="1">
+    </div>
+
+    <audio id="audio" src="/audio"></audio>
+
+    <script src="/static/player.js"></script>
+</body>
+</html>
+```
+
+**Step 2: Create `static/player.js`**
+
+```javascript
+const audio = document.getElementById('audio');
+const playBtn = document.getElementById('playBtn');
+const seekBar = document.getElementById('seek');
+const volumeBar = document.getElementById('volume');
+const timeDisplay = document.getElementById('time-display');
+const lyricsScroll = document.getElementById('lyrics-scroll');
+const noLyricsEl = document.getElementById('no-lyrics');
+
+let lyrics = [];
+let currentLineIndex = -1;
+
+// Load song data from session storage
+const songData = JSON.parse(sessionStorage.getItem('songData') || 'null');
+if (!songData) {
+    window.location.href = '/';
+}
+
+document.getElementById('song-title').textContent =
+    `${songData.artist} — ${songData.title}`;
+
+lyrics = songData.lyrics || [];
+
+if (lyrics.length === 0) {
+    noLyricsEl.style.display = 'block';
+} else {
+    renderLyrics();
+}
+
+function renderLyrics() {
+    lyricsScroll.innerHTML = '';
+    lyrics.forEach((line, i) => {
+        const el = document.createElement('div');
+        el.className = 'lyric-line';
+        el.textContent = line.text;
+        el.dataset.index = i;
+        lyricsScroll.appendChild(el);
+    });
+}
+
+function updateLyrics() {
+    if (lyrics.length === 0) return;
+
+    const t = audio.currentTime;
+    let idx = -1;
+    for (let i = 0; i < lyrics.length; i++) {
+        if (lyrics[i].time <= t) idx = i;
+        else break;
+    }
+
+    if (idx === currentLineIndex) return;
+    currentLineIndex = idx;
+
+    const lines = lyricsScroll.querySelectorAll('.lyric-line');
+    lines.forEach((el, i) => {
+        el.classList.remove('active', 'upcoming');
+        if (i === idx) el.classList.add('active');
+        else if (i > idx && i <= idx + 2) el.classList.add('upcoming');
+    });
+
+    // Scroll active line to center
+    if (idx >= 0) {
+        const activeLine = lines[idx];
+        const containerHeight = document.getElementById('lyrics-container').offsetHeight;
+        const lineTop = activeLine.offsetTop;
+        const lineHeight = activeLine.offsetHeight;
+        lyricsScroll.style.transform =
+            `translateY(${containerHeight / 2 - lineTop - lineHeight / 2}px)`;
+    }
+}
+
+// Poll every 100ms for lyric sync
+setInterval(updateLyrics, 100);
+
+// Play/pause
+function togglePlay() {
+    if (audio.paused) {
+        audio.play();
+        playBtn.textContent = '⏸';
+    } else {
+        audio.pause();
+        playBtn.textContent = '▶';
+    }
+}
+
+// Skip ±10s
+function skipBack() { audio.currentTime = Math.max(0, audio.currentTime - 10); }
+function skipFwd() { audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 10); }
+
+// Seek bar
+audio.addEventListener('timeupdate', () => {
+    if (!audio.duration) return;
+    seekBar.value = (audio.currentTime / audio.duration) * 100;
+    timeDisplay.textContent = `${fmt(audio.currentTime)} / ${fmt(audio.duration)}`;
+});
+
+seekBar.addEventListener('input', () => {
+    if (audio.duration) {
+        audio.currentTime = (seekBar.value / 100) * audio.duration;
+    }
+});
+
+// Volume
+volumeBar.addEventListener('input', () => { audio.volume = volumeBar.value; });
+
+// Format seconds as m:ss
+function fmt(s) {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60).toString().padStart(2, '0');
+    return `${m}:${sec}`;
+}
+
+// Auto-play when audio is ready
+audio.addEventListener('canplay', () => {
+    audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
+});
+```
+
+**Step 3: Run Flask and do a manual end-to-end test**
+
+```bash
+python app.py
+```
+
+1. Open `http://localhost:5000`
+2. Paste a public YouTube URL (e.g. a well-known song)
+3. Click Load Song
+4. Verify it transitions to the player
+5. Verify lyrics highlight and scroll in sync with audio
+
+**Step 4: Commit**
+
+```bash
+git add static/player.html static/player.js
+git commit -m "feat: add karaoke player with lyric sync"
+```
+
+---
+
+### Task 7: Launcher Script
+
+**Files:**
+- Create: `start.bat`
+
+**Step 1: Create `start.bat`**
+
+```bat
+@echo off
+start "" python app.py
+timeout /t 2 /nobreak >nul
+start http://localhost:5000
+```
+
+**Step 2: Test it**
+
+Double-click `start.bat` from Windows Explorer. Expected: browser opens at `http://localhost:5000`.
+
+**Step 3: Commit**
+
+```bash
+git add start.bat
+git commit -m "feat: add start.bat one-click launcher"
+```
+
+---
+
+### Task 8: Retry Lyrics Flow
+
+When lyrics are not found, the user should be able to edit artist/title and retry without re-downloading audio.
+
+**Files:**
+- Modify: `app.py` — add `GET /retry-lyrics` route
+- Modify: `static/index.html` — add retry button behavior
+
+**Step 1: Add `/retry-lyrics` route to `app.py`**
+
+Add this route after the `/audio` route:
+
+```python
+@app.route('/retry-lyrics', methods=['POST'])
+def retry_lyrics():
+    data = request.get_json()
+    title = (data or {}).get('title', '').strip()
+    artist = (data or {}).get('artist', '').strip()
+    if not title or not artist:
+        return jsonify({"error": "Title and artist required"}), 400
+    lyrics = fetch_lyrics(title, artist)
+    if not lyrics:
+        return jsonify({"lyrics": [], "lyricsError": "Still no lyrics found."}), 200
+    return jsonify({"lyrics": lyrics})
+```
+
+**Step 2: Update `static/index.html` — add retry button**
+
+After the `#status` div, add:
+
+```html
+<button id="retryBtn" onclick="retryLyrics()" style="display:none;margin-top:10px;background:#334;">
+    Retry with edited title/artist
+</button>
+```
+
+And add the `retryLyrics` function in the `<script>` block:
+
+```javascript
+async function retryLyrics() {
+    const title = document.getElementById('title').value.trim();
+    const artist = document.getElementById('artist').value.trim();
+    setStatus('Searching for lyrics...', '');
+    const resp = await fetch('/retry-lyrics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, artist })
+    });
+    const data = await resp.json();
+    if (data.lyricsError) {
+        setStatus(data.lyricsError, 'error');
+        return;
+    }
+    const existing = JSON.parse(sessionStorage.getItem('songData') || '{}');
+    existing.lyrics = data.lyrics;
+    existing.title = title;
+    existing.artist = artist;
+    sessionStorage.setItem('songData', JSON.stringify(existing));
+    setStatus('Lyrics found! Loading player...', 'success');
+    window.location.href = '/player';
+}
+```
+
+Also update the `loadSong` function to show the retry button when `data.lyricsError` is present:
+
+```javascript
+// In the lyricsError block inside loadSong():
+if (data.lyricsError) {
+    setStatus(data.lyricsError, 'error');
+    document.getElementById('retryBtn').style.display = 'block';
+    loadBtn.disabled = false;
+    return;
+}
+```
+
+**Step 3: Add test for retry route in `tests/test_app.py`**
+
+```python
+def test_retry_lyrics_success(client):
+    with patch("app.fetch_lyrics") as mock_lyrics:
+        mock_lyrics.return_value = [{"time": 1.0, "text": "Line one"}]
+        resp = client.post("/retry-lyrics", json={"title": "My Song", "artist": "Me"})
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["lyrics"] == [{"time": 1.0, "text": "Line one"}]
+
+
+def test_retry_lyrics_missing_params(client):
+    resp = client.post("/retry-lyrics", json={})
+    assert resp.status_code == 400
+```
+
+**Step 4: Run all tests**
+
+```bash
+pytest tests/ -v
+```
+Expected: all tests PASS
+
+**Step 5: Commit**
+
+```bash
+git add app.py static/index.html tests/test_app.py
+git commit -m "feat: add retry-lyrics route and retry UI flow"
+```
+
+---
+
+## Final Verification
+
+Run the full test suite one last time:
+
+```bash
+pytest tests/ -v
+```
+
+Then do a complete manual end-to-end run:
+1. `python app.py`
+2. Open `http://localhost:5000`
+3. Paste a YouTube URL → verify metadata fills in
+4. Click Load Song → verify transitions to player
+5. Verify audio plays and lyrics sync
+6. Test pause, seek, skip back/forward, volume
+7. Test Back button returns to setup
+8. Test a URL with no matching lyrics → verify retry flow works
+
+```bash
+git tag v1.0
+```
