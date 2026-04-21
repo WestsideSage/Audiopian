@@ -598,6 +598,21 @@ class GameMode {
         }
     }
 
+    _resetLineState(lineStartAudioTime, discardPrevLine) {
+        this.matchedSet = new Map();
+        this.vadMatchedSet = new Map();
+        this.asrConfirmedSet = new Set();
+        this.lineStartWordCount = normalizeWords(this.transcript).length;
+        this.lineStartTranscriptPos = this.lineStartWordCount;
+        this.hotWordIndex = -1;
+        this.whisperBuffer = '';
+        this.lineHadAsrEvent = false;
+        this._lineComparisonCount = 0;
+        this._telemetryLoggedMatches = new Set();
+        this._lineStartAudioTime = lineStartAudioTime;
+        if (discardPrevLine) this.prevLine = null;
+    }
+
     /**
      * Handle seek/skip during game mode. Resets current line scoring state
      * so that pre-seek transcript doesn't count toward the new position.
@@ -606,14 +621,7 @@ class GameMode {
         if (!this.active) return;
         // Discard current line's match state — it will be re-established
         // when updateLyrics fires and calls setActiveLine for the new position.
-        this.matchedSet = new Map();
-        this.vadMatchedSet = new Map();
-        this.asrConfirmedSet = new Set();
-        this.lineStartWordCount = normalizeWords(this.transcript).length;
-        this.lineStartTranscriptPos = this.lineStartWordCount;
-        this.hotWordIndex = -1;
-        this.whisperBuffer = '';
-        this.prevLine = null;   // discard any pending overlap scoring
+        this._resetLineState((audio && isFinite(audio.currentTime)) ? audio.currentTime : 0, true);
         this._updateWordSpans();
     }
 
@@ -1075,23 +1083,12 @@ class GameMode {
 
         // --- Set up new line ---
         this.activeLineIdx = lineIdx;
-        this._lineStartAudioTime = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
-        this.lineStartWordCount = normalizeWords(this.transcript).length;
-        this.lineStartTranscriptPos = this.lineStartWordCount;
-        this.matchedSet = new Map();
-        this.vadMatchedSet = new Map();
-        this.asrConfirmedSet = new Set();
-        this.lineHadAsrEvent = false;
-        this._lineComparisonCount = 0;
-        this.whisperBuffer = '';
-        this._telemetryLoggedMatches = new Set();
+        this._resetLineState((audio && isFinite(audio.currentTime)) ? audio.currentTime : 0, false);
 
         // Load interpolated word timings for this line
         this.wordTimings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
             ? this.allWordTimings[lineIdx]
             : [];
-        this.hotWordIndex = -1;
-
         // Load adaptive window params for this line's tempo
         this.currentParams = (this.wordTimings && this.wordTimings.tempoClass)
             ? getWindowParams(this.wordTimings.tempoClass)
