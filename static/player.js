@@ -412,6 +412,7 @@ class GameMode {
         this.vadMatchedSet  = new Map(); // indices matched via VAD (optimistic)
         this.asrConfirmedSet = new Set(); // VAD-matched words later confirmed by ASR
         this.transcript        = '';      // accumulated final transcript (never reset)
+        this.transcriptWords   = [];      // normalized final transcript cached at append time
         this.lineStartWordCount = 0;      // word count in transcript when current line started
         this.lineStartTranscriptPos = 0;  // transcript word index when current line started (fence)
         this.latestInterim     = '';      // most recent interim, used to anchor fast-song lines
@@ -572,7 +573,7 @@ class GameMode {
         this.matchedSet = new Map();
         this.vadMatchedSet = new Map();
         this.asrConfirmedSet = new Set();
-        this.lineStartWordCount = normalizeWords(this.transcript).length;
+        this.lineStartWordCount = this.transcriptWords.length;
         this.lineStartTranscriptPos = this.lineStartWordCount;
         this.hotWordIndex = -1;
         this.whisperBuffer = '';
@@ -588,6 +589,7 @@ class GameMode {
         this.lineWords = [];
         this._resetLineState(0, true);
         this.transcript = '';
+        this.transcriptWords = [];
         this.lineStartWordCount = 0;
         this.lineStartTranscriptPos = 0;
         this.latestInterim = '';
@@ -666,7 +668,10 @@ class GameMode {
                     interim += e.results[i][0].transcript + ' ';
                 }
             }
-            if (finalText) self.transcript += finalText;
+            if (finalText) {
+                self.transcript += finalText;
+                self.transcriptWords = self.transcriptWords.concat(normalizeWords(finalText));
+            }
             self.latestInterim = interim;
 
             // HOT-WORD PRIORITY: check predicted word first for instant green
@@ -701,7 +706,7 @@ class GameMode {
 
             // Diagnostic: log what the recognition heard and what matched
             if (window._kDebug) {
-                const spokenFull = normalizeWords(self.transcript + interim);
+                const spokenFull = self.transcriptWords.concat(normalizeWords(interim));
                 const scanFrom   = self.lineStartTranscriptPos;
                 self._debugLog('RESULT', {
                     lineIdx:   self.activeLineIdx,
@@ -1080,7 +1085,7 @@ class GameMode {
                 matched:       this.matchedSet.size,
                 total:         this.lineWords.length,
                 missedWords:   this.lineWords.filter(function(w, i) { return !this.matchedSet.has(i); }.bind(this)).join(', '),
-                transcriptTail: normalizeWords(this.transcript).slice(-8).join(' '),
+                transcriptTail: this.transcriptWords.slice(-8).join(' '),
                 interim:       this.latestInterim,
             });
             this._logTransition(
@@ -1420,7 +1425,7 @@ class GameMode {
     _lateScoreLine(lineIdx, lineWords, matchedSet, lineStartWordCount, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet) {
         if (lineWords.length === 0) return;
 
-        const spokenNow = normalizeWords(this.transcript);
+        const spokenNow = this.transcriptWords;
         // Intentionally retains the -4 lookback (unlike _collectMatches which uses a
         // strict fence). This method runs 800ms after line change, so it needs slack
         // to catch late-arriving recognition finals from the transition boundary.
@@ -1765,7 +1770,7 @@ class GameMode {
             return `<span class="${cls}">[${w}]</span>`;
         }).join(' ');
 
-        const finalWords = normalizeWords(this.transcript);
+        const finalWords = this.transcriptWords;
         const tail    = finalWords.slice(-10).join(' ') || '—';
         const interim = this.latestInterim.trim() || '—';
         const wBuf    = finalWords.length;
