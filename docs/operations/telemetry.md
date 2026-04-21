@@ -32,6 +32,7 @@ Current telemetry is useful for analysis but not sufficient by itself to determi
 - use telemetry to identify candidate regressions
 - use `tests/test_scoring.cjs` for deterministic arithmetic regressions
 - when a failure mode is found, add a focused pure regression case rather than relying on schema-only checks
+- use `tests/test_telemetry_replay.cjs` as the current replay harness pattern; it consumes a telemetry-shaped JSON fixture with an explicit `replay` section because production exports are not yet replay-complete
 
 ## Current Policy
 

@@ -1,0 +1,65 @@
+{
+  "meta": {
+    "songTitle": "Replay Fixture",
+    "gameVersion": "phase-4"
+  },
+  "transitions": [
+    {
+      "fromIdx": 0,
+      "toIdx": 1,
+      "fromText": "Free your mind",
+      "trigger": "score",
+      "matchedWords": 3,
+      "totalWords": 3,
+      "weightedMatched": 2,
+      "weightedTotal": 2.5,
+      "missedWords": ["your"]
+    },
+    {
+      "fromIdx": 1,
+      "toIdx": 2,
+      "fromText": "Let it fly",
+      "trigger": "score",
+      "matchedWords": 3,
+      "totalWords": 3,
+      "weightedMatched": 2.3,
+      "weightedTotal": 2.5,
+      "missedWords": []
+    }
+  ],
+  "replay": {
+    "version": 1,
+    "lines": [
+      {
+        "lineIdx": 0,
+        "fromText": "Free your mind",
+        "matchedScores": [1, 1, 1],
+        "vadMatchedIndices": [1],
+        "asrConfirmedIndices": [0, 2],
+        "expected": {
+          "matchedWords": 3,
+          "totalWords": 3,
+          "weightedMatched": 2,
+          "weightedTotal": 2.5,
+          "missedWords": ["your"],
+          "perfect": false
+        }
+      },
+      {
+        "lineIdx": 1,
+        "fromText": "Let it fly",
+        "matchedScores": [1, 1, 0.8],
+        "vadMatchedIndices": [],
+        "asrConfirmedIndices": [0, 1, 2],
+        "expected": {
+          "matchedWords": 3,
+          "totalWords": 3,
+          "weightedMatched": 2.3,
+          "weightedTotal": 2.5,
+          "missedWords": [],
+          "perfect": true
+        }
+      }
+    ]
+  }
+}
