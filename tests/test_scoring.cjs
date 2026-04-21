@@ -174,4 +174,11 @@ lineCases.forEach(function(testCase) {
     assert.strictEqual(actual.perfect, testCase.expected.perfect, testCase.label + ' perfect');
 });
 
+var repeatedTargets = scoring.collectSequentialWordMatches(
+    ['la'],
+    ['la', 'la', 'la'],
+    [{ phonetic: scoring.doubleMetaphone('la') }, { phonetic: scoring.doubleMetaphone('la') }, { phonetic: scoring.doubleMetaphone('la') }]
+);
+assert.deepStrictEqual(Array.from(repeatedTargets.keys()), [0], 'one spoken token should only credit one repeated target slot');
+
 console.log('All scoring tests passed.');

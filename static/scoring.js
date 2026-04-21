@@ -487,6 +487,27 @@
         };
     }
 
+    function collectSequentialWordMatches(spokenWords, lineWords, wordTimings) {
+        var matches = new Map();
+        var spokenIdx = 0;
+
+        for (var li = 0; li < lineWords.length; li++) {
+            var target = lineWords[li];
+            var targetPhonetic = wordTimings && wordTimings[li] ? wordTimings[li].phonetic : undefined;
+
+            for (var si = spokenIdx; si < spokenWords.length; si++) {
+                var result = wordsMatchScore(spokenWords[si], target, targetPhonetic);
+                if (result.score > 0) {
+                    matches.set(li, result.score);
+                    spokenIdx = si + 1;
+                    break;
+                }
+            }
+        }
+
+        return matches;
+    }
+
     function resetSpokenMatchCache() {
         spokenMetaphoneLRU.reset();
     }
@@ -502,6 +523,7 @@
         interpolateWordTimings: interpolateWordTimings,
         effectiveMatchScore: effectiveMatchScore,
         computeLineScore: computeLineScore,
+        collectSequentialWordMatches: collectSequentialWordMatches,
         resetSpokenMatchCache: resetSpokenMatchCache
     };
 });
