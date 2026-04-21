@@ -109,7 +109,7 @@ var lineCases = [
     {
         label: 'vad only downgraded',
         args: [['hey'], [{ weight: 1.0 }], new Map([[0, 1.0]]), new Map([[0, 1.0]]), new Set()],
-        expected: { totalWords: 1, matchedWords: 1, weightedTotal: 1.0, weightedMatched: 0.25, missedWordIndices: [], missedWords: [], perfect: false }
+        expected: { totalWords: 1, matchedWords: 1, weightedTotal: 1.0, weightedMatched: 0.0, missedWordIndices: [0], missedWords: ['hey'], perfect: false }
     },
     {
         label: 'vad confirmed by asr keeps full credit',
@@ -119,7 +119,7 @@ var lineCases = [
     {
         label: 'mixed weights with adlib',
         args: [['my', 'boy', 'yeah'], [{ weight: 1.0 }, { weight: 1.0 }, { weight: 0.25 }], new Map([[0, 1.0], [1, 0.8], [2, 1.0]]), new Map([[2, 1.0]]), new Set([0, 1])],
-        expected: { totalWords: 3, matchedWords: 3, weightedTotal: 2.25, weightedMatched: 1.8625, missedWordIndices: [], missedWords: [], perfect: false }
+        expected: { totalWords: 3, matchedWords: 3, weightedTotal: 2.25, weightedMatched: 1.8, missedWordIndices: [2], missedWords: ['yeah'], perfect: false }
     },
     {
         label: 'missed words tracked',
@@ -144,7 +144,7 @@ var lineCases = [
     {
         label: 'confirmed and unconfirmed vad mix',
         args: [['one', 'two'], [{ weight: 1.0 }, { weight: 1.0 }], new Map([[0, 1.0], [1, 1.0]]), new Map([[0, 1.0], [1, 1.0]]), new Set([1])],
-        expected: { totalWords: 2, matchedWords: 2, weightedTotal: 2.0, weightedMatched: 1.25, missedWordIndices: [], missedWords: [], perfect: false }
+        expected: { totalWords: 2, matchedWords: 2, weightedTotal: 2.0, weightedMatched: 1.0, missedWordIndices: [0], missedWords: ['one'], perfect: false }
     },
     {
         label: 'low weight miss still fails threshold',

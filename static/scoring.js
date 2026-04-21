@@ -449,7 +449,7 @@
     function effectiveMatchScore(rawScore, idx, vadMatchedSet, asrConfirmedSet) {
         if (rawScore > 0 && vadMatchedSet && vadMatchedSet.has && vadMatchedSet.has(idx) &&
             !(asrConfirmedSet && asrConfirmedSet.has && asrConfirmedSet.has(idx))) {
-            return 0.25;
+            return 0;
         }
         return rawScore;
     }

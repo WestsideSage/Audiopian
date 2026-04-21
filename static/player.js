@@ -1298,7 +1298,6 @@ class GameMode {
             if (!this.matchedSet.has(newHot)) {
                 this.matchedSet.set(newHot, 0.25);       // provisional — shows amber; upgradeable by ASR
                 this.vadMatchedSet.set(newHot, 0.25);
-                this.lineHadAsrEvent = true;             // VAD activity counts as "user was trying"
                 this._updateWordSpans();
                 this._logMatch(
                     this.wordTimings[newHot] ? this.wordTimings[newHot].word : '',
