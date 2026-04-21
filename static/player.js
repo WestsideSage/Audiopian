@@ -487,28 +487,7 @@ class GameMode {
         if (this.active) return;
         this.active = true;
         this._suspended = false;
-        this.activeLineIdx = -1;
-        this.lineWords = [];
-        this.matchedSet = new Map();
-        this.vadMatchedSet = new Map();
-        this.asrConfirmedSet = new Set();
-        this._lineComparisonCount = 0;   // total word comparisons attempted this line
-        this.transcript = '';
-        this.lineStartWordCount = 0;
-        this.lineStartTranscriptPos = 0;
-        this.latestInterim = '';
-        this.totalWords      = 0;
-        this.matchedWords    = 0;
-        this.weightedTotal   = 0;
-        this.weightedMatched = 0;
-        this.linesScored     = 0;
-        this.perfectLines    = 0;
-        this.currentStreak   = 0;
-        this.bestStreak      = 0;
-        this.whisperBuffer = '';
-        this.prevLine = null;
-        this._lineStartAudioTime = 0;
-        this._lastResultTime = Date.now();
+        this._resetSessionCounters();
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
         this._initTelemetry();   // always init so download button works whenever D is pressed
@@ -521,15 +500,6 @@ class GameMode {
         // Restore per-song LRC offset from localStorage
         this.lrcOffset = parseFloat(localStorage.getItem('lrcOffset_' + _songKey()) || '0');
         _updateOffsetDisplay();
-        this.wordTimings = [];
-        this.hotWordIndex = -1;
-        this.isSpeaking = false;
-        this._vadBaseline = 0;
-        this._vadBaselineReady = false;
-        this._vadBaselineSamples = [];
-        this._vadAnalyser = null;
-        this._vadAnalyserBuf = null;
-        this._energyThreshold = 0.01; // reset to default until baseline computed
 
         renderLyricsGameMode();
         this._setupRecognition();
@@ -611,6 +581,50 @@ class GameMode {
         this._telemetryLoggedMatches = new Set();
         this._lineStartAudioTime = lineStartAudioTime;
         if (discardPrevLine) this.prevLine = null;
+    }
+
+    _resetSessionCounters() {
+        this.activeLineIdx = -1;
+        this.lineWords = [];
+        this._resetLineState(0, true);
+        this.transcript = '';
+        this.lineStartWordCount = 0;
+        this.lineStartTranscriptPos = 0;
+        this.latestInterim = '';
+        this.totalWords = 0;
+        this.matchedWords = 0;
+        this.weightedTotal = 0;
+        this.weightedMatched = 0;
+        this.linesScored = 0;
+        this.perfectLines = 0;
+        this.currentStreak = 0;
+        this.bestStreak = 0;
+        this._lastResultTime = Date.now();
+        this._dbBuf = [];
+        this._telemetry = null;
+        this.wordTimings = [];
+        this.hotWordIndex = -1;
+        this.isSpeaking = false;
+        this._vadBaseline = 0;
+        this._vadBaselineReady = false;
+        this._vadBaselineSamples = [];
+        this._vadAnalyser = null;
+        this._vadAnalyserBuf = null;
+        this._energyThreshold = 0.01;
+        this._whisperInFlight = 0;
+        this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null };
+        this._whisperTrackStatus = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0 };
+        this._chunksDispatched = 0;
+        this._chunksSucceeded = 0;
+        this._chunksFailed503 = 0;
+        this._chunksFailed500 = 0;
+        this._chunksDroppedWhileLoading = 0;
+        this._chunksFailedNetwork = 0;
+        this._whisperResponses = 0;
+        this._whisperResponsesWithWords = 0;
+        this._whisperWordsTotal = 0;
+        this.allWordTimings = [];
+        this.songTempoProfile = null;
     }
 
     /**
@@ -2086,6 +2100,7 @@ function toggleGameMode() {
 function replayGame() {
     document.getElementById('gameModal').style.display = 'none';
     gameMode.stop();  // reset active flag so start() doesn't no-op
+    gameMode._resetSessionCounters();
     audio.currentTime = 0;
     audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
     gameMode.start();
