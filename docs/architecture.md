@@ -42,6 +42,12 @@ Karaokee ships as a Flask app plus server-served static files.
 - Per-session counters are reset by `_resetSessionCounters()`.
 - Pure matching and scoring helpers live in `static/match-helpers.js`, `static/sync-helpers.js`, and `static/scoring.js`.
 
+## Module-Split Decision
+
+Further `player.js` splitting is deferred until the app has fresh manual coverage and a replay harness for scoring-adjacent regressions.
+
+The highest-value extraction has already happened: pure matching, sync, and scoring helpers are isolated and Node-tested. What remains in `player.js` is orchestration across DOM state, audio timing, browser SpeechRecognition, Whisper dispatch, line transitions, and telemetry. That layer has the highest async regression risk, so another structural split should wait until the current behavior is validated with real songs and telemetry exports.
+
 ## Operational Constraints
 
 - The shipped frontend is `static/`, not `src/`.

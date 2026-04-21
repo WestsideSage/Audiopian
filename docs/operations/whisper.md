@@ -37,3 +37,13 @@ Current runtime defaults in `app.py`:
 - Treat browser SR as the real-time source.
 - Treat Whisper as supplemental confirmation or observability.
 - If the machine stays CPU-only, leave the defaults CPU-first instead of pretending CUDA is the normal path.
+
+## Dual-Track Decision
+
+Keep the browser SR + Whisper model for now.
+
+The retrospective showed Whisper was sparse and late on this machine, so it should not be promoted to the primary scorer. Removing it immediately would still be a product behavior change, not a cleanup. The current direction is:
+
+- keep browser SR as the scoring-critical real-time path
+- keep Whisper as an optional late-confirmation and observability layer
+- use fresh manual tests and telemetry exports to decide later whether Whisper's contribution justifies its complexity
