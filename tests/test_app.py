@@ -282,6 +282,41 @@ def test_whisper_status_returns_error_with_reason(client):
         _app_module._whisper_error = orig_err
 
 
+def test_whisper_status_reports_prewarm_failure_from_first_request(client, monkeypatch):
+    orig_state = _app_module._whisper_state
+    orig_error = _app_module._whisper_error
+    orig_once = _app_module._prewarm_once
+
+    _app_module._whisper_state = 'idle'
+    _app_module._whisper_error = None
+    _app_module._prewarm_once = False
+
+    def fake_prewarm():
+        _app_module._whisper_state = 'error'
+        _app_module._whisper_error = 'prewarm failed in test'
+
+    class ImmediateThread:
+        def __init__(self, target=None, daemon=None):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(_app_module, "_prewarm_whisper", fake_prewarm)
+    monkeypatch.setattr(_app_module.threading, "Thread", ImmediateThread)
+
+    try:
+        resp = client.get('/whisper-status')
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data['status'] == 'error'
+        assert data['error'] == 'prewarm failed in test'
+    finally:
+        _app_module._whisper_state = orig_state
+        _app_module._whisper_error = orig_error
+        _app_module._prewarm_once = orig_once
+
+
 # ---------------------------------------------------------------------------
 # /transcribe readiness gate + 503/500 split tests
 # ---------------------------------------------------------------------------
