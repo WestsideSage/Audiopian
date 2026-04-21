@@ -262,6 +262,8 @@
         return [p.substring(0, 4), s.substring(0, 4)];
     }
 
+    root.doubleMetaphone = doubleMetaphone;
+
     var spokenMetaphoneLRU = new MetaphoneLRU(50);
 
     function wordsMatch(spoken, target, targetPhonetic) {
