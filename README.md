@@ -1,42 +1,32 @@
 # Karaokee
 
-A real-time karaoke scoring engine that matches your singing against song lyrics using dual-track automatic speech recognition (ASR), phonetic matching, and adaptive timing.
+Karaokee is a Flask-served karaoke scoring app. It loads audio from YouTube metadata/download flow, fetches synced lyrics from lrclib, and scores live singing with browser speech recognition plus optional server-side Whisper support.
 
 ## How It Works
 
-1. **Search & Load** — Paste a YouTube URL or search by song name. The backend extracts audio via yt-dlp and fetches synced lyrics from lrclib.net.
-
-2. **Dual-Track ASR** — Two speech recognition systems run in parallel:
-   - **Browser SpeechRecognition** for low-latency interim results
-   - **Whisper** (server-side, via faster-whisper) for high-accuracy word-level timestamps
-
-3. **Fuzzy Matching** — Words are matched using multiple strategies:
-   - Exact match
-   - Double Metaphone phonetic codes ("night" ≈ "knight")
-   - Levenshtein edit distance with length-adaptive thresholds
-   - Contraction expansion ("gonna" ↔ "going to")
-   - Slang normalization (76+ bidirectional mappings)
-
-4. **Adaptive Sync** — Timing windows adjust based on song tempo:
-   - Slow songs (< 2 wps): wider windows, longer overlap
-   - Fast songs (> 5 wps): tighter windows, shorter chunks
-
-5. **Scoring** — Per-word scoring with positional accuracy, streak tracking, and VAD-assisted provisional credit for words the mic picks up but ASR hasn't confirmed yet.
+1. Search or paste a YouTube URL.
+2. The backend downloads audio and fetches synced lyrics.
+3. The browser plays the track and runs game mode against the lyric timeline.
+4. Matching uses exact, contraction, slang, phonetic, and edit-distance strategies.
+5. Scoring uses weighted lyric words and adaptive timing windows by tempo.
 
 ## Tech Stack
 
-- **Backend:** Python, Flask, faster-whisper, yt-dlp
-- **Frontend:** Vanilla HTML/JS/CSS (no framework)
-- **ASR:** Browser Web Speech API + server-side Whisper (large-v3-turbo on CUDA)
-- **Audio:** Web Audio API (AudioWorklet for real-time mic processing)
+- Backend: Python, Flask, faster-whisper, yt-dlp
+- Frontend: plain HTML, CSS, and JavaScript served from `static/`
+- ASR: browser Web Speech API plus optional server-side Whisper
+- Audio: Web Audio API with an AudioWorklet for mic sampling and VAD
 
 ## Setup
 
 ### Prerequisites
 
 - Python 3.10+
-- NVIDIA GPU with CUDA support (for Whisper)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) (installed via pip)
+- `yt-dlp` via `pip install -r requirements.txt`
+
+Optional:
+
+- NVIDIA GPU with a working CUDA runtime if you want to opt Whisper into `cuda`
 
 ### Install
 
@@ -50,42 +40,50 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Then open http://localhost:5000.
+Then open `http://localhost:5000`.
 
-On Windows, you can also use `start.bat` which launches the server and opens the browser.
+On Windows, `start.bat` launches the server and opens the browser.
 
-### Environment Variables
+## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FLASK_DEBUG` | `0` | Set to `1` for Flask debug mode |
 | `WHISPER_MODEL` | `large-v3-turbo` | Whisper model name |
-| `WHISPER_DEVICE` | `cuda` | Device for Whisper inference |
-| `WHISPER_COMPUTE` | `float16` | Compute type for Whisper |
+| `WHISPER_DEVICE` | `cpu` | Default runtime on this machine |
+| `WHISPER_COMPUTE` | `int8` | Compute type for the configured device |
+| `WHISPER_COMPUTE_CPU` | `int8` | CPU fallback compute type |
+
+Note: older docs and plans may mention CUDA defaults. The current shipped runtime is CPU-first on this machine unless you explicitly override it.
 
 ## Project Structure
 
-```
-├── app.py              # Flask server — API endpoints, Whisper lifecycle
-├── downloader.py       # YouTube metadata extraction and audio download
-├── lyrics.py           # LRC lyrics fetching and candidate ranking
-├── requirements.txt    # Python dependencies
-├── start.bat           # Windows launcher
-├── static/
-│   ├── index.html          # Search page
-│   ├── player.html         # Playback + game mode UI
-│   ├── player.js           # Core game engine — matching, scoring, telemetry
-│   ├── match-helpers.js    # Contraction/slang/phonetic matching
-│   ├── sync-helpers.js     # Tempo classification, adaptive timing
-│   ├── audio-processor.js  # AudioWorklet for mic sampling + VAD
-│   └── style.css
-├── tests/              # pytest + Node.js test suites
-└── docs/plans/         # Design docs showing iterative development
+```text
+app.py                 Flask server and Whisper lifecycle
+downloader.py          YouTube metadata extraction and audio download
+lyrics.py              lrclib fetch and candidate ranking
+static/                Production frontend served by Flask
+tests/                 Pytest and Node regression suites
+docs/                  Audits, plans, retrospectives, architecture, operations
+output_telemetry/      Exported gameplay telemetry for offline analysis
 ```
 
-## Design Documents
+## Documentation
 
-The [docs/plans/](docs/plans/) directory contains paired design specs and implementation plans for each feature iteration, showing how the scoring algorithm evolved through telemetry-driven tuning. See the [index](docs/plans/README.md) for the full timeline.
+- `docs/architecture.md`: runtime overview and main data flow
+- `docs/algorithms/scoring.md`: scoring rules and line arithmetic
+- `docs/algorithms/matching.md`: word-level matching strategies
+- `docs/algorithms/sync.md`: tempo classes and timing windows
+- `docs/operations/whisper.md`: Whisper config, fallback behavior, and failure modes
+- `docs/operations/telemetry.md`: telemetry schema and replay notes
+- `docs/plans/README.md`: historical plan timeline
+- `docs/audits/`: audit history
+
+## Notes
+
+- `static/` is the shipped frontend. The old `src/` tree was an abandoned rewrite and is not part of the runtime.
+- Browser speech recognition drives the real-time path. Whisper is supplemental and can be slower on CPU.
+- VAD-only hints are visual only until ASR confirms them.
 
 ## License
 
