@@ -1186,13 +1186,6 @@ class GameMode {
         }
     }
 
-    _matchTranscript(transcript) {
-        var unionMap = new Map();
-        this._collectMatches(transcript, unionMap);
-        this.matchedSet = unionMap;
-        this._updateWordSpans();
-    }
-
     _updateWordSpans() {
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
         const lineEl = lines[this.activeLineIdx];
