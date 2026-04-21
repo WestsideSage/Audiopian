@@ -759,6 +759,14 @@ class GameMode {
         }, 2000);
     }
 
+    _appendWhisperTranscript(text) {
+        var words = normalizeWords((this.whisperBuffer + ' ' + (text || '')).trim());
+        if (words.length > 200) {
+            words = words.slice(words.length - 200);
+        }
+        this.whisperBuffer = words.join(' ');
+    }
+
     async _startWhisperTrack() {
         this._whisperTrackStatus.startAttempts++;
         try {
@@ -881,7 +889,7 @@ class GameMode {
             this._whisperServerStatus.state = 'ready'; // confirmed working
 
             if (data.transcript && this.active) {
-                this.whisperBuffer = (this.whisperBuffer + ' ' + data.transcript).trim();
+                this._appendWhisperTranscript(data.transcript);
                 this.lineHadAsrEvent = true;
                 this._collectMatchesWhisper(this.whisperBuffer);
                 this._logAsr('final', data.transcript, data.words || [], 'whisper');
