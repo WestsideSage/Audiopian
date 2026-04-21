@@ -389,6 +389,17 @@ function interpolateWordTimings(lyricsArr) {
     return allTimings;
 }
 
+var scoringHelpers = window.KaraokeeScoring;
+editDistance = scoringHelpers.editDistance;
+doubleMetaphone = scoringHelpers.doubleMetaphone;
+wordsMatch = scoringHelpers.wordsMatch;
+wordsMatchScore = scoringHelpers.wordsMatchScore;
+normalizeWord = scoringHelpers.normalizeWord;
+normalizeWords = scoringHelpers.normalizeWords;
+estimateSyllables = scoringHelpers.estimateSyllables;
+interpolateWordTimings = scoringHelpers.interpolateWordTimings;
+var computeLineScore = scoringHelpers.computeLineScore;
+
 class GameMode {
     constructor() {
         this.active       = false;
@@ -1342,36 +1353,19 @@ class GameMode {
         // Zero-ASR line fencing: skip scoring for lines with no ASR activity
         if (lineHadAsrEvent === false) return;
 
-        // Compute weighted score
         var wordTimings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
             ? this.allWordTimings[lineIdx] : [];
-        var weightedTotal = 0;
-        var weightedMatched = 0;
-        for (var i = 0; i < lineWords.length; i++) {
-            var weight = (wordTimings[i] && wordTimings[i].weight) || 1.0;
-            weightedTotal += weight;
-            var matchScore = matchedSet.get ? matchedSet.get(i) : (matchedSet.has(i) ? 1.0 : 0);
-            // Downgrade VAD-only hits that were never confirmed by ASR
-            if (matchScore > 0 && vadMatchedSet && vadMatchedSet.has(i) && !asrConfirmedSet.has(i)) {
-                matchScore = 0.25;
-            }
-            if (matchScore > 0) {
-                weightedMatched += weight * matchScore;
-            }
-        }
-
-        // For display: count matched words (any score > 0)
-        var matched = 0;
-        for (var j = 0; j < lineWords.length; j++) {
-            if (matchedSet.has(j)) matched++;
-        }
+        var scoreSummary = computeLineScore(lineWords, wordTimings, matchedSet, vadMatchedSet, asrConfirmedSet);
+        var weightedTotal = scoreSummary.weightedTotal;
+        var weightedMatched = scoreSummary.weightedMatched;
+        var matched = scoreSummary.matchedWords;
 
         // Mark unmatched spans as red
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
         const lineEl = lines[lineIdx];
         if (lineEl) {
             lineEl.querySelectorAll('.word-span').forEach((span, wi) => {
-                if (!matchedSet.has(wi)) span.classList.add('missed');
+                if (scoreSummary.missedWordIndices.indexOf(wi) >= 0) span.classList.add('missed');
             });
 
             // Flash per-line score
@@ -1389,7 +1383,7 @@ class GameMode {
         this.matchedWords    += matched;
         this.linesScored++;
 
-        if (weightedTotal > 0 && weightedMatched >= weightedTotal * 0.9) {
+        if (scoreSummary.perfect) {
             this.perfectLines++;
             this.currentStreak++;
             if (this.currentStreak > this.bestStreak) this.bestStreak = this.currentStreak;
