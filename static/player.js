@@ -1845,7 +1845,12 @@ class GameMode {
 const gameMode = new GameMode();
 
 // Load song data from session storage
-const songData = JSON.parse(sessionStorage.getItem('songData') || 'null');
+let songData = null;
+try {
+    songData = JSON.parse(sessionStorage.getItem('songData') || 'null');
+} catch (e) {
+    songData = null;
+}
 if (!songData) {
     window.location.href = '/';
 }
