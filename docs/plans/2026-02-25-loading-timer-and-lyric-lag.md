@@ -1,3 +1,49 @@
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Loading Timer & Lyric Lag Fix Design
+
+**Date:** 2026-02-25
+**Context:** Two follow-up improvements after initial karaokee-improvements ship.
+
+---
+
+## Feature 1: Elapsed Time on Loading Overlay
+
+**Goal:** Show how long vocal separation has been running so users know the app is still working.
+
+**Why elapsed time, not a fake progress bar:** Demucs exposes no progress signal â€” it is a subprocess that runs and exits. A fake percentage would give false accuracy. Elapsed time is honest and equally reassuring.
+
+**Architecture:** Frontend-only. No backend changes.
+
+**Components:**
+- `static/player.html`: Add `id="prepStatus"` to the existing status `<span>`.
+- `static/player.js`:
+  - Module-level `prepTimer` variable (stores `setInterval` handle, initialized `null`).
+  - `initPrepOverlay()` starts a 1-second interval that computes `m:ss` elapsed and sets `prepStatus.textContent`.
+  - `finishPrep()` and `skipPrep()` both call `clearInterval(prepTimer)`.
+
+**Display format:** `Preparing audioâ€¦ (1:23)` â€” the elapsed portion appended in parentheses.
+
+---
+
+## Fix 2: Lyric Matching Lag on Fast Songs
+
+**Root cause:** `lineStartWordCount` in `GameMode.setActiveLine()` is computed from `this.transcript` (committed final text only). For fast rap, Chrome's speech recognition can go 3â€“5 seconds without producing a final result â€” the entire recognition output stays as a growing interim. During that window, every new line starts with `lineStartWordCount = 0`, so `_collectMatches` searches from position 0 against a transcript that grows to span many lines, running into the same drift-window miss that we partially fixed earlier.
+
+**Fix:** Cache the latest interim text in `GameMode.latestInterim`. In `setActiveLine()`, compute `lineStartWordCount` from `normalizeWords(this.transcript + this.latestInterim).length` instead of `this.transcript` alone. The `onresult` handler updates `latestInterim` each time it fires.
+
+**Components:** `static/player.js` only.
+
+**Testing:** Manual â€” rap a fast song in game mode, expect noticeably higher match rate on rapid-fire bars. Backend tests unaffected.
+
+---
+
+## Implementation
+
 # Loading Timer & Lyric Lag Fix Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
@@ -6,9 +52,9 @@
 
 **Architecture:** Both changes are frontend-only (`player.html` and `player.js`). No backend changes, no new files. The timer uses a module-level `setInterval` cleared on dismiss. The lag fix adds a `latestInterim` field to `GameMode` that is updated each `onresult` event and read in `setActiveLine`.
 
-**Tech Stack:** Vanilla JS, plain HTML. No test framework for frontend — verification is manual browser testing. Backend test suite (`pytest`) must stay green.
+**Tech Stack:** Vanilla JS, plain HTML. No test framework for frontend â€” verification is manual browser testing. Backend test suite (`pytest`) must stay green.
 
-> ⚠️ **Windows template literal warning:** When editing `player.js`, ALWAYS use the `Edit` or `Write` tools directly from the main Claude context. Do NOT delegate JS file writes to Bash subagents — backtick template literals get silently stripped on Windows.
+> âš ï¸ **Windows template literal warning:** When editing `player.js`, ALWAYS use the `Edit` or `Write` tools directly from the main Claude context. Do NOT delegate JS file writes to Bash subagents â€” backtick template literals get silently stripped on Windows.
 
 ---
 
@@ -24,14 +70,14 @@ In `static/player.html`, find:
 ```html
             <div class="prep-status">
                 <div class="prep-spinner"></div>
-                <span>Preparing audio…</span>
+                <span>Preparing audioâ€¦</span>
             </div>
 ```
 Replace with:
 ```html
             <div class="prep-status">
                 <div class="prep-spinner"></div>
-                <span id="prepStatus">Preparing audio…</span>
+                <span id="prepStatus">Preparing audioâ€¦</span>
             </div>
 ```
 
@@ -112,7 +158,7 @@ function skipPrep() {
 **Step 5: Manual verification**
 
 Start the Flask server, load a song, open the player page. Confirm:
-- The overlay shows "Preparing audio… (0:01)", "(0:02)" etc., incrementing each second
+- The overlay shows "Preparing audioâ€¦ (0:01)", "(0:02)" etc., incrementing each second
 - When separation completes (overlay fades), the timer stops
 - Clicking Skip also stops the timer
 - No JS errors in console
@@ -138,7 +184,7 @@ git commit -m "feat: add elapsed-time counter to loading overlay"
 **Files:**
 - Modify: `static/player.js`
 
-**Background:** `lineStartWordCount` is computed from `this.transcript` (committed finals only). For fast rap, Chrome may not produce a final for 3–5 seconds. During that window every line starts with `lineStartWordCount = 0`, so `_collectMatches` searches from position 0 and the drift window misses current-line words. Fix: also include the latest interim text in the word-count anchor.
+**Background:** `lineStartWordCount` is computed from `this.transcript` (committed finals only). For fast rap, Chrome may not produce a final for 3â€“5 seconds. During that window every line starts with `lineStartWordCount = 0`, so `_collectMatches` searches from position 0 and the drift window misses current-line words. Fix: also include the latest interim text in the word-count anchor.
 
 **Step 1: Add `latestInterim` field to constructor and `start()`**
 

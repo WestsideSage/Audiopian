@@ -1,3 +1,184 @@
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Intelligent Lyrics Matching - Design Document
+
+**Date:** 2026-03-03
+**Status:** Approved
+
+## Problem Statement
+
+The current lyrics matching algorithm has two classes of issues that cause false misses:
+
+1. **Word boundary mismatches:** ASR engines (Web Speech API and Whisper) may split or merge words differently than the lyrics source. For example, lyrics contain "Alright" but ASR returns "all right" as two words. The current 1-to-1 `wordsMatch()` cannot bridge this gap â€” neither "all" nor "right" individually match "alright" via edit distance or phonetics.
+
+2. **Timing/sync issues:** ASR latency is variable and unaccounted for. Words said on time get recognized after the time window has moved on, line transitions close before the last words are captured, and fast sections suffer disproportionately because ASR batches rapid speech into larger chunks with bursty delivery.
+
+## Goals
+
+- Reduce false misses (words shown red despite being said correctly)
+- Maintain score integrity (avoid inflating scores with false greens)
+- Self-tune to actual ASR performance characteristics
+- Keep the system debuggable
+
+## Design
+
+### 1. Word Boundary Normalization (Hybrid Approach)
+
+#### 1a. Equivalence Map + Canonicalization
+
+A new `WORD_EQUIV_MAP` maps multi-word phrases to canonical single-word forms and vice versa. Applied to both lyrics and ASR transcript during normalization, before matching.
+
+A new `canonicalizeWords(words)` function runs after `expandContractions()`. It scans the word array with a sliding window of up to 3 words, checking if a 3-word, 2-word, or 1-word sequence has a canonical form. Longest match wins.
+
+**Initial equivalence entries:**
+
+| Input | Canonical |
+|-------|-----------|
+| `all right` | `alright` |
+| `every day` | `everyday` |
+| `every one` | `everyone` |
+| `any one` | `anyone` |
+| `some one` | `someone` |
+| `no one` | `noone` |
+| `any time` | `anytime` |
+| `some time` | `sometime` |
+| `any way` | `anyway` |
+| `every thing` | `everything` |
+| `some thing` | `something` |
+| `any thing` | `anything` |
+| `no thing` | `nothing` |
+| `in to` | `into` |
+| `on to` | `onto` |
+| `a lot` | `alot` |
+| `ice cream` | `icecream` |
+| `all ready` | `already` |
+| `all ways` | `always` |
+| `all though` | `although` |
+| `all together` | `altogether` |
+
+The map is bidirectional: single-word canonical forms also have entries so that if lyrics have the split form and ASR has the merged form (or vice versa), both sides canonicalize to the same result.
+
+#### 1b. Concatenation Fallback
+
+When `wordsMatch(spoken, target)` fails in `_collectMatches()`:
+
+1. Try concatenating `spoken[si] + spoken[si+1]` and test against `target` using **phonetic matching only** (Double Metaphone). No edit-distance allowed for this fallback to prevent false greens.
+2. If it matches, consume both spoken words and mark the target as hit.
+3. Also try the reverse: if a single spoken word fails, check if `target[li] + target[li+1]` concatenated matches the spoken word phonetically. If so, mark both target words as hit and advance both indices.
+
+### 2. Adaptive ASR Latency Compensation
+
+#### 2a. Latency Tracker
+
+When a word matches in `_collectMatches()` or `_matchHotWord()`, record the delta: `matchTime - wordTiming.expected` (where `expected` is the midpoint of the word's predicted window).
+
+Maintain a sliding window of the last 20 match deltas. The median of recent deltas = `estimatedLatency`.
+
+#### 2b. Window Shifting
+
+Use `estimatedLatency` to adjust time windows:
+
+- `effectiveWindowStart = wordTiming.windowStart - estimatedLatency`
+- `effectiveWindowEnd = wordTiming.windowEnd + max(estimatedLatency, 0.3)`
+
+If ASR consistently delivers results 400ms late, all windows open 400ms earlier and close 400ms later. Self-tuning.
+
+#### 2c. Fast Section Grace Period
+
+When `classifyTempo()` returns `'fast'`:
+
+- Multiply overlap duration by 1.5
+- Extend drift window by 30% (e.g., 25 -> 32 words)
+
+This accounts for ASR batching fast speech into larger chunks with bursty delivery.
+
+#### 2d. Calibration
+
+- First 2 lines use default windows (no compensation) while collecting initial latency samples.
+- After 8+ match observations, latency compensation activates.
+- Sliding window naturally adapts if latency changes mid-song.
+
+### 3. Post-hoc Reconciliation Pass
+
+#### 3a. When It Runs
+
+At line scoring time (inside `_scoreLine()` / `_finalizePrevLine()`), after normal matching has produced its `matchedSet`.
+
+#### 3b. How It Works
+
+1. Take the full transcript accumulated during the line's lifetime (from `lineStartTranscriptPos` to current transcript length).
+2. For each unmatched target word, re-scan the entire transcript window using `wordsMatch()` three-tier matching + canonicalization.
+3. Use a wider drift window (2x normal) since ordering matters less at reconciliation â€” we just want to confirm the word was said somewhere during the line.
+4. Newly matched words are upgraded from miss to hit before score calculation.
+
+#### 3c. False-Green Prevention
+
+- Only runs on genuinely unmatched words.
+- For short words (3 letters or fewer), the reconciliation pass disables edit-distance matching â€” only exact + phonetic. Prevents tiny words from false-matching everywhere.
+- A word can only reconcile if it appears in the transcript after the previous matched word's position (maintains ordering with wider tolerance).
+
+#### 3d. Visual Feedback
+
+Words reconciled in the post-hoc pass turn green with a subtle pulse animation, visually distinct from normal real-time matches. This lets the user know it was a late catch.
+
+## Updated Processing Pipeline
+
+```
+ASR Result / Whisper Transcript
+        |
+  normalizeWords()          <- existing: lowercase, strip punctuation
+        |
+  expandContractions()      <- existing: gonna->going to, etc.
+        |
+  canonicalizeWords()       <- NEW: all right->alright, every day->everyday
+        |
++-----------------------------------------------+
+|  _collectMatches() / _collectMatchesWhisper() |
+|  +- Latency-adjusted time gate                | <- NEW
+|  +- Adaptive drift window                     |
+|  +- wordsMatch() [3-tier fuzzy]               |
+|  +- Concatenation fallback (phonetic-gated)   | <- NEW
++-----------------------------------------------+
+        |
+  _matchHotWord()   (latency-adjusted window)    <- UPDATED
+        |
+  _matchPrevLine()  (extended fast-section overlap) <- UPDATED
+        |
+  _scoreLine() / _finalizePrevLine()
+  +- Post-hoc reconciliation pass                <- NEW
+  +- Reconciled words get subtle pulse animation <- NEW
+  +- Calculate final score
+```
+
+## Files Modified
+
+| File | Changes |
+|------|---------|
+| `static/player.js` | `canonicalizeWords()`, `WORD_EQUIV_MAP`, concatenation fallback in matching, latency tracker, reconciliation pass, reconciled-word animation |
+| `static/sync-helpers.js` | Fast-section grace period multipliers, latency window helpers |
+
+## Debug HUD Additions
+
+- Current `estimatedLatency` value
+- Reconciled word count per line (e.g., "+2 reconciled")
+- When canonicalization triggered (which words were remapped)
+
+## What Stays the Same
+
+- Existing 3-tier `wordsMatch()` logic
+- Existing contraction map (CONTRACTION_MAP)
+- Scoring formula (matched/total)
+- Whisper track architecture
+- All existing debug HUD elements
+
+---
+
+## Implementation
+
 # Intelligent Lyrics Matching Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
@@ -96,7 +277,7 @@ console.log('All canonicalizeWords tests passed.');
 **Step 2: Run test to verify it fails**
 
 Run: `node tests/test_match_helpers.cjs`
-Expected: FAIL — file `static/match-helpers.js` does not exist
+Expected: FAIL â€” file `static/match-helpers.js` does not exist
 
 **Step 3: Write minimal implementation**
 
@@ -105,7 +286,7 @@ Create `static/match-helpers.js`:
 ```javascript
 /**
  * Pure helper functions for intelligent lyrics matching.
- * No DOM or AudioContext dependencies — testable in Node.js.
+ * No DOM or AudioContext dependencies â€” testable in Node.js.
  */
 
 /**
@@ -178,7 +359,7 @@ if (typeof module !== 'undefined' && module.exports) {
 **Step 4: Run test to verify it passes**
 
 Run: `node tests/test_match_helpers.cjs`
-Expected: PASS — "All canonicalizeWords tests passed."
+Expected: PASS â€” "All canonicalizeWords tests passed."
 
 **Step 5: Commit**
 
@@ -245,7 +426,7 @@ console.log('All LatencyTracker tests passed.');
 **Step 2: Run test to verify it fails**
 
 Run: `node tests/test_match_helpers.cjs`
-Expected: FAIL — `LatencyTracker` is undefined
+Expected: FAIL â€” `LatencyTracker` is undefined
 
 **Step 3: Write minimal implementation**
 
@@ -317,7 +498,7 @@ if (typeof module !== 'undefined' && module.exports) {
 **Step 4: Run test to verify it passes**
 
 Run: `node tests/test_match_helpers.cjs`
-Expected: PASS — "All LatencyTracker tests passed."
+Expected: PASS â€” "All LatencyTracker tests passed."
 
 **Step 5: Commit**
 
@@ -360,7 +541,7 @@ console.log('All fast-grace tests passed.');
 **Step 2: Run test to verify it fails**
 
 Run: `node tests/test_sync_helpers.cjs`
-Expected: FAIL — `getFastOverlapDuration` is undefined
+Expected: FAIL â€” `getFastOverlapDuration` is undefined
 
 **Step 3: Write minimal implementation**
 
@@ -400,7 +581,7 @@ if (typeof module !== 'undefined' && module.exports) {
 **Step 4: Run test to verify it passes**
 
 Run: `node tests/test_sync_helpers.cjs`
-Expected: PASS — "All fast-grace tests passed."
+Expected: PASS â€” "All fast-grace tests passed."
 
 **Step 5: Commit**
 
@@ -421,7 +602,7 @@ git commit -m "feat: add fast-section grace period helpers to sync-helpers.js"
 - Modify: `static/player.js:658-689` (canonicalize in _matchPrevLine)
 - Modify: `static/player.js:898-924` (canonicalize in _matchHotWord)
 
-**Context:** Two changes: (1) add `<script>` tag for match-helpers.js, (2) insert `canonicalizeWords(expandContractions(...))` into every path where words are prepared for matching. Note: `expandContractions()` is defined but never called in the current code — we wire it in here too.
+**Context:** Two changes: (1) add `<script>` tag for match-helpers.js, (2) insert `canonicalizeWords(expandContractions(...))` into every path where words are prepared for matching. Note: `expandContractions()` is defined but never called in the current code â€” we wire it in here too.
 
 **Step 1: Add script tag**
 
@@ -457,7 +638,7 @@ With:
         var normed = rawWords.map(function(w) { return normalizeWord(w); });
         this.lineWords = canonicalizeWords(expandContractions(normed));
 
-        // Build mapping: lineWords[i] → [spanIdx, spanIdx, ...] so we can
+        // Build mapping: lineWords[i] â†’ [spanIdx, spanIdx, ...] so we can
         // light up the correct visual spans when a canonicalized word matches.
         this.wordToSpans = [];
         var spanCursor = 0;
@@ -650,7 +831,7 @@ Replace with:
                     found = true;
                     break;
                 }
-                // Concatenation fallback: try merging spoken[si]+spoken[si+1] → target (phonetic only)
+                // Concatenation fallback: try merging spoken[si]+spoken[si+1] â†’ target (phonetic only)
                 if (si + 1 < spoken.length && wordsMatchPhoneticOnly(spoken[si] + spoken[si + 1], target)) {
                     resultSet.add(li);
                     spokenIdx = si + 2; // consume both spoken words
@@ -692,7 +873,7 @@ With the same concatenation + reverse fallback pattern as above (using `whisperS
 **Step 4: Run tests**
 
 Run: `node tests/test_match_helpers.cjs && node tests/test_sync_helpers.cjs`
-Expected: All pass (no new unit tests for this task — the fallback is integration-level, tested manually)
+Expected: All pass (no new unit tests for this task â€” the fallback is integration-level, tested manually)
 
 **Step 5: Commit**
 
@@ -708,9 +889,9 @@ git commit -m "feat: add phonetic-gated concatenation fallback to matching loops
 **Files:**
 - Modify: `static/player.js:372-417` (GameMode constructor)
 - Modify: `static/player.js:419-450` (start method)
-- Modify: `static/player.js:824-843` (_collectMatches — record latency)
-- Modify: `static/player.js:898-924` (_matchHotWord — record latency)
-- Modify: `static/player.js:830-832` (time gate — apply compensation)
+- Modify: `static/player.js:824-843` (_collectMatches â€” record latency)
+- Modify: `static/player.js:898-924` (_matchHotWord â€” record latency)
+- Modify: `static/player.js:830-832` (time gate â€” apply compensation)
 
 **Context:** Create a LatencyTracker instance in GameMode. Each time a word matches, record the delta between actual match time and the word's predicted time. Use the estimated latency to shift time gate windows.
 
@@ -863,13 +1044,13 @@ With:
 
         for (var li = 0; li < prev.lineWords.length; li++) {
             if (prev.matchedSet.has(li)) {
-                // Already matched — advance cursor past this word's approximate position
+                // Already matched â€” advance cursor past this word's approximate position
                 cursor++;
                 continue;
             }
             var target = prev.lineWords[li];
 
-            // Short-word guard: 3 chars or fewer → phonetic only (no edit distance)
+            // Short-word guard: 3 chars or fewer â†’ phonetic only (no edit distance)
             var matchFn = target.length <= 3 ? wordsMatchPhoneticOnly : wordsMatch;
 
             for (var si = cursor; si < Math.min(cursor + driftWindow, spokenFull.length); si++) {
@@ -948,9 +1129,9 @@ git commit -m "feat: add post-hoc reconciliation pass to _finalizePrevLine"
 ### Task 8: Wire fast-section grace period into overlap and drift
 
 **Files:**
-- Modify: `static/player.js:720-757` (setActiveLine — use getFastOverlapDuration)
-- Modify: `static/player.js:824-843` (_collectMatches — apply drift multiplier)
-- Modify: `static/player.js:691-718` (_collectMatchesWhisper — apply drift multiplier)
+- Modify: `static/player.js:720-757` (setActiveLine â€” use getFastOverlapDuration)
+- Modify: `static/player.js:824-843` (_collectMatches â€” apply drift multiplier)
+- Modify: `static/player.js:691-718` (_collectMatchesWhisper â€” apply drift multiplier)
 
 **Step 1: Use getFastOverlapDuration in setActiveLine**
 
@@ -1014,7 +1195,7 @@ git commit -m "feat: wire fast-section grace period into overlap and drift windo
 
 **Files:**
 - Modify: `static/player.html:123-129` (add `.reconciled` CSS)
-- Modify: `static/player.js:940-955` (_scoreLine — skip reconciled spans when marking missed)
+- Modify: `static/player.js:940-955` (_scoreLine â€” skip reconciled spans when marking missed)
 
 **Step 1: Add CSS for reconciled animation**
 
@@ -1039,7 +1220,7 @@ In `_scoreLine`, the line that marks unmatched spans as red (line 945):
                 if (!matchedSet.has(wi)) span.classList.add('missed');
 ```
 
-Should also handle reconciled spans — already matched spans with `.reconciled` should NOT get `.missed`. The current logic only checks `matchedSet.has(wi)` which already includes reconciled words (they were added to `matchedSet` in the reconciliation pass). So this line should work correctly as-is. No change needed.
+Should also handle reconciled spans â€” already matched spans with `.reconciled` should NOT get `.missed`. The current logic only checks `matchedSet.has(wi)` which already includes reconciled words (they were added to `matchedSet` in the reconciliation pass). So this line should work correctly as-is. No change needed.
 
 **Step 3: Run tests**
 
@@ -1079,7 +1260,7 @@ In `setActiveLine`, after the `this.lineWords = canonicalizeWords(...)` assignme
 ```javascript
         // Debug: log if canonicalization changed anything
         if (window._kDebug && this.lineWords.length !== normed.length) {
-            console.log('[GAME] Canonicalized line ' + lineIdx + ': [' + normed.join(', ') + '] → [' + this.lineWords.join(', ') + ']');
+            console.log('[GAME] Canonicalized line ' + lineIdx + ': [' + normed.join(', ') + '] â†’ [' + this.lineWords.join(', ') + ']');
         }
 ```
 
@@ -1130,7 +1311,7 @@ Start the app (`python app.py`) and:
 4. Verify: saying "all right" lights up "Alright" green
 5. Verify: debug HUD shows latency calibration progress
 6. Verify: on fast sections, drift windows are wider
-7. Verify: reconciled words pulse yellow→green at line transitions
+7. Verify: reconciled words pulse yellowâ†’green at line transitions
 8. Verify: no false greens on words you didn't say
 
 **Step 6: Commit (if any fixes were needed)**

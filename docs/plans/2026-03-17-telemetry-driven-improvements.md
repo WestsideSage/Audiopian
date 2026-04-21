@@ -1,4 +1,95 @@
-# Telemetry-Driven Scoring & ASR Improvements — Implementation Plan
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Telemetry-Driven Scoring & ASR Improvements
+
+**Date**: 2026-03-17
+**Based on**: Analysis of 10 real-play telemetry sessions (620 lines, 5303 words, 78.1% overall match rate)
+
+## Problem Statement
+
+Telemetry analysis revealed several systemic issues degrading match accuracy:
+
+1. **Binary matching** â€” all matches are score=1.0 or 0.0, no fuzzy tolerance. ASR garbling a single character = total miss.
+2. **ASR buffer bloat** â€” Web Speech API accumulates 200+ word un-finalized transcripts, strongly correlating with worse match quality.
+3. **Function words swallowed** â€” "a", "the", "I", "it", "me" etc. are consistently missed (14-21x each) in fast speech, unfairly penalizing scores.
+4. **Ad-libs unrecognizable** â€” "ooh" (24x missed), "wow" (18x), "yeah" (11x). Non-lexical vocalizations fail ASR.
+5. **Slang/profanity filtered** â€” "nigga" (12x missed), "em" (12x), "bout" (8x). ASR sanitizes or misrecognizes common hip-hop vocabulary.
+6. **Telemetry cap** â€” 9/10 songs hit the 5000 match event cap, losing diagnostic data for 49-93% of each song.
+
+## Design
+
+### 1. Expanded Match Pipeline
+
+Current pipeline: `exact â†’ contraction â†’ phrase â†’ miss`
+
+New pipeline: `exact â†’ contraction â†’ phrase â†’ slang dictionary â†’ phonetic fuzzy â†’ edit distance fuzzy â†’ miss`
+
+**Slang dictionary**: A lookup table mapping common ASR mishearings and slang variants to their target words:
+- `"gonna" â†’ "going to"`, `"em" â†’ "them"`, `"bout" â†’ "about"`, `"ya" â†’ "you"`, `"wanna" â†’ "want to"`, `"gotta" â†’ "got to"`, `"kinda" â†’ "kind of"`, `"tryna" â†’ "trying to"`
+- Ad-lib recognition: explicit entries for `"ooh"`, `"yeah"`, `"huh"`, `"uh"`, `"ah"` so ASR output maps to lyric text
+- Profanity mappings for common ASR sanitizations
+
+**Phonetic fuzzy**: If Double Metaphone codes match but spelling doesn't, award 0.9 credit. The phonetic engine already exists (`doubleMetaphone()`) but is only used as a boolean gate inside `wordsMatch()`. This change makes it a scored fallback.
+
+**Edit distance fuzzy**: For words >= 3 characters:
+- Edit distance 1 â†’ 0.75 credit
+- Edit distance 2 â†’ 0.5 credit
+- Edit distance 3+ â†’ 0.0
+
+Each match method records its `method` and `score` in telemetry for future tuning.
+
+### 2. ASR Buffer Management
+
+**Line-transition reset**: When the game advances to a new line, run one final `_collectMatches` against the outgoing line, then reset `lineStartTranscriptPos` to the current transcript length. This prevents old text from polluting the new line's matching window.
+
+**Sliding window truncation**: Within a line, cap the spoken word scan to the last `N` words, where `N = lineWords.length * 3`. This keeps matching fast and focused, especially for rap verses where the ASR buffer grows rapidly between finals.
+
+These two changes work together: the reset prevents cross-line drift, the sliding window prevents within-line drift.
+
+### 3. Smart Word Classification
+
+Pre-process lyrics at load time to classify words:
+
+- **Core words**: Regular lyrics â€” weight 1.0
+- **Function words**: Articles, pronouns, prepositions ("a", "the", "I", "it", "me", "with", "in", "on", "to", "of", "is", "and", "or", "but", "at", "for") â€” weight 0.5
+- **Ad-lib words**: Anything inside parentheses, plus known interjections ("ooh", "yeah", "huh", "uh", "ah", "wow") â€” weight 0.25
+
+Score calculation changes from `matchedWords / totalWords` to `weightedMatched / weightedTotal`. This means a song heavy in ad-libs and function words won't be artificially harder than one with clean lyrics.
+
+### 4. Telemetry Improvements
+
+- **Remove the 5000 cap** but only log first-time matches and misses (skip redundant re-checks for already-matched words). Full song coverage without massive files.
+- **Log new match methods and scores** â€” the existing `method` and `score` fields in telemetry match entries will capture the new fuzzy/slang/phonetic methods automatically.
+- No changes to `transitions` telemetry â€” already comprehensive and uncapped.
+
+## Key Data Points from Analysis
+
+| Song | Lines | Words | Match% | Notes |
+|------|-------|-------|--------|-------|
+| Cure For The Itch (Linkin Park) | 8 | 39 | 97.4% | Spoken word, best performer |
+| Silkk da Shocka (Isaiah Rashad) | 52 | 365 | 92.9% | Laid-back flow |
+| Love Is All I Got (Feed Me) | 64 | 456 | 92.3% | Melodic/repetitive |
+| FLOW (Jay Prince) | 49 | 347 | 90.2% | |
+| Black Panther (Kendrick) | 35 | 333 | 83.5% | |
+| WAV Files (Lupe Fiasco) | 149 | 1138 | 77.5% | Long, proper nouns fail |
+| euphoria (Kendrick) | 129 | 1428 | 74.3% | Dense, 11.1 words/line avg |
+| Rich Interlude (Kendrick) | 43 | 322 | 73.6% | Only 2 ASR finals |
+| 9-3 Freestyle (Isaiah Rashad) | 42 | 369 | 66.4% | Freestyle delivery |
+| Rubbin Off The Paint (YBN Nahmir) | 49 | 506 | 64.8% | Heavy slang, 2 ASR finals |
+
+**Tempo performance**: Slow 71.0%, Medium 87.4%, Fast 78.1% â€” slow lines underperform due to ASR drift accumulation.
+
+**Top missed words**: ooh (24), a (21), the (19), wow (18), I (17), with/me/it (14 each), that (13), nigga/em (12 each).
+
+---
+
+## Implementation
+
+# Telemetry-Driven Scoring & ASR Improvements â€” Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -17,7 +108,7 @@
 
 **Step 1: Add the SLANG_MAP dictionary**
 
-Add a new `SLANG_MAP` object after `CONTRACTION_MAP` (line 63). This is a **bidirectional** lookup — if the ASR hears "gonna" but the lyric says "going", OR the lyric says "gonna" but ASR hears "going", both should match. Unlike CONTRACTION_MAP (which maps slang→expansion for multi-word matching), SLANG_MAP maps single-word synonyms.
+Add a new `SLANG_MAP` object after `CONTRACTION_MAP` (line 63). This is a **bidirectional** lookup â€” if the ASR hears "gonna" but the lyric says "going", OR the lyric says "gonna" but ASR hears "going", both should match. Unlike CONTRACTION_MAP (which maps slangâ†’expansion for multi-word matching), SLANG_MAP maps single-word synonyms.
 
 ```javascript
 // --- Slang / ASR-mishearing dictionary ---
@@ -233,7 +324,7 @@ var inParen = false;
 var wordClasses = [];
 var syllables = words.map(function(w, wi) {
     var nw = normalizeWord(w);
-    // Track parentheses — a word starting with '(' opens, ending with ')' closes
+    // Track parentheses â€” a word starting with '(' opens, ending with ')' closes
     if (w.indexOf('(') >= 0) inParen = true;
     wordClasses.push(classifyWord(nw, inParen));
     if (w.indexOf(')') >= 0) inParen = false;
@@ -376,9 +467,9 @@ _matchTranscript(transcript) {
 
 `Map.has()` works the same as `Set.has()`, so most call sites work unchanged. But `matchedSet.size` and iteration patterns need checking.
 
-Update `_updateWordSpans()` (line 909-928) — `this.matchedSet.has(wi)` works with Map, no change needed.
+Update `_updateWordSpans()` (line 909-928) â€” `this.matchedSet.has(wi)` works with Map, no change needed.
 
-Update `_collectMatchesWhisper()` (line 726-728) — change Set.add to Map.set:
+Update `_collectMatchesWhisper()` (line 726-728) â€” change Set.add to Map.set:
 ```javascript
 whisperSet.forEach(function(score, i) {
     var existing = this.matchedSet.get(i);
@@ -637,7 +728,7 @@ git commit -m "feat: add final match pass at line transitions to capture boundar
 
 ---
 
-### Task 7: Telemetry improvements — remove cap, add smart filtering
+### Task 7: Telemetry improvements â€” remove cap, add smart filtering
 
 **Files:**
 - Modify: `static/player.js:1180-1203` (_logMatch method)

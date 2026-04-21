@@ -1,3 +1,142 @@
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Karaokee Telemetry System â€” Design
+
+**Date:** 2026-03-17
+**Status:** Approved
+
+## Goal
+
+Capture structured, per-event diagnostic data during game mode so that precise numerical analysis can be performed on lyric-detection accuracy, match method breakdown, transition timing, and tempo-correlated behaviour â€” with the output pasted directly into a Claude conversation for deep analysis.
+
+## Approach
+
+Rich JSON telemetry log, recorded in-memory during play, auto-downloaded as a `.json` file when the song ends. Active only when debug mode is on (`D` key / `window._kDebug === true`). No server changes required.
+
+## Data Schema
+
+Single JSON object with four top-level keys:
+
+### `meta` â€” captured once at `startGame()`
+
+```json
+{
+  "songTitle": "Lose Yourself",
+  "songDurationMs": 326000,
+  "lrcLines": 42,
+  "whisperAvailable": true,
+  "browserLang": "en-US",
+  "startedAt": "2026-03-17T14:32:00Z",
+  "gameVersion": "1.0"
+}
+```
+
+`songDurationMs` enables per-line coverage normalisation and anomaly detection relative to total song length.
+
+### `asr[]` â€” one entry per speech recognition result
+
+```json
+{
+  "ts": 12.34,
+  "lineIdx": 5,
+  "lineTempo": "fast",
+  "type": "final",
+  "text": "his palms are sweaty",
+  "wordTimestamps": [{ "word": "his", "start": 11.9, "end": 12.1 }]
+}
+```
+
+`type` is `"final"` or `"interim"`. `wordTimestamps` is populated only when Whisper word-level timestamps are available.
+
+### `matches[]` â€” one entry per word-match attempt (richest dataset)
+
+```json
+{
+  "ts": 12.45,
+  "lineIdx": 5,
+  "lineTempo": "fast",
+  "spokenWord": "palms",
+  "targetWord": "palms",
+  "method": "exact",
+  "editDistance": 0,
+  "phoneticMatch": true,
+  "score": 1.0,
+  "matched": true,
+  "windowPosition": 2
+}
+```
+
+`method` is one of: `"exact"`, `"fuzzy"`, `"phonetic"`, `"phrase"`, `"contraction"`, `"none"` (attempted but unmatched).
+`windowPosition` is the index within the current spoken window at which the match was attempted.
+
+Cap: 5,000 entries. Once reached, new attempts update aggregate counts only.
+
+### `transitions[]` â€” one entry per line advance
+
+```json
+{
+  "ts": 15.20,
+  "fromIdx": 5,
+  "toIdx": 6,
+  "fromText": "his palms are sweaty knees weak arms are heavy",
+  "trigger": "score",
+  "matchedWords": 7,
+  "totalWords": 9,
+  "missedWords": ["knees", "heavy"],
+  "timeSpentMs": 4200,
+  "lineTempo": "fast",
+  "expectedTimeMs": 4000,
+  "earlyMs": null,
+  "lateMs": 200
+}
+```
+
+`trigger` is `"score"` (threshold met), `"time"` (clock expired), or `"forced"` (song ended).
+`earlyMs` / `lateMs` â€” exactly one will be non-null, showing how far off the transition was vs the LRC timestamp.
+
+## Tempo Classification
+
+Reuses existing `getSpokenWindowSize` thresholds from `sync-helpers.js`. Each event is tagged `"slow"`, `"medium"`, or `"fast"` at log time â€” no new logic.
+
+## Architecture
+
+All changes are inside the existing `GameMode` class in `static/player.js`. No new files except a test file.
+
+| Addition | Purpose |
+|---|---|
+| `this._telemetry` | In-memory log object, initialised at `startGame()`, null otherwise |
+| `_logAsr(type, text, wts)` | Called at existing ASR result sites |
+| `_logMatch(spoken, target, method, ed, phonetic, score, matched, pos)` | Called at match-helpers call sites |
+| `_logTransition(fromIdx, toIdx, trigger, ...)` | Called in existing line-advance path |
+| `_downloadTelemetry()` | Serialises to JSON blob and triggers browser download |
+
+## Download Triggers
+
+1. **Auto-download** when song naturally ends (existing end-of-song hook)
+2. **`ðŸ“¥` button** in the debug HUD â€” visible only when `window._kDebug === true`
+
+Filename: `karaokee-telemetry-<songTitle>-<timestamp>.json`
+
+## Error Handling
+
+- All `_log*` calls wrapped in `try/catch` â€” logging failures never crash the game
+- If `_telemetry` is null, all log calls are no-ops
+- If blob download fails, raw JSON is printed to `console.warn` for manual copy
+
+## Testing
+
+- New `tests/test_telemetry.cjs`: schema shape, all four keys present, `lineTempo` always one of three valid values, 5,000-entry cap logic
+- Existing `tests/test_match_helpers.cjs` â€” unchanged, matching logic already covered
+- Manual: play one song with `D` pressed, confirm download, paste JSON for analysis
+
+---
+
+## Implementation
+
 # Telemetry System Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
@@ -22,7 +161,7 @@ Create `tests/test_telemetry.cjs`:
 ```javascript
 'use strict';
 // ---------------------------------------------------------------------------
-// Minimal stubs — replicate the structures GameMode will produce
+// Minimal stubs â€” replicate the structures GameMode will produce
 // ---------------------------------------------------------------------------
 function makeMeta(overrides = {}) {
     return Object.assign({
@@ -86,10 +225,10 @@ let failed = 0;
 
 function assert(condition, msg) {
     if (condition) {
-        console.log('  ✓', msg);
+        console.log('  âœ“', msg);
         passed++;
     } else {
-        console.error('  ✗', msg);
+        console.error('  âœ—', msg);
         failed++;
     }
 }
@@ -183,7 +322,7 @@ if (failed > 0) process.exit(1);
 node tests/test_telemetry.cjs
 ```
 
-Expected: Tests should pass (these are schema tests against stubs — they verify the contract we'll implement). All 6 test groups should pass before we write any GameMode code.
+Expected: Tests should pass (these are schema tests against stubs â€” they verify the contract we'll implement). All 6 test groups should pass before we write any GameMode code.
 
 **Step 3: Commit**
 
@@ -197,9 +336,9 @@ git commit -m "test: add telemetry schema contract tests"
 ### Task 2: Initialise `_telemetry` in the `GameMode` constructor and `startGame()`
 
 **Files:**
-- Modify: `static/player.js` — constructor (around line 343) and `startGame()` (around line 380)
+- Modify: `static/player.js` â€” constructor (around line 343) and `startGame()` (around line 380)
 
-**Context:** The constructor currently has `this._dbBuf = [];` at around line 343. `startGame()` is the method that resets game state around line 370–400.
+**Context:** The constructor currently has `this._dbBuf = [];` at around line 343. `startGame()` is the method that resets game state around line 370â€“400.
 
 **Step 1: Add `_telemetry = null` to the constructor**
 
@@ -230,7 +369,7 @@ Add immediately after it:
 
 **Step 3: Add the `_initTelemetry()` method**
 
-Find the `// ── Diagnostics ───` comment section (before `_debugLog`). Add this new method immediately before `_debugLog`:
+Find the `// â”€â”€ Diagnostics â”€â”€â”€` comment section (before `_debugLog`). Add this new method immediately before `_debugLog`:
 
 ```javascript
     /**
@@ -240,7 +379,7 @@ Find the `// ── Diagnostics ───` comment section (before `_debugLog`).
     _initTelemetry() {
         var sd = {};
         try { sd = JSON.parse(sessionStorage.getItem('songData') || '{}'); } catch (e) {}
-        var title = (sd.artist && sd.title) ? sd.artist + ' — ' + sd.title : (document.title || 'unknown');
+        var title = (sd.artist && sd.title) ? sd.artist + ' â€” ' + sd.title : (document.title || 'unknown');
         this._telemetry = {
             meta: {
                 songTitle:        title,
@@ -278,7 +417,7 @@ git commit -m "feat: initialise telemetry log in GameMode on startGame"
 ### Task 3: Add `_logAsr()` and hook it into the ASR result handler
 
 **Files:**
-- Modify: `static/player.js` — ASR handler (around line 493) and diagnostics section
+- Modify: `static/player.js` â€” ASR handler (around line 493) and diagnostics section
 
 **Context:** The ASR result handler already has a `if (window._kDebug)` block around line 493 that calls `self._debugLog('RESULT', ...)`. We add `_logAsr()` call alongside it.
 
@@ -349,7 +488,7 @@ git commit -m "feat: add _logAsr telemetry method and hook into ASR handler"
 ### Task 4: Add `_logMatch()` and instrument `_collectMatches()`
 
 **Files:**
-- Modify: `static/player.js` — `_collectMatches()` method (around line 844)
+- Modify: `static/player.js` â€” `_collectMatches()` method (around line 844)
 
 **Context:** `_collectMatches` iterates over `lineWords` and tries `wordsMatch`, then `multiWordContractionMatch`, then `phraseMatch`. We need to record which method fired (or `"none"` if the word was not matched in this pass).
 
@@ -437,7 +576,7 @@ Replace with the instrumented version:
                 this._logMatch(spoken[si], target, 'none', -1, false, 0.0, false, si);
 ```
 
-> **Note:** `wordsMatch` internally handles fuzzy and phonetic — we label the result `'exact'` here since we cannot inspect which sub-method fired without modifying `match-helpers.js`. A future pass can expose method detail from `wordsMatch` if needed. The important thing for analysis is the `matched: true/false` and the `spokenWord`/`targetWord` pair.
+> **Note:** `wordsMatch` internally handles fuzzy and phonetic â€” we label the result `'exact'` here since we cannot inspect which sub-method fired without modifying `match-helpers.js`. A future pass can expose method detail from `wordsMatch` if needed. The important thing for analysis is the `matched: true/false` and the `spokenWord`/`targetWord` pair.
 
 **Step 3: Run tests**
 
@@ -459,7 +598,7 @@ git commit -m "feat: add _logMatch telemetry method and instrument _collectMatch
 ### Task 5: Add `_logTransition()` and hook into the line-advance path
 
 **Files:**
-- Modify: `static/player.js` — line transition / `_debugLog('LINE', ...)` block (around line 773)
+- Modify: `static/player.js` â€” line transition / `_debugLog('LINE', ...)` block (around line 773)
 
 **Context:** The line transition is logged in the existing `if (window._kDebug && _dbgFromIdx >= 0 ...)` block. We add `_logTransition()` call in that same block.
 
@@ -552,7 +691,7 @@ After the `this._debugLog('LINE', { ... });` call (still inside the same `if` bl
             this._logTransition(
                 _dbgFromIdx,
                 lineIdx,
-                'score',       // default trigger — time-gate advances also pass through here
+                'score',       // default trigger â€” time-gate advances also pass through here
                 _dbgFromText,
                 this.matchedSet.size,
                 this.lineWords.length,
@@ -581,7 +720,7 @@ git commit -m "feat: add _logTransition telemetry method and hook into line-adva
 ### Task 6: Add `_downloadTelemetry()`, auto-download on song end, and HUD button
 
 **Files:**
-- Modify: `static/player.js` — diagnostics section, `audio.ended` handler (around line 1406), `_renderDebugHud()` (around line 1147)
+- Modify: `static/player.js` â€” diagnostics section, `audio.ended` handler (around line 1406), `_renderDebugHud()` (around line 1147)
 
 **Step 1: Add `_downloadTelemetry()` method** after `_logTransition()`:
 
@@ -614,7 +753,7 @@ git commit -m "feat: add _logTransition telemetry method and hook into line-adva
                 this._telemetry.matches.length, 'matches,',
                 this._telemetry.transitions.length, 'transitions');
         } catch (e) {
-            console.warn('[Telemetry] Download failed — raw JSON below:', e);
+            console.warn('[Telemetry] Download failed â€” raw JSON below:', e);
             console.warn(JSON.stringify(this._telemetry, null, 2));
         }
     }
@@ -635,19 +774,19 @@ Change to:
         setTimeout(function() { gameMode.showEndModal(); }, 1500);
 ```
 
-**Step 3: Add a 📥 download button to the debug HUD**
+**Step 3: Add a ðŸ“¥ download button to the debug HUD**
 
 Find `_renderDebugHud()`. It builds an HTML string for the HUD. Find where the HUD inner HTML is set (look for `hud.innerHTML = ...` or similar). Add a download button row.
 
 Find the line that closes the HUD HTML (typically something like a closing `</div>` before `hud.innerHTML = ...`). Add this button before the closing content:
 
 ```javascript
-        const dlBtn = `<div style="margin-top:6px"><button onclick="gameMode._downloadTelemetry()" style="font-size:11px;padding:2px 6px;cursor:pointer">📥 Download Telemetry</button></div>`;
+        const dlBtn = `<div style="margin-top:6px"><button onclick="gameMode._downloadTelemetry()" style="font-size:11px;padding:2px 6px;cursor:pointer">ðŸ“¥ Download Telemetry</button></div>`;
 ```
 
 Then include `dlBtn` in the `hud.innerHTML` assignment.
 
-> **Tip:** Read `_renderDebugHud()` carefully before editing — the exact location depends on how the innerHTML string is built. Add `dlBtn` as the last item before `hud.innerHTML = ...`.
+> **Tip:** Read `_renderDebugHud()` carefully before editing â€” the exact location depends on how the innerHTML string is built. Add `dlBtn` as the last item before `hud.innerHTML = ...`.
 
 **Step 4: Run all tests**
 
@@ -670,8 +809,8 @@ git commit -m "feat: add _downloadTelemetry, auto-download on song end, HUD down
 
 1. Start the Flask server: `python app.py`
 2. Open a song in the browser, press **D** to enable debug mode
-3. Start Game Mode, sing along for at least 2–3 lines
-4. Let the song end (or press 📥 in the HUD)
+3. Start Game Mode, sing along for at least 2â€“3 lines
+4. Let the song end (or press ðŸ“¥ in the HUD)
 5. Confirm a `.json` file downloads
 6. Open it and verify:
    - `meta.songDurationMs` is a positive number

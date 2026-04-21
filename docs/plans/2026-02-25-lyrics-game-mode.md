@@ -1,3 +1,139 @@
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Karaokee â€” Lyrics Game Mode Design
+**Date:** 2026-02-25
+
+## Overview
+
+Add a game mode to the karaoke player where the user sings/raps along and the app scores them based on how accurately their spoken words match the lyrics. Uses the browser's built-in Web Speech API for real-time speech recognition â€” no backend changes required.
+
+Primary use case: songs the user can already recite nearly word-for-word (rap, spoken word). Game provides honest feedback on lyric accuracy.
+
+---
+
+## Architecture
+
+**Scope:** Frontend-only change. No new routes, no new Python dependencies.
+
+**Files changed:**
+- `static/player.js` â€” new `GameMode` class, activated alongside existing playback
+- `static/player.html` â€” "Game" button in controls bar, score display in header
+- `static/style.css` â€” word span states (grey/green/red), score UI, end-of-song modal
+
+**Activation flow:**
+1. User clicks "Game Mode" button on player
+2. Vocal removal triggers automatically (instrumental track loaded via existing `/separate` + `/instrumental` routes)
+3. Browser requests mic via `SpeechRecognition`
+4. Lyrics re-render: each word becomes its own `<span>` element
+5. Game loop runs alongside existing 100ms `updateLyrics()` poll
+
+The existing lyric sync logic is untouched. Game mode is a layer on top.
+
+---
+
+## UI
+
+### Player in game mode
+```
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  â† Back          Lose Yourself            Score: 87%â”‚
+â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
+â”‚                                                     â”‚
+â”‚     his palms are sweaty knees weak arms are heavy  â”‚  â† past line (words colored)
+â”‚                                                     â”‚
+â”‚  â–¶  there's  vomit  on  his  sweater  already       â”‚  â† active line
+â”‚     [grey]  [green] [grey] [green]  [grey]  [red]   â”‚
+â”‚                                                     â”‚
+â”‚     mom's spaghetti                                 â”‚  â† upcoming (grey)
+â”‚                                                     â”‚
+â”‚â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”‚
+â”‚  ðŸŽ® Game  â®  â¸  â­  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€  2:14/5:26  ðŸ”Šâ”€â”€ â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+### Word states
+| State | Color | Meaning |
+|---|---|---|
+| Grey | `#555` | Not yet said |
+| Green | `#00e676` | Recognized and matched |
+| Red | `#ff5252` | Line passed, word missed |
+
+### End-of-song modal
+```
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚        ðŸŽ¤ Final Score       â”‚
+â”‚                             â”‚
+â”‚           87%               â”‚
+â”‚                             â”‚
+â”‚   Words correct:  142/163   â”‚
+â”‚   Lines perfect:  6/18      â”‚
+â”‚   Best streak:    4 lines   â”‚
+â”‚                             â”‚
+â”‚  [ Play Again ]  [ Back ]   â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+Score displays in the header as a running percentage, updated after each line.
+
+---
+
+## Speech Recognition
+
+**API:** `window.SpeechRecognition` (Chrome) / `window.webkitSpeechRecognition`
+
+**Config:**
+- `continuous: true`
+- `interimResults: true`
+- Auto-restarts on `onend` if game mode still active (API stops after silence)
+
+**Normalization (both transcript and lyric words):**
+- Lowercase
+- Strip punctuation: `'`, `,`, `.`, `!`, `?`, `-`
+- Contraction normalization: `gonna â†’ going to`, `i'm â†’ im`, `wanna â†’ want to`, etc.
+
+**Matching:**
+- Order-sensitive within the active line (left to right)
+- Window of Â±2 words allowed for rap cadence drift
+- Interim results used for in-progress green highlighting
+- Final results used to confirm matches
+
+---
+
+## Line Lifecycle
+
+1. **Line becomes active** (timestamp fires) â†’ words render as grey `<span>` elements
+2. **During active window** â†’ speech transcript compared continuously against line words
+3. **Line becomes inactive** (next timestamp fires) â†’ unmatched words turn red; line scored
+4. **Line score** = `matched words / total words` â€” brief "+8/10" flash near the line
+
+Instrumental break lines (empty text or `â™ª`) are skipped from scoring.
+
+---
+
+## Scoring
+
+- **Running score:** `total matched words / total words passed` â€” shown as % in header
+- **Per-line flash:** `+N/M` appears briefly as each line exits
+- **Perfect line streak:** consecutive lines with 100% accuracy, tracked for end screen
+- **End modal stats:** final %, words correct, lines perfect, best streak
+
+---
+
+## Out of Scope (v1)
+
+- Memory mode (lyrics hidden, recite from memory) â€” second mode, added after testing karaoke-along
+- Phonetic / sounds-like matching
+- Leaderboards or score persistence
+- Mobile support
+
+---
+
+## Implementation
+
 # Lyrics Game Mode Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
@@ -38,20 +174,20 @@ Replace with:
 
 In `player.html`, find the controls div. Add the game button as the first button (before `vocalBtn`):
 ```html
-<button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">🎮 Game</button>
+<button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">ðŸŽ® Game</button>
 ```
 
 So the controls line becomes:
 ```html
 <div class="controls">
-    <button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">🎮 Game</button>
-    <button class="ctrl-btn" id="vocalBtn" onclick="toggleVocals()">🎤 Remove Vocals</button>
-    <button class="ctrl-btn" id="skipBackBtn" onclick="skipBack()">⏮</button>
-    <button class="ctrl-btn" id="playBtn" onclick="togglePlay()">▶</button>
-    <button class="ctrl-btn" id="skipFwdBtn" onclick="skipFwd()">⏭</button>
+    <button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">ðŸŽ® Game</button>
+    <button class="ctrl-btn" id="vocalBtn" onclick="toggleVocals()">ðŸŽ¤ Remove Vocals</button>
+    <button class="ctrl-btn" id="skipBackBtn" onclick="skipBack()">â®</button>
+    <button class="ctrl-btn" id="playBtn" onclick="togglePlay()">â–¶</button>
+    <button class="ctrl-btn" id="skipFwdBtn" onclick="skipFwd()">â­</button>
     <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
     <div id="time-display">0:00 / 0:00</div>
-    <span style="font-size:0.8rem;color:#aaa">🔊</span>
+    <span style="font-size:0.8rem;color:#aaa">ðŸ”Š</span>
     <input type="range" id="volume" min="0" max="1" step="0.05" value="1">
 </div>
 ```
@@ -62,7 +198,7 @@ Before the closing `</body>` tag (after the `<audio>` element), add:
 ```html
 <div class="game-modal" id="gameModal" style="display:none">
     <div class="game-modal-box">
-        <div class="game-modal-title">🎤 Final Score</div>
+        <div class="game-modal-title">ðŸŽ¤ Final Score</div>
         <div class="game-modal-score" id="modalScore">0%</div>
         <div class="game-modal-stats">
             <div>Words correct: <span id="modalWords">0/0</span></div>
@@ -80,7 +216,7 @@ Before the closing `</body>` tag (after the `<audio>` element), add:
 **Step 4: Manually verify HTML renders without JS errors**
 
 Open the player page in browser. Confirm:
-- 🎮 Game button appears in controls
+- ðŸŽ® Game button appears in controls
 - No JS errors in console (modal is hidden, score display is hidden)
 
 **Step 5: Commit**
@@ -273,7 +409,7 @@ git commit -m "feat: add word normalization utilities for game mode"
 
 ---
 
-### Task 4: Implement the GameMode class — state + recognition
+### Task 4: Implement the GameMode class â€” state + recognition
 
 **Files:**
 - Modify: `static/player.js`
@@ -384,7 +520,7 @@ const gameMode = new GameMode();
 
 **Step 2: Verify no errors**
 
-Reload player page. Check console — no errors expected.
+Reload player page. Check console â€” no errors expected.
 
 **Step 3: Commit**
 
@@ -709,7 +845,7 @@ function toggleGameMode() {
 function replayGame() {
     document.getElementById('gameModal').style.display = 'none';
     audio.currentTime = 0;
-    audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
+    audio.play().then(() => { playBtn.textContent = 'â¸'; }).catch(() => {});
     gameMode.start();
 }
 ```
@@ -717,11 +853,11 @@ function replayGame() {
 **Step 4: Verify end-to-end in browser**
 
 1. Load a song with lyrics
-2. Click 🎮 Game — confirm mic permission prompt appears, vocal removal starts, button glows
-3. Press play — confirm lyric words appear as spans
-4. Speak some lyrics into the mic — confirm words go green in real time
-5. Let the line pass — confirm unspoken words go red, score flashes, header % updates
-6. Let song finish — confirm end modal appears with stats
+2. Click ðŸŽ® Game â€” confirm mic permission prompt appears, vocal removal starts, button glows
+3. Press play â€” confirm lyric words appear as spans
+4. Speak some lyrics into the mic â€” confirm words go green in real time
+5. Let the line pass â€” confirm unspoken words go red, score flashes, header % updates
+6. Let song finish â€” confirm end modal appears with stats
 
 **Step 5: Commit**
 
@@ -758,7 +894,7 @@ In `GameMode.setActiveLine()`, after setting `this.lineWords`, add a check:
 
         const lineText = lyrics[lineIdx].text.trim();
         // Skip empty lines and music notation lines
-        if (!lineText || lineText === '♪' || lineText === '♫') {
+        if (!lineText || lineText === 'â™ª' || lineText === 'â™«') {
             this.lineWords = [];
             return;
         }
@@ -780,7 +916,7 @@ In `GameMode.setActiveLine()`, after setting `this.lineWords`, add a check:
 
 **Step 2: Dismiss modal on Back button**
 
-The Back button in the modal already calls `window.location.href='/'`, which navigates away — no extra handling needed.
+The Back button in the modal already calls `window.location.href='/'`, which navigates away â€” no extra handling needed.
 
 **Step 3: Guard toggleGameMode when no lyrics loaded**
 
@@ -789,7 +925,7 @@ In `toggleGameMode()`, add a guard:
 ```javascript
 function toggleGameMode() {
     if (lyrics.length === 0) {
-        alert('No lyrics available for this song — game mode requires synced lyrics.');
+        alert('No lyrics available for this song â€” game mode requires synced lyrics.');
         return;
     }
     if (gameMode.active) {
@@ -805,9 +941,9 @@ function toggleGameMode() {
 
 **Step 4: Verify edge cases**
 
-- Load a song without lyrics → clicking 🎮 Game shows alert, does not activate
-- Play a song with instrumental gaps (no lyric lines) → score doesn't count those gaps
-- Toggle game mode off mid-song → lyrics revert to normal view, mic stops
+- Load a song without lyrics â†’ clicking ðŸŽ® Game shows alert, does not activate
+- Play a song with instrumental gaps (no lyric lines) â†’ score doesn't count those gaps
+- Toggle game mode off mid-song â†’ lyrics revert to normal view, mic stops
 
 **Step 5: Commit**
 
@@ -822,15 +958,15 @@ git commit -m "feat: handle edge cases (empty lines, no lyrics, mid-song toggle)
 
 Before considering this complete:
 
-- [ ] 🎮 Game button visible in controls
-- [ ] Clicking 🎮 triggers mic permission prompt (Chrome only)
+- [ ] ðŸŽ® Game button visible in controls
+- [ ] Clicking ðŸŽ® triggers mic permission prompt (Chrome only)
 - [ ] Vocal removal activates automatically
 - [ ] Lyrics re-render as word spans when game mode starts
 - [ ] Speaking correct words turns them green in real time
 - [ ] When line advances, unspoken words turn red
 - [ ] Per-line score flashes briefly (`+N/M`)
 - [ ] Running score % updates in header after each line
-- [ ] Song ends → modal appears with final %, words, lines, streak
+- [ ] Song ends â†’ modal appears with final %, words, lines, streak
 - [ ] Play Again resets and restarts
 - [ ] Toggling game mode off reverts to normal lyric view
 - [ ] No-lyrics guard works (alert shown)
@@ -840,6 +976,6 @@ Before considering this complete:
 
 ## Out of Scope (not in this plan)
 
-- Memory mode (lyrics hidden — future v2)
+- Memory mode (lyrics hidden â€” future v2)
 - Score persistence / leaderboard
 - Mobile support

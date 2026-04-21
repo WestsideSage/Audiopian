@@ -1,3 +1,100 @@
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Karaokee Improvements Design
+
+**Date:** 2026-02-25
+**Context:** Post-launch improvements based on testing with rap/hip-hop music.
+
+---
+
+## Area 1: Word Matching Overhaul
+
+### Problem
+
+Three compounding issues reduce word detection to ~30â€“50% for rap:
+
+1. **Contraction expansion bug** â€” `setActiveLine()` calls `expandContractions([nw]).join(' ')`, producing a single multi-word string (e.g. `"gonna"` â†’ `"going to"` as one string). In `_matchTranscript`, spoken words are individual tokens, so `"going"` never equals `"going to"`. Spans go unlit.
+
+2. **Drift window too tight** â€” window of 3 is too small for fast rap bars where words arrive in rapid bursts.
+
+3. **Single-alternative transcript** â€” Chrome's first alternative for slang often misses; alternatives 2â€“3 frequently get it right.
+
+### Solution
+
+**Fix 1 â€” Remove contraction expansion from `lineWords`.**
+`lineWords[i]` = `normalizeWord(w)` only (lowercase + strip punctuation). This keeps `lineWords` 1:1 with spans, fixing the type mismatch entirely.
+
+**Fix 2 â€” Drop contraction expansion from both sides during matching.**
+For rap, Chrome Speech API transcribes words phonetically as spoken ("gonna" â†’ "gonna"), so the expansion map hurts more than it helps. Both sides use plain `normalizeWords()`.
+
+**Fix 3 â€” Widen drift window: 3 â†’ 6.**
+Accommodates fast rap cadence where multiple words can arrive between polling cycles.
+
+**Fix 4 â€” `maxAlternatives: 3`.**
+Set on the `SpeechRecognition` instance. In `onresult`, collect all final alternatives per result and run `_matchTranscript` against each, taking the union of matched indices across all alternatives.
+
+### Files Changed
+- `static/player.js` â€” `setActiveLine()`, `_matchTranscript()`, `_setupRecognition()`
+
+---
+
+## Area 2: Pre-processing Loading Screen
+
+### Problem
+
+Vocal separation is manually triggered and takes 2â€“3 minutes. Users must wait after clicking "Remove Vocals" or "Game", interrupting the flow.
+
+### Solution
+
+**Backend â€” auto-kick separation on `/load`.**
+After `download_audio()` completes in the `/load` endpoint, immediately start `separate()` in a background thread (same pattern as the existing `/separate` route). The `/separate` endpoint remains but becomes a no-op if separation is already running or done.
+
+**Frontend â€” loading overlay on player page.**
+`player.html` renders a full-screen overlay on load. The overlay displays the song title/artist and a pulsing "Preparing audioâ€¦" message. It polls `/separate-status` every 2 seconds. On `done`, the overlay fades out and the song autoplays â€” both Remove Vocals and Game mode are immediately available with no further wait.
+
+**Skip button.**
+The overlay includes a "â–¶ Skip (karaoke only)" button. Clicking it dismisses the overlay immediately, autoplays the full mix, and marks `instrumentalReady = false`. The Game button remains visible but shows a tooltip "Still processingâ€¦" and blocks activation until separation completes (checked on click).
+
+### Files Changed
+- `app.py` â€” `/load` endpoint auto-kicks separation
+- `static/player.html` â€” loading overlay HTML + CSS
+- `static/player.js` â€” overlay poll loop, skip logic, game button guard
+
+---
+
+## Area 3: Demucs Quality Upgrade
+
+### Problem
+
+Current model `htdemucs` leaves audible vocal bleed-through in the instrumental track, which causes the Speech API microphone to pick up residual vocals and produce incorrect transcripts.
+
+### Solution
+
+Switch to `htdemucs_ft` (fine-tuned variant). It was trained with additional data specifically to reduce vocal bleed and produces noticeably cleaner separation. Processing time increases ~50%, which is acceptable given the loading screen in Area 2 absorbs the wait.
+
+**Change required:**
+- `--name htdemucs` â†’ `--name htdemucs_ft`
+- Output glob pattern: `htdemucs/` â†’ `htdemucs_ft/`
+
+### Files Changed
+- `vocal_remover.py`
+
+---
+
+## Out of Scope
+
+- Phonetic / fuzzy word matching (Soundex, edit distance) â€” deferred to v3
+- Score persistence / leaderboard
+- Mobile support
+
+---
+
+## Implementation
+
 # Karaokee Improvements Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
@@ -8,7 +105,7 @@
 
 **Tech Stack:** Python/Flask backend, vanilla JS frontend, pytest for backend tests, manual browser verification for frontend. Design doc: `docs/plans/2026-02-25-karaokee-improvements-design.md`.
 
-> ⚠️ **Windows template literal warning:** When writing or editing `player.js`, ALWAYS use the `Edit` or `Write` tools directly from the main Claude context. Do NOT delegate JS file writes to Bash subagents — backtick template literals (e.g. `` `${foo}` ``) get silently stripped on Windows.
+> âš ï¸ **Windows template literal warning:** When writing or editing `player.js`, ALWAYS use the `Edit` or `Write` tools directly from the main Claude context. Do NOT delegate JS file writes to Bash subagents â€” backtick template literals (e.g. `` `${foo}` ``) get silently stripped on Windows.
 
 ---
 
@@ -33,7 +130,7 @@ cd C:/GPT5-Projects/Karaokee && python -m pytest tests/test_vocal_remover.py -v
 ```
 Expected: `test_separate_returns_instrumental_path` FAILS (glob pattern mismatch).
 
-**Step 3: Update vocal_remover.py — model name and glob pattern**
+**Step 3: Update vocal_remover.py â€” model name and glob pattern**
 
 In `vocal_remover.py`, change both occurrences of `htdemucs` to `htdemucs_ft`:
 
@@ -107,7 +204,7 @@ def test_load_triggers_separation_automatically(client):
 ```bash
 python -m pytest tests/test_app.py::test_load_triggers_separation_automatically -v
 ```
-Expected: FAIL — `separation_state["status"]` is still `"idle"`, `mock_thread` not called.
+Expected: FAIL â€” `separation_state["status"]` is still `"idle"`, `mock_thread` not called.
 
 **Step 3: Update existing test_load_success to patch threading**
 
@@ -271,7 +368,7 @@ In `player.html`, add the overlay div immediately after `<body>` (before the `pl
         <div class="prep-song" id="prepSongTitle"></div>
         <div class="prep-status">
             <div class="prep-spinner"></div>
-            <span>Preparing audio…</span>
+            <span>Preparing audioâ€¦</span>
         </div>
         <button class="ctrl-btn" onclick="skipPrep()">&#9654; Skip (karaoke only)</button>
     </div>
@@ -295,12 +392,12 @@ git commit -m "feat: add loading overlay HTML and CSS for pre-processing wait sc
 
 ---
 
-### Task 4: Loading overlay JS — poll loop, skip, and game guard
+### Task 4: Loading overlay JS â€” poll loop, skip, and game guard
 
 **Files:**
 - Modify: `static/player.js`
 
-> ⚠️ Use the `Edit` or `Write` tool directly — do NOT use Bash to write this file.
+> âš ï¸ Use the `Edit` or `Write` tool directly â€” do NOT use Bash to write this file.
 
 **Step 1: Add overlay state flag and suppress canplay autoplay during overlay**
 
@@ -313,7 +410,7 @@ let overlayDismissed = false;
 // Auto-play when audio is ready (only after overlay dismisses)
 audio.addEventListener('canplay', () => {
     if (overlayDismissed) {
-        audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
+        audio.play().then(() => { playBtn.textContent = 'â¸'; }).catch(() => {});
     }
 });
 ```
@@ -371,7 +468,7 @@ function skipPrep() {
 initPrepOverlay();
 ```
 
-> Note: Arrow functions and template literals are avoided here to prevent the Windows backtick-stripping issue. `\u2014` = em dash, `\u23F8` = ⏸.
+> Note: Arrow functions and template literals are avoided here to prevent the Windows backtick-stripping issue. `\u2014` = em dash, `\u23F8` = â¸.
 
 **Step 3: Guard toggleGameMode when instrumental not yet ready**
 
@@ -402,9 +499,9 @@ function toggleGameMode() {
 
 1. Load a song from the home page
 2. Confirm the loading overlay appears on the player page with the song title
-3. Wait for separation to complete — overlay should fade out and song should autoplay
+3. Wait for separation to complete â€” overlay should fade out and song should autoplay
 4. Confirm both "Remove Vocals" and "Game" buttons work immediately
-5. Load another song, click Skip — confirm overlay dismisses, song plays, Game button shows alert if clicked
+5. Load another song, click Skip â€” confirm overlay dismisses, song plays, Game button shows alert if clicked
 6. No JS errors throughout
 
 **Step 5: Commit**
@@ -421,9 +518,9 @@ git commit -m "feat: add overlay poll loop, skip, and game mode guard for loadin
 **Files:**
 - Modify: `static/player.js`
 
-> ⚠️ Use the `Edit` or `Write` tool directly — do NOT use Bash to write this file.
+> âš ï¸ Use the `Edit` or `Write` tool directly â€” do NOT use Bash to write this file.
 
-**Step 1: Fix lineWords — remove contraction expansion**
+**Step 1: Fix lineWords â€” remove contraction expansion**
 
 In `GameMode.setActiveLine()`, find:
 
@@ -524,9 +621,9 @@ Replace the entire `this.recognition.onresult` handler:
 
 1. Load a rap song with synced lyrics
 2. Enable Game mode
-3. Rap along for a few bars — words should light up green substantially more than before
+3. Rap along for a few bars â€” words should light up green substantially more than before
 4. Fast bars should still track (drift window of 6 helps)
-5. Check console — no JS errors
+5. Check console â€” no JS errors
 
 **Step 6: Run all backend tests to make sure nothing broke**
 
@@ -551,9 +648,9 @@ Before considering complete:
 - [ ] Demucs uses `htdemucs_ft` (check subprocess call in `vocal_remover.py`)
 - [ ] Loading overlay appears on player page with song title + spinner
 - [ ] Overlay dismisses and song autoplays when separation completes
-- [ ] Skip button works — song plays, Game mode shows alert if vocal separation unfinished
+- [ ] Skip button works â€” song plays, Game mode shows alert if vocal separation unfinished
 - [ ] After overlay completes: Remove Vocals switches instantly, Game mode activates instantly
-- [ ] Load a second song — overlay appears again (state was reset)
+- [ ] Load a second song â€” overlay appears again (state was reset)
 - [ ] Word matching noticeably better for rap (aim for >60% detection)
 - [ ] Fast rap bars don't get stuck (drift window of 6)
 - [ ] No JS errors in browser console throughout

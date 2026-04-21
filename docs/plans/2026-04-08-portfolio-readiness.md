@@ -1,8 +1,99 @@
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Portfolio Readiness Pass â€” Design Document
+
+**Date:** 2026-04-08
+**Goal:** Transform the Karaokee repo from a rough side project into a resume-worthy portfolio piece.
+
+## Problem Statement
+
+The core engineering is strong â€” dual-track ASR, phonetic matching, adaptive sync, telemetry-driven iteration â€” but the repo presentation undermines it. An interviewer cloning this repo would be confused by two frontends, overwhelmed by 32 flat design docs, and distracted by dead/disabled features.
+
+## Narrative
+
+The project should tell this story: "I built a real-time karaoke scoring engine that combines browser speech recognition with Whisper ASR, uses phonetic matching and edit distance for fuzzy word comparison, adapts timing windows by song tempo, and I instrumented it with telemetry to iterate on the algorithm using real gameplay data."
+
+## Decisions
+
+### Vocal separation: Remove entirely
+- Currently disabled in `app.py` (commented-out block), tests skipped, endpoints exist but don't fire
+- Removal simplifies the codebase, removes half-finished impression
+- Can be re-added later as a deliberate feature with its own design doc and PR
+- Scope: delete `vocal_remover.py`, `test_vocal_remover.py`, separation endpoints in `app.py`, separation state globals, frontend separation polling/toggle code
+
+### React/TypeScript frontend: Remove entirely
+- `src/` contains 734 lines of orphaned React code (hooks, components, parser)
+- `package.json` misidentifies the project as Vite/React
+- The actual working frontend is static HTML/JS in `static/`
+- Scope: delete `src/`, `package.json`
+
+### Design docs: Keep but organize
+- The 32 design/implementation docs show engineering maturity and iterative improvement
+- Reorganize into chronological subdirectories with an index for scannability
+- Preserve the "how it started vs how it's going" progression
+
+### Telemetry output: Remove from git, keep locally
+- 56MB of session JSON committed to repo is noise
+- Add to `.gitignore`, remove from git tracking
+- Data stays on disk for continued analysis
+
+## Cleanup Plan
+
+### Phase 1 â€” Safe Cleanup (Low Risk, High Impact)
+
+1. **Delete orphaned React frontend** â€” `src/`, `package.json`
+2. **Delete misc dead files** â€” `demo.json`, `temp/write_tests.py`
+3. **Remove vocal separation entirely** â€” `vocal_remover.py`, `test_vocal_remover.py`, separation endpoints/state in `app.py`, frontend separation code in `player.html`/`player.js`
+4. **Remove commented-out separation block** in `app.py`
+5. **Fix duplicate `import threading`** in `app.py`
+6. **Remove `output_telemetry/` from git tracking** â€” add to `.gitignore`
+7. **Add `.gitignore` entries** â€” telemetry output, logs, IDE files
+8. **Clean up stale git branches** â€” `feat/time-gated-matching`, `backup/local-prototype-snapshot`, `telemetry-driven-tuning`
+
+### Phase 2 â€” Structural Improvements (Medium Risk, High Impact)
+
+9. **Fix broken `maxEditDistance` JS test** â€” determine correct behavior, fix assertion
+10. **Pin `requirements.txt` versions**
+11. **Fix thread safety** â€” add lock around `_last_duration` write in `app.py`
+12. **Fix Flask debug mode** â€” use `FLASK_DEBUG` env var instead of hardcoded `True`
+13. **Add basic logging** â€” replace silent exception swallowing in `lyrics.py`
+14. **Organize `docs/plans/`** â€” group by month or feature area, add index README
+
+### Phase 3 â€” Resume-Facing Polish
+
+15. **Write README** â€” project description, architecture overview, setup instructions, demo flow, tech stack
+16. **Add GitHub Actions CI** â€” run pytest on push
+17. **Move hardcoded config to env vars** â€” Whisper model, device, Demucs model (with sensible defaults)
+
+### Phase 4 â€” Optional Stretch
+
+18. Add type hints to Python backend
+19. Add architecture diagram (Mermaid) to README
+20. Accessibility improvements (ARIA labels, keyboard navigation)
+21. Dockerfile for easy demo setup
+
+## What This Achieves
+
+- Removes ~800 lines of dead/orphaned code
+- Removes ~56MB of committed telemetry data
+- Eliminates the "two frontends" confusion
+- Eliminates the "half-disabled feature" impression
+- Makes the repo clonable and understandable in under 5 minutes
+- Positions the project to tell a coherent, impressive technical story
+
+---
+
+## Implementation
+
 # Portfolio Readiness Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Clean up the Karaokee repo to be resume-ready — remove dead code, fix hygiene, improve presentation.
+**Goal:** Clean up the Karaokee repo to be resume-ready â€” remove dead code, fix hygiene, improve presentation.
 
 **Architecture:** No architecture changes. This is a deletion-heavy cleanup pass that removes orphaned code (React frontend, vocal separation), fixes broken tests, pins dependencies, organizes docs, and adds a README.
 
@@ -96,7 +187,7 @@ python -m pytest tests/test_app.py tests/test_vocal_remover.py -v
 
 Expected: All pass (1 skipped).
 
-**Step 2: Edit `app.py` — remove vocal separation import**
+**Step 2: Edit `app.py` â€” remove vocal separation import**
 
 Change line 8 from:
 ```python
@@ -104,7 +195,7 @@ from vocal_remover import separate, INSTRUMENTAL_PATH
 ```
 Remove this line entirely.
 
-**Step 3: Edit `app.py` — remove separation state globals**
+**Step 3: Edit `app.py` â€” remove separation state globals**
 
 Remove lines 13-14:
 ```python
@@ -112,11 +203,11 @@ separation_state = {"status": "idle"}
 separation_gen = 0  # incremented on each new song load; threads check before writing state
 ```
 
-**Step 4: Edit `app.py` — clean up the `/load` endpoint**
+**Step 4: Edit `app.py` â€” clean up the `/load` endpoint**
 
 In the `/load` function, remove the entire commented-out separation block (lines 85-104):
 ```python
-    # Vocal separation disabled for rapid testing — re-enable by restoring the block below.
+    # Vocal separation disabled for rapid testing â€” re-enable by restoring the block below.
     separation_state["status"] = "idle"
     separation_state.pop("error", None)
     # --- re-enable block start ---
@@ -124,14 +215,14 @@ In the `/load` function, remove the entire commented-out separation block (lines
     # --- re-enable block end ---
 ```
 
-**Step 5: Edit `app.py` — remove `/separate`, `/separate-status`, `/instrumental` endpoints**
+**Step 5: Edit `app.py` â€” remove `/separate`, `/separate-status`, `/instrumental` endpoints**
 
 Remove the three endpoint functions (lines 141-220):
 - `start_separate()` (lines 141-154)
 - `separate_status()` (lines 157-165)
 - `instrumental()` (lines 216-220)
 
-**Step 6: Edit `app.py` — fix duplicate threading import**
+**Step 6: Edit `app.py` â€” fix duplicate threading import**
 
 Change lines 3-4 from:
 ```python
@@ -145,13 +236,13 @@ import threading
 
 Then replace all `_threading.Lock()` with `threading.Lock()` (line 20).
 
-**Step 7: Edit `tests/test_app.py` — remove separation tests**
+**Step 7: Edit `tests/test_app.py` â€” remove separation tests**
 
 Remove these test functions and their related code:
 - `test_separate_starts_processing` (lines 72-78)
 - `test_separate_status_returns_state` (lines 81-90)
 - `test_load_does_not_trigger_separation_when_disabled` (lines 111-128)
-- `test_stale_separation_thread_does_not_overwrite_new_song_status` (lines 131-171) — already skipped
+- `test_stale_separation_thread_does_not_overwrite_new_song_status` (lines 131-171) â€” already skipped
 
 **Step 8: Delete vocal_remover module and its tests**
 
@@ -195,18 +286,18 @@ Will be re-added as a deliberate feature in a future PR."
 - Modify: `static/player.js` (remove toggleVocals, pollSeparation, switchToInstrumental, vocal btn refs, prep overlay separation code)
 - Modify: `static/player.html` (remove hidden vocalBtn)
 
-**Step 1: Edit `static/player.html` — remove vocalBtn**
+**Step 1: Edit `static/player.html` â€” remove vocalBtn**
 
 Remove line 327:
 ```html
-        <button class="ctrl-btn" id="vocalBtn" onclick="toggleVocals()" style="display:none">🎤 Remove Vocals</button>
+        <button class="ctrl-btn" id="vocalBtn" onclick="toggleVocals()" style="display:none">ðŸŽ¤ Remove Vocals</button>
 ```
 And its comment on line 326:
 ```html
         <!-- vocalBtn hidden while vocal separation is disabled; restore display:'' to re-enable -->
 ```
 
-**Step 2: Edit `static/player.js` — remove vocal separation variables and functions**
+**Step 2: Edit `static/player.js` â€” remove vocal separation variables and functions**
 
 Remove the entire vocal removal section (lines 2127-2192):
 ```javascript
@@ -220,7 +311,7 @@ function pollSeparation() { ... }
 function switchToInstrumental() { ... }
 ```
 
-**Step 3: Edit `static/player.js` — clean up `initPrepOverlay()`**
+**Step 3: Edit `static/player.js` â€” clean up `initPrepOverlay()`**
 
 Simplify `initPrepOverlay()` by removing the commented-out separation polling block (lines 2073-2086). The function should just show the song title and call `skipPrep()`:
 ```javascript
@@ -234,7 +325,7 @@ function initPrepOverlay() {
 }
 ```
 
-**Step 4: Edit `static/player.js` — remove `pollPrep()` and `finishPrep()` functions**
+**Step 4: Edit `static/player.js` â€” remove `pollPrep()` and `finishPrep()` functions**
 
 Remove lines 2089-2116 (these only exist for separation polling):
 ```javascript
@@ -242,7 +333,7 @@ function pollPrep() { ... }
 function finishPrep(success) { ... }
 ```
 
-**Step 5: Edit `static/player.js` — clean up `toggleGameMode()`**
+**Step 5: Edit `static/player.js` â€” clean up `toggleGameMode()`**
 
 Remove the commented-out separation guards in `toggleGameMode()` (lines 2199-2210). Should become:
 ```javascript
@@ -263,7 +354,7 @@ function toggleGameMode() {
 
 ```bash
 python app.py &
-# Open http://localhost:5000 in browser — verify search, load, playback, game mode all work
+# Open http://localhost:5000 in browser â€” verify search, load, playback, game mode all work
 ```
 
 **Step 7: Commit**
@@ -376,7 +467,7 @@ function maxEditDistance(len) {
 }
 ```
 
-The test on line 103 asserts `maxEditDistance(10)` should equal `3`. But the code returns `2` for any length > 6. The test expectation is wrong — there's no third tier in the code.
+The test on line 103 asserts `maxEditDistance(10)` should equal `3`. But the code returns `2` for any length > 6. The test expectation is wrong â€” there's no third tier in the code.
 
 **Step 2: Fix the test assertion**
 
@@ -386,8 +477,8 @@ assert.strictEqual(maxEditDistance(10), 3);
 ```
 
 But based on the code, `maxEditDistance(10)` returns `2`. Looking at the pattern:
-- len 1-6 → edit distance 1
-- len 7+ → edit distance 2
+- len 1-6 â†’ edit distance 1
+- len 7+ â†’ edit distance 2
 
 The test at line 103 should be `2`, not `3`. Change to:
 ```javascript
@@ -570,7 +661,7 @@ This directory contains paired design specs and implementation plans for each ma
 
 ## Timeline
 
-### February 2026 — Foundation
+### February 2026 â€” Foundation
 | Date | Feature | Design | Implementation |
 |------|---------|--------|----------------|
 | Feb 19 | Initial Karaokee app | [design](2026-02-19-karaokee-design.md) | [impl](2026-02-19-karaokee-implementation.md) |
@@ -581,25 +672,25 @@ This directory contains paired design specs and implementation plans for each ma
 | Feb 26 | Lyrics detection improvements | [design](2026-02-26-lyrics-detection-improvements-design.md) | [impl](2026-02-26-lyrics-detection-improvements.md) |
 | Feb 26 | Predictive word timing | [design](2026-02-26-predictive-word-timing-design.md) | [impl](2026-02-26-predictive-word-timing-implementation.md) |
 
-### March 2026 — Matching Algorithm
+### March 2026 â€” Matching Algorithm
 | Date | Feature | Design | Implementation |
 |------|---------|--------|----------------|
 | Mar 2 | Adaptive sync | [design](2026-03-02-adaptive-sync-design.md) | [impl](2026-03-02-adaptive-sync-implementation.md) |
 | Mar 2 | Time-gated matching | [design](2026-03-02-time-gated-matching-design.md) | [impl](2026-03-02-time-gated-matching-implementation.md) |
 | Mar 3 | Intelligent matching | [design](2026-03-03-intelligent-matching-design.md) | [impl](2026-03-03-intelligent-matching-implementation.md) |
-| Mar 3 | Slow song time gate | [design](2026-03-03-slow-song-time-gate-design.md) | — |
+| Mar 3 | Slow song time gate | [design](2026-03-03-slow-song-time-gate-design.md) | â€” |
 | Mar 17 | Algorithm improvements | [design](2026-03-17-algorithm-improvements-design.md) | [impl](2026-03-17-algorithm-improvements-implementation.md) |
 
-### March 2026 — Telemetry & Tuning
+### March 2026 â€” Telemetry & Tuning
 | Date | Feature | Design | Implementation |
 |------|---------|--------|----------------|
 | Mar 17 | Telemetry system | [design](2026-03-17-telemetry-design.md) | [impl](2026-03-17-telemetry-implementation.md) |
 | Mar 17 | Telemetry-driven improvements | [design](2026-03-17-telemetry-driven-improvements-design.md) | [impl](2026-03-17-telemetry-driven-improvements.md) |
 | Mar 17 | VAD optimistic scoring | [design](2026-03-17-vad-optimistic-scoring-design.md) | [impl](2026-03-17-vad-optimistic-scoring-implementation.md) |
-| Mar 17 | VAD analyser & LRC offset | [notes](2026-03-17-vad-analyser-lrc-offset.md) | — |
+| Mar 17 | VAD analyser & LRC offset | [notes](2026-03-17-vad-analyser-lrc-offset.md) | â€” |
 | Mar 23 | Telemetry-driven tuning | [design](2026-03-23-telemetry-driven-tuning-design.md) | [impl](2026-03-23-telemetry-driven-tuning-implementation.md) |
 
-### April 2026 — Hardening
+### April 2026 â€” Hardening
 | Date | Feature | Design | Implementation |
 |------|---------|--------|----------------|
 | Apr 6 | Slow-line VAD + scoring honesty | [design](2026-04-06-slow-line-vad-scoring-honesty-design.md) | [impl](2026-04-06-slow-line-vad-scoring-honesty.md) |
@@ -632,24 +723,24 @@ A real-time karaoke scoring engine that matches your singing against song lyrics
 
 ## How It Works
 
-1. **Search & Load** — Paste a YouTube URL or search by song name. The backend extracts audio via yt-dlp and fetches synced lyrics from lrclib.net.
+1. **Search & Load** â€” Paste a YouTube URL or search by song name. The backend extracts audio via yt-dlp and fetches synced lyrics from lrclib.net.
 
-2. **Dual-Track ASR** — Two speech recognition systems run in parallel:
+2. **Dual-Track ASR** â€” Two speech recognition systems run in parallel:
    - **Browser SpeechRecognition** for low-latency interim results
    - **Whisper** (server-side, via faster-whisper) for high-accuracy word-level timestamps
 
-3. **Fuzzy Matching** — Words are matched using multiple strategies:
+3. **Fuzzy Matching** â€” Words are matched using multiple strategies:
    - Exact match
-   - Double Metaphone phonetic codes ("night" ≈ "knight")
+   - Double Metaphone phonetic codes ("night" â‰ˆ "knight")
    - Levenshtein edit distance with length-adaptive thresholds
-   - Contraction expansion ("gonna" ↔ "going to")
+   - Contraction expansion ("gonna" â†” "going to")
    - Slang normalization (76+ bidirectional mappings)
 
-4. **Adaptive Sync** — Timing windows adjust based on song tempo:
+4. **Adaptive Sync** â€” Timing windows adjust based on song tempo:
    - Slow songs (< 2 wps): wider windows, longer overlap
    - Fast songs (> 5 wps): tighter windows, shorter chunks
 
-5. **Scoring** — Per-word scoring with positional accuracy, streak tracking, and VAD-assisted provisional credit for words the mic picks up but ASR hasn't confirmed yet.
+5. **Scoring** â€” Per-word scoring with positional accuracy, streak tracking, and VAD-assisted provisional credit for words the mic picks up but ASR hasn't confirmed yet.
 
 ## Tech Stack
 
@@ -691,21 +782,21 @@ On Windows, you can also use `start.bat` which launches the server and opens the
 ## Project Structure
 
 ```
-├── app.py              # Flask server — API endpoints, Whisper lifecycle
-├── downloader.py       # YouTube metadata extraction and audio download
-├── lyrics.py           # LRC lyrics fetching and candidate ranking
-├── requirements.txt    # Python dependencies
-├── start.bat           # Windows launcher
-├── static/
-│   ├── index.html      # Search page
-│   ├── player.html     # Playback + game mode UI
-│   ├── player.js       # Core game engine — matching, scoring, telemetry
-│   ├── match-helpers.js    # Contraction/slang/phonetic matching
-│   ├── sync-helpers.js     # Tempo classification, adaptive timing
-│   ├── audio-processor.js  # AudioWorklet for mic sampling + VAD
-│   └── style.css
-├── tests/              # pytest + Node.js test suites
-└── docs/plans/         # Design docs showing iterative development
+â”œâ”€â”€ app.py              # Flask server â€” API endpoints, Whisper lifecycle
+â”œâ”€â”€ downloader.py       # YouTube metadata extraction and audio download
+â”œâ”€â”€ lyrics.py           # LRC lyrics fetching and candidate ranking
+â”œâ”€â”€ requirements.txt    # Python dependencies
+â”œâ”€â”€ start.bat           # Windows launcher
+â”œâ”€â”€ static/
+â”‚   â”œâ”€â”€ index.html      # Search page
+â”‚   â”œâ”€â”€ player.html     # Playback + game mode UI
+â”‚   â”œâ”€â”€ player.js       # Core game engine â€” matching, scoring, telemetry
+â”‚   â”œâ”€â”€ match-helpers.js    # Contraction/slang/phonetic matching
+â”‚   â”œâ”€â”€ sync-helpers.js     # Tempo classification, adaptive timing
+â”‚   â”œâ”€â”€ audio-processor.js  # AudioWorklet for mic sampling + VAD
+â”‚   â””â”€â”€ style.css
+â”œâ”€â”€ tests/              # pytest + Node.js test suites
+â””â”€â”€ docs/plans/         # Design docs showing iterative development
 ```
 
 ## Design Documents
@@ -843,10 +934,10 @@ git commit -m "chore: move Whisper config to environment variables with sensible
 |------|-------|-------------|------|
 | 1 | 1 | Delete orphaned React frontend | None |
 | 2 | 1 | Delete misc dead files | None |
-| 3 | 1 | Remove vocal separation (backend) | Low — verify tests pass |
-| 4 | 1 | Remove vocal separation (frontend) | Low — verify app works |
+| 3 | 1 | Remove vocal separation (backend) | Low â€” verify tests pass |
+| 4 | 1 | Remove vocal separation (frontend) | Low â€” verify app works |
 | 5 | 1 | Untrack telemetry output | None |
-| 6 | 1 | Clean up stale branches | Low — verify no uncommitted work |
+| 6 | 1 | Clean up stale branches | Low â€” verify no uncommitted work |
 | 7 | 2 | Fix broken JS test | None |
 | 8 | 2 | Pin dependency versions | None |
 | 9 | 2 | Fix thread safety + debug mode | Low |

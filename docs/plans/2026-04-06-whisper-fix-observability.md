@@ -1,21 +1,232 @@
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Whisper End-to-End Fix + Observability Design
+
+**Date:** 2026-04-06
+**Status:** Approved
+
+## Problem Statement
+
+Session3 and Session4 telemetry show zero Whisper-sourced ASR events across all songs. Server logs confirm one `/transcribe` call that returned 503 on the first song, and zero `/transcribe` calls on songs 2â€“4. The confirmation system has been running on browser SR alone, which cannot reliably transcribe fast/rapped delivery. This means the provisional-to-confirmed gap cannot be properly diagnosed or fixed until Whisper is actually participating in live play.
+
+**Root causes identified:**
+1. `get_whisper_model()` lazy-loads on first request; if the model isn't cached, the first request can fail (503) and the bare `except Exception` hides the real error
+2. `/transcribe` returns 503 for both "model not ready" and "transcription error" â€” indistinguishable
+3. `_startWhisperTrack()` fails silently with only a `console.warn`; songs 2â€“4 sent zero chunks, reason unknown
+4. `_sendChunkToWhisper()` drops non-ok responses silently; no retry, no circuit breaker, no counters
+5. vad-confirmed promotions from the main browser SR merge path (line 631) and Whisper merge path (line 880) emit zero telemetry
+6. `_lateScoreLine()` can upgrade matchedSet scores late but never adds confirmed words to `asrConfirmedSet`, so late Whisper confirmations are still scored as unconfirmed 0.25 VAD hits
+
+## Scope
+
+**In scope:**
+- Server: eager model prewarming, proper error logging, tri-state status endpoint, strict readiness gate
+- Client: `_whisperStatus` object (server state), `_whisperTrackStatus` object (client mic/worklet state), circuit breaker, chunk counters including network exceptions
+- Telemetry: promotion logging in both merge paths, richer Whisper meta fields
+- Correctness: `_lateScoreLine` VAD confirmation upgrade
+
+**Out of scope (deferred until Whisper is confirmed live):**
+- VAD threshold tuning
+- Score formula changes
+- Counter/perfect-line logic changes
+- Score honesty UI changes
+
+## Architecture
+
+### Server (`app.py`)
+
+**Module-level state:**
+```python
+_whisper_model = None
+_whisper_state = 'idle'   # 'idle' | 'loading' | 'ready' | 'error'
+_whisper_error = None     # string or None
+_whisper_lock = threading.Lock()
+```
+
+**Startup prewarming:**
+- On import (guarded by `os.environ.get('WERKZEUG_RUN_MAIN') == 'true'` to prevent double-init under the Flask debug reloader), launch a daemon thread that calls `_prewarm_whisper()`
+- `_prewarm_whisper()` sets `_whisper_state = 'loading'`, calls `WhisperModel(...)`, on success sets `_whisper_state = 'ready'`, on exception sets `_whisper_state = 'error'` and `_whisper_error = traceback.format_exc()`, and logs the full traceback with `app.logger.exception(...)`
+
+**`/whisper-status` GET endpoint:**
+```json
+{
+  "status": "loading | ready | error",
+  "error": "...full reason or null...",
+  "model": "large-v3-turbo",
+  "device": "cuda"
+}
+```
+
+**`/transcribe` POST endpoint:**
+- If `_whisper_state != 'ready'`: return `{"error": "model not ready", "status": _whisper_state}` with HTTP 503
+- Never call `get_whisper_model()` inside the request path (strict readiness gate)
+- If model ready but transcription throws: `app.logger.exception("transcribe error")` and return HTTP 500 (not 503)
+
+### Client (`player.js`)
+
+**Two separate state objects:**
+
+```js
+// Server model state â€” populated from /whisper-status at game start and after 503
+this._whisperServerStatus = {
+    state: 'unknown',   // 'unknown' | 'loading' | 'ready' | 'error'
+    reason: null,
+    checkedAt: null
+};
+
+// Client mic/worklet state â€” populated by _startWhisperTrack outcome
+this._whisperTrackStatus = {
+    state: 'idle',      // 'idle' | 'starting' | 'ready' | 'error'
+    reason: null,
+    startAttempts: 0,
+    startFailures: 0
+};
+```
+
+**`_startWhisperTrack()` changes:**
+- Increment `_whisperTrackStatus.startAttempts` before attempting
+- On success: set `_whisperTrackStatus.state = 'ready'`
+- On catch: set `_whisperTrackStatus.state = 'error'`, `_whisperTrackStatus.reason = err.message`, increment `_whisperTrackStatus.startFailures`; still `console.warn` but also update the status object so the HUD and telemetry can surface it
+
+**Chunk counters (on `this`):**
+```js
+_chunksDispatched: 0
+_chunksSucceeded: 0
+_chunksFailed503: 0
+_chunksFailed500: 0
+_chunksDroppedWhileLoading: 0
+_chunksFailedNetwork: 0    // fetch threw an exception (no HTTP response)
+```
+
+**`_sendChunkToWhisper()` changes:**
+- Increment `_chunksDispatched` before fetch
+- On success (resp.ok): increment `_chunksSucceeded`, update `_whisperServerStatus.state = 'ready'`
+- On 503: increment `_chunksFailed503`; enter circuit-breaker: set `_whisperServerStatus.state = 'loading'`; schedule a `/whisper-status` poll (e.g. after 5s); drop subsequent chunks as `_chunksDroppedWhileLoading` until status returns `ready`
+- On 500: increment `_chunksFailed500`; log to console; continue sending
+- On fetch exception (catch block): increment `_chunksFailedNetwork`; continue (fire-and-forget intent preserved)
+
+**Debug HUD additions:**
+- `Whisper Server: {state} | Track: {state}` row
+- `Chunks: sent={dispatched} ok={succeeded} 503={failed503} 500={failed500} net={failedNetwork} drop={dropped}`
+
+**Game start:**
+- Fetch `/whisper-status` immediately and store in `_whisperServerStatus`
+- Store result in `telemetry.meta.whisperStatusAtStart`
+
+### Telemetry (`player.js`)
+
+**Promotion logging â€” both merge paths:**
+
+Browser SR merge path (~line 626â€“632):
+```js
+unionMap.forEach(function(score, i) {
+    var existing = self.matchedSet.get(i);
+    if (existing === undefined || score > existing) {
+        self.matchedSet.set(i, score);
+    }
+    if (self.vadMatchedSet.has(i) && !self.asrConfirmedSet.has(i)) {
+        self.asrConfirmedSet.add(i);
+        self._logPromotion('browser_sr', i, score);   // NEW
+    }
+});
+```
+
+Whisper merge path (~line 875â€“882):
+```js
+result.forEach(function(score, i) {
+    // ...existing upgrade logic...
+    if (self.vadMatchedSet.has(i) && !self.asrConfirmedSet.has(i)) {
+        self.asrConfirmedSet.add(i);
+        self._logPromotion('whisper', i, score);      // NEW
+    }
+});
+```
+
+`_logPromotion(source, wordIndex, score)` â€” a lightweight dedicated method (not `_logMatch`) that appends to a `this._telemetry.promotions` array:
+```json
+{ "ts": 1.23, "lineIdx": 4, "wordIndex": 2, "source": "browser_sr|whisper", "score": 1.0 }
+```
+No dedup â€” promotion events are inherently non-redundant (guarded by `!asrConfirmedSet.has(i)`).
+
+**`_logMatch` dedupe exemption:**
+Add `&& method !== 'vad-confirmed'` to the dedup guard so the `_matchHotWord()` path also surfaces confirmations.
+
+**`meta` additions (written at telemetry download time):**
+```json
+{
+  "whisperStatusAtStart": { "state": "...", "reason": "..." },
+  "whisperStatusFinal":   { "state": "...", "reason": "..." },
+  "whisperTrackStatus":   { "state": "...", "reason": "...", "startAttempts": N, "startFailures": N },
+  "whisperChunkCounters": {
+    "dispatched": N, "succeeded": N,
+    "failed503": N, "failed500": N,
+    "failedNetwork": N, "droppedWhileLoading": N
+  },
+  "whisperResponses": N,
+  "whisperResponsesWithWords": N,
+  "whisperWordsTotal": N
+}
+```
+`whisperAvailable` field is kept as-is (not mutated).
+
+### Correctness Fix: `_lateScoreLine` VAD confirmation
+
+`_lateScoreLine()` (~line 1328) runs 800ms after line advance to catch late ASR matches. When it finds a match for a word that is in `vadMatchedSet` but not yet in `asrConfirmedSet`, it should promote it:
+
+```js
+if (matchedSet.set) {
+    matchedSet.set(li, result.score);
+}
+// NEW: promote VAD word if ASR just confirmed it late
+if (vadMatchedSet && vadMatchedSet.has(li) && asrConfirmedSet && !asrConfirmedSet.has(li)) {
+    asrConfirmedSet.add(li);
+}
+```
+
+This ensures late Whisper transcriptions (which fire via `_collectMatchesWhisper` near the line boundary) are not scored as unconfirmed 0.25 VAD hits.
+
+## Success Criteria
+
+1. Server logs show `Whisper model loaded OK` at startup within ~10 seconds of app start
+2. `/whisper-status` returns `{"status": "ready"}` before first song
+3. Every song sends multiple chunks to `/transcribe` (visible in server logs)
+4. Telemetry `whisperChunkCounters.succeeded > 0` for each song
+5. `promotions` array in telemetry contains entries with `source: "whisper"` when Whisper transcribes correctly
+6. No more ambiguous 503s hiding real errors â€” terminal shows full traceback on any transcription failure
+7. Debug HUD shows real Whisper server + track state during gameplay
+8. Same 4-song control panel (Praise The Lord, Big Amount, battlecry, Rubbin off the Paint) run fresh after these changes
+
+## Files Modified
+
+- `app.py` â€” prewarming, `/whisper-status`, `/transcribe` readiness gate + error split
+- `static/player.js` â€” `_whisperServerStatus`, `_whisperTrackStatus`, circuit breaker, chunk counters, `_logPromotion`, both merge path promotions, `_lateScoreLine` upgrade, HUD row, telemetry meta
+
+---
+
+## Implementation
+
 # Whisper End-to-End Fix + Observability Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Make Whisper actually participate in live gameplay by fixing server prewarming, /transcribe error handling, client chunk dispatch, and promotion-path telemetry — then verify with the same 4-song control panel.
+**Goal:** Make Whisper actually participate in live gameplay by fixing server prewarming, /transcribe error handling, client chunk dispatch, and promotion-path telemetry â€” then verify with the same 4-song control panel.
 
-**Architecture:** Three layers of fixes: (1) server eager-loads model and exposes tri-state status, (2) client uses a circuit breaker and rich status objects instead of silent failures, (3) telemetry logs VAD→ASR promotion events in both merge paths and richer Whisper counters in meta. No VAD threshold tuning, no score formula changes — the goal is to get Whisper active and observable.
+**Architecture:** Three layers of fixes: (1) server eager-loads model and exposes tri-state status, (2) client uses a circuit breaker and rich status objects instead of silent failures, (3) telemetry logs VADâ†’ASR promotion events in both merge paths and richer Whisper counters in meta. No VAD threshold tuning, no score formula changes â€” the goal is to get Whisper active and observable.
 
 **Tech Stack:** Python + Flask backend (`app.py`), vanilla JS frontend (`static/player.js`), Node.js CJS unit tests (`tests/test_match_helpers.cjs`, `tests/test_telemetry.cjs`), pytest for Python (`tests/test_app.py`).
 
 ---
 
-## Task 1: Server — Module State + Prewarm + `/whisper-status` (TDD)
+## Task 1: Server â€” Module State + Prewarm + `/whisper-status` (TDD)
 
 **Context:** `get_whisper_model()` currently lazy-loads on the first `/transcribe` request. If it fails, the bare `except Exception: return 503` hides the real error. The fix: add tri-state module-level state (`_whisper_state: 'idle'|'loading'|'ready'|'error'`), prewarm in a background thread triggered on the first HTTP request (avoids Werkzeug reloader double-init), and expose state via a new `/whisper-status` endpoint.
 
 **Files:**
-- Modify: `app.py` (lines 17–32 and new endpoint after line 145)
+- Modify: `app.py` (lines 17â€“32 and new endpoint after line 145)
 - Modify: `tests/test_app.py` (add new tests at end)
 
 ---
@@ -82,19 +293,19 @@ def test_whisper_status_returns_error_with_reason(client):
 
 ---
 
-**Step 3: Run new tests — expect FAIL**
+**Step 3: Run new tests â€” expect FAIL**
 
 ```bash
 python -m pytest tests/test_app.py::test_whisper_status_returns_loading tests/test_app.py::test_whisper_status_returns_ready tests/test_app.py::test_whisper_status_returns_error_with_reason -v
 ```
 
-Expected: `FAILED` — `AttributeError: module 'app' has no attribute '_whisper_state'`
+Expected: `FAILED` â€” `AttributeError: module 'app' has no attribute '_whisper_state'`
 
 ---
 
 **Step 4: Replace the whisper module-level state in `app.py`**
 
-Replace lines 17–32 (the `_whisper_model`, `_whisper_lock`, and `get_whisper_model` block) with:
+Replace lines 17â€“32 (the `_whisper_model`, `_whisper_lock`, and `get_whisper_model` block) with:
 
 ```python
 _whisper_model  = None
@@ -151,7 +362,7 @@ def whisper_status():
 
 ---
 
-**Step 6: Run new tests — expect PASS**
+**Step 6: Run new tests â€” expect PASS**
 
 ```bash
 python -m pytest tests/test_app.py::test_whisper_status_returns_loading tests/test_app.py::test_whisper_status_returns_ready tests/test_app.py::test_whisper_status_returns_error_with_reason -v
@@ -167,7 +378,7 @@ Expected: 3 passed.
 python -m pytest tests/ -v
 ```
 
-Expected: 32 passed, 1 skipped (same as before — no regressions).
+Expected: 32 passed, 1 skipped (same as before â€” no regressions).
 
 ---
 
@@ -186,12 +397,12 @@ git commit -m "feat: Whisper eager prewarm + tri-state /whisper-status endpoint
 
 ---
 
-## Task 2: Server — `/transcribe` Readiness Gate + 503/500 Split (TDD)
+## Task 2: Server â€” `/transcribe` Readiness Gate + 503/500 Split (TDD)
 
 **Context:** `/transcribe` currently catches all exceptions and returns 503, collapsing "model not ready" and "transcription error" into one opaque code. Fix: check `_whisper_state` before touching the model (503 if not ready), log full traceback and return 500 if transcription itself fails.
 
 **Files:**
-- Modify: `app.py` (lines 148–181)
+- Modify: `app.py` (lines 148â€“181)
 - Modify: `tests/test_app.py` (update existing transcribe tests + add 503/500 cases)
 
 ---
@@ -228,19 +439,19 @@ def test_transcribe_returns_500_on_transcription_error(client, monkeypatch):
 
 ---
 
-**Step 2: Run new tests — expect FAIL**
+**Step 2: Run new tests â€” expect FAIL**
 
 ```bash
 python -m pytest tests/test_app.py::test_transcribe_returns_503_when_model_not_ready tests/test_app.py::test_transcribe_returns_500_on_transcription_error -v
 ```
 
-Expected: FAIL — current code returns 503 in both cases.
+Expected: FAIL â€” current code returns 503 in both cases.
 
 ---
 
 **Step 3: Replace the `/transcribe` endpoint in `app.py`**
 
-Replace lines 148–181 with:
+Replace lines 148â€“181 with:
 
 ```python
 @app.route('/transcribe', methods=['POST'])
@@ -307,7 +518,7 @@ def test_transcribe_whisper_exception_returns_500(client, monkeypatch):
         _app_module._whisper_state = 'idle'
 ```
 
-Also update any other existing transcribe tests that mock `get_whisper_model` — they should instead set `_app_module._whisper_state = 'ready'` and `monkeypatch.setattr(_app_module, '_whisper_model', mock_model)`.
+Also update any other existing transcribe tests that mock `get_whisper_model` â€” they should instead set `_app_module._whisper_state = 'ready'` and `monkeypatch.setattr(_app_module, '_whisper_model', mock_model)`.
 
 ---
 
@@ -325,7 +536,7 @@ Expected: 32 passed, 1 skipped.
 
 ```bash
 git add app.py tests/test_app.py
-git commit -m "fix: /transcribe readiness gate — 503 if not ready, 500 on transcription error
+git commit -m "fix: /transcribe readiness gate â€” 503 if not ready, 500 on transcription error
 
 - Check _whisper_state == 'ready' before using _whisper_model (never
   falls back to lazy init, which was the root cause of the first-request 503)
@@ -336,12 +547,12 @@ git commit -m "fix: /transcribe readiness gate — 503 if not ready, 500 on tran
 
 ---
 
-## Task 3: Client — Whisper Status Objects + Game Start Check
+## Task 3: Client â€” Whisper Status Objects + Game Start Check
 
 **Context:** `_startWhisperTrack()` fails silently with only a `console.warn`. The client has no structured state for server vs client Whisper health, and telemetry receives only a coarse `whisperAvailable` boolean. Fix: add `_whisperServerStatus` and `_whisperTrackStatus` objects, fetch `/whisper-status` at game start, and update `_startWhisperTrack` to populate `_whisperTrackStatus`.
 
 **Files:**
-- Modify: `static/player.js` — three locations: constructor (~line 425), `start()` (~line 508), `_startWhisperTrack()` (~line 690)
+- Modify: `static/player.js` â€” three locations: constructor (~line 425), `start()` (~line 508), `_startWhisperTrack()` (~line 690)
 
 No browser unit tests for AudioContext/fetch logic. Verify via the debug HUD in Task 5.
 
@@ -396,7 +607,7 @@ In `start()`, after the call to `this._startWhisperTrack()` (line ~508), add:
 
 **Step 3: Update `_startWhisperTrack()` to populate `_whisperTrackStatus`**
 
-Replace the existing `_startWhisperTrack()` method (~lines 690–727):
+Replace the existing `_startWhisperTrack()` method (~lines 690â€“727):
 
 ```js
     async _startWhisperTrack() {
@@ -471,12 +682,12 @@ git commit -m "feat: client Whisper status objects + game-start /whisper-status 
 
 ---
 
-## Task 4: Client — Circuit Breaker + Chunk Counters
+## Task 4: Client â€” Circuit Breaker + Chunk Counters
 
 **Context:** `_sendChunkToWhisper()` silently drops any non-ok response and has no counters. A 503 (model loading) should enter a circuit breaker state and pause chunk dispatch until the server reports ready. All failure modes need separate counters.
 
 **Files:**
-- Modify: `static/player.js` — `_sendChunkToWhisper()` (~lines 746–773) and one new helper method
+- Modify: `static/player.js` â€” `_sendChunkToWhisper()` (~lines 746â€“773) and one new helper method
 
 ---
 
@@ -496,7 +707,7 @@ Insert this method after `_stopWhisperTrack()` (~line 744):
                     checkedAt: Date.now(),
                 };
             }.bind(this))
-            .catch(function() { /* silent — best effort */ }.bind(this));
+            .catch(function() { /* silent â€” best effort */ }.bind(this));
     }
 ```
 
@@ -504,7 +715,7 @@ Insert this method after `_stopWhisperTrack()` (~line 744):
 
 **Step 2: Replace `_sendChunkToWhisper()` with circuit-breaker version**
 
-Replace lines 746–773 with:
+Replace lines 746â€“773 with:
 
 ```js
     async _sendChunkToWhisper(float32) {
@@ -539,7 +750,7 @@ Replace lines 746–773 with:
             }
             if (resp.status === 500) {
                 this._chunksFailed500++;
-                console.warn('[Whisper] transcription error (500) — continuing');
+                console.warn('[Whisper] transcription error (500) â€” continuing');
                 return;
             }
             if (!resp.ok) {
@@ -568,7 +779,7 @@ Replace lines 746–773 with:
             }
         } catch (_err) {
             this._chunksFailedNetwork++;
-            /* fire-and-forget — network errors are expected on flaky connections */
+            /* fire-and-forget â€” network errors are expected on flaky connections */
         } finally {
             this._whisperInFlight = Math.max(0, this._whisperInFlight - 1);
         }
@@ -593,9 +804,9 @@ Expected: 32 passed, 1 skipped.
 git add static/player.js
 git commit -m "feat: Whisper circuit breaker + chunk failure counters
 
-- 503 → enter circuit-breaker (drop chunks, poll /whisper-status to resume)
-- 500 → log and continue sending
-- Network exception → _chunksFailedNetwork (separate from HTTP errors)
+- 503 â†’ enter circuit-breaker (drop chunks, poll /whisper-status to resume)
+- 500 â†’ log and continue sending
+- Network exception â†’ _chunksFailedNetwork (separate from HTTP errors)
 - Track _chunksDispatched, Succeeded, Failed503, Failed500, FailedNetwork,
   DroppedWhileLoading, _whisperResponses, ResponsesWithWords, WordsTotal
 - Move _logAsr whisper call inside success path alongside response counters"
@@ -603,12 +814,12 @@ git commit -m "feat: Whisper circuit breaker + chunk failure counters
 
 ---
 
-## Task 5: Client — Debug HUD Whisper Row
+## Task 5: Client â€” Debug HUD Whisper Row
 
 **Context:** The HUD currently shows only `VAD hits:N | asr-conf:N/N`. Add a Whisper row showing server state, track state, and chunk counts so failures are visible during live play.
 
 **Files:**
-- Modify: `static/player.js` — `_renderDebugHud()` (~line 1662)
+- Modify: `static/player.js` â€” `_renderDebugHud()` (~line 1662)
 
 ---
 
@@ -649,17 +860,17 @@ Expected: 32 passed, 1 skipped.
 
 ```bash
 git add static/player.js
-git commit -m "feat: debug HUD Whisper row — server state, track state, chunk counters"
+git commit -m "feat: debug HUD Whisper row â€” server state, track state, chunk counters"
 ```
 
 ---
 
-## Task 6: Telemetry — `_logPromotion` + Browser SR Merge Logging
+## Task 6: Telemetry â€” `_logPromotion` + Browser SR Merge Logging
 
-**Context:** When `_collectMatches` (browser SR) upgrades a VAD-matched word into `asrConfirmedSet`, zero telemetry is emitted. Add a dedicated `_logPromotion()` method (not `_logMatch` — no dedup, different schema) and call it in the browser SR union merge.
+**Context:** When `_collectMatches` (browser SR) upgrades a VAD-matched word into `asrConfirmedSet`, zero telemetry is emitted. Add a dedicated `_logPromotion()` method (not `_logMatch` â€” no dedup, different schema) and call it in the browser SR union merge.
 
 **Files:**
-- Modify: `static/player.js` — `_initTelemetry()` (~line 1383), browser SR union merge (~line 626), new `_logPromotion()` method, and `tests/test_telemetry.cjs`
+- Modify: `static/player.js` â€” `_initTelemetry()` (~line 1383), browser SR union merge (~line 626), new `_logPromotion()` method, and `tests/test_telemetry.cjs`
 
 ---
 
@@ -676,7 +887,7 @@ Replace with:
 ```js
             asr:         [],
             matches:     [],
-            promotions:  [],   // VAD→ASR upgrade events (both browser SR and Whisper paths)
+            promotions:  [],   // VADâ†’ASR upgrade events (both browser SR and Whisper paths)
             transitions: []
 ```
 
@@ -688,10 +899,10 @@ Insert after the closing brace of `_logAsr()` (~line 1426):
 
 ```js
     /**
-     * Record a VAD→ASR promotion event.
+     * Record a VADâ†’ASR promotion event.
      * Called when a word transitions from provisional VAD credit to ASR-confirmed.
      * Uses wordIndex (not word string) as key to handle repeated words on a line.
-     * Not deduped — promotion events are inherently non-redundant (guarded by !asrConfirmedSet.has).
+     * Not deduped â€” promotion events are inherently non-redundant (guarded by !asrConfirmedSet.has).
      * @param {'browser_sr'|'whisper'} source
      * @param {number} wordIndex   - index within lineWords
      * @param {number} score       - the ASR match score that triggered promotion
@@ -782,19 +993,19 @@ git add static/player.js tests/test_telemetry.cjs
 git commit -m "feat: _logPromotion + browser SR merge promotion logging
 
 - Add promotions:[] array to telemetry
-- Add _logPromotion(source, wordIndex, score) — not deduped, uses index not word string
+- Add _logPromotion(source, wordIndex, score) â€” not deduped, uses index not word string
 - Log browser_sr promotion in union merge when VAD word gets ASR-confirmed
 - Add telemetry schema test for promotions entry"
 ```
 
 ---
 
-## Task 7: Telemetry — Whisper Merge Promotion + `_lateScoreLine` VAD Upgrade
+## Task 7: Telemetry â€” Whisper Merge Promotion + `_lateScoreLine` VAD Upgrade
 
-**Context:** Two remaining gaps: (1) the Whisper merge path (~line 880) also adds to `asrConfirmedSet` but emits no promotion log, and (2) `_lateScoreLine()` can upgrade `matchedSet` scores late via ASR but never adds the word to `asrConfirmedSet` — meaning late Whisper confirmations are still scored as unconfirmed 0.25 VAD hits.
+**Context:** Two remaining gaps: (1) the Whisper merge path (~line 880) also adds to `asrConfirmedSet` but emits no promotion log, and (2) `_lateScoreLine()` can upgrade `matchedSet` scores late via ASR but never adds the word to `asrConfirmedSet` â€” meaning late Whisper confirmations are still scored as unconfirmed 0.25 VAD hits.
 
 **Files:**
-- Modify: `static/player.js` — Whisper merge (~line 875) and `_lateScoreLine()` match block (~line 1347)
+- Modify: `static/player.js` â€” Whisper merge (~line 875) and `_lateScoreLine()` match block (~line 1347)
 
 ---
 
@@ -871,18 +1082,18 @@ git commit -m "feat: Whisper merge promotion logging + lateScoreLine VAD upgrade
 
 - Log 'whisper' promotions in _collectMatchesWhisper merge path (was silent)
 - _lateScoreLine now adds confirmed words to asrConfirmedSet when late ASR
-  matches a VAD-backed word — prevents late Whisper hits scoring as 0.25"
+  matches a VAD-backed word â€” prevents late Whisper hits scoring as 0.25"
 ```
 
 ---
 
-## Task 8: Telemetry — Dedupe Fix + Meta Fields at Download
+## Task 8: Telemetry â€” Dedupe Fix + Meta Fields at Download
 
 **Context:** `_logMatch` dedup suppresses `vad-confirmed` events from the `_matchHotWord` path. Fix the guard. Also add all the richer Whisper meta fields to `_downloadTelemetry()` and update the telemetry test.
 
 **Files:**
-- Modify: `static/player.js` — `_logMatch()` dedup guard (~line 1438) and `_downloadTelemetry()` (~line 1560)
-- Modify: `tests/test_telemetry.cjs` — add meta field assertions
+- Modify: `static/player.js` â€” `_logMatch()` dedup guard (~line 1438) and `_downloadTelemetry()` (~line 1560)
+- Modify: `tests/test_telemetry.cjs` â€” add meta field assertions
 
 ---
 
@@ -897,7 +1108,7 @@ Find (~line 1438):
 
 Replace with:
 ```js
-        // Exempt vad-confirmed — a promotion is a distinct event from the earlier provisional.
+        // Exempt vad-confirmed â€” a promotion is a distinct event from the earlier provisional.
         if (method !== 'vad-confirmed' && matched && this._telemetryLoggedMatches && this._telemetryLoggedMatches.has(this.activeLineIdx + ':' + targetWord)) {
             return;  // Already logged a match for this word on this line
         }
@@ -978,7 +1189,7 @@ Expected: all JS tests pass + 32 Python passed, 1 skipped.
 
 ```bash
 git add static/player.js tests/test_telemetry.cjs
-git commit -m "feat: telemetry meta — whisper counters, status fields, dedupe fix
+git commit -m "feat: telemetry meta â€” whisper counters, status fields, dedupe fix
 
 - Exempt vad-confirmed from _logMatch dedup (promotion != provisional)
 - Add whisperStatusAtStart, whisperStatusFinal, whisperTrackStatus,
@@ -1032,17 +1243,17 @@ Expected response: `{"status": "ready", "error": null, "model": "large-v3-turbo"
 Load any song, open debug overlay (press D), start game mode. Verify:
 
 - `Whisp  srv:ready trk:ready | sent:0 ok:0 503:0 500:0 net:0 drop:0` appears
-- After ~5–10 seconds of gameplay, `sent:N ok:N` counts increment
+- After ~5â€“10 seconds of gameplay, `sent:N ok:N` counts increment
 
 ---
 
 **Step 4: Run the 4-song control panel**
 
 Play the same 4 songs as Sessions 3 and 4:
-1. A$AP Rocky — Praise The Lord (Da Shine)
-2. 2 Chainz ft. Drake — Big Amount
-3. Nujabes — battlecry
-4. YBN Nahmir — Rubbin off the Paint
+1. A$AP Rocky â€” Praise The Lord (Da Shine)
+2. 2 Chainz ft. Drake â€” Big Amount
+3. Nujabes â€” battlecry
+4. YBN Nahmir â€” Rubbin off the Paint
 
 After each song, download telemetry (press D, download). After all 4 songs, send telemetry files to Codex for analysis.
 

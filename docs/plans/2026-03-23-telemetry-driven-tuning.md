@@ -1,8 +1,171 @@
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Telemetry-Driven Algorithm Tuning Design
+
+**Date:** 2026-03-23
+**Data source:** 16 telemetry sessions from 2026-03-23 (all hip-hop/rap)
+**Score range observed:** 74.0% â€“ 93.1% (weighted)
+
+## Problem Statement
+
+Analysis of 16 gameplay telemetry sessions revealed systematic false positives (wrong words getting credit), false negatives (correct words not scoring), and structural scoring issues with short/slow lines. This design addresses all data-backed findings to improve both score accuracy and responsiveness.
+
+---
+
+## Section 1: Match Precision Tightening
+
+### Edit-Distance-2 Reform
+
+**Finding:** ~18% false positive rate on edit2 matches. Examples: "cant"â†’"and", "god"â†’"and", "for"â†’"you" all receive 0.5 score.
+
+**Changes:**
+- Raise minimum word length for edit2 matches to â‰¥6 characters. A 3-letter word with 2 edits is essentially a different word.
+- Drop edit2 score from 0.5 â†’ 0.4.
+- Keep edit1 unchanged (0.75, already gated by `maxEditDistance`).
+
+### Phonetic Match Tightening
+
+**Finding:** False positives like "die"â†’"the", "one"â†’"in", "get"â†’"caught", "pussy"â†’"boss" all get 0.9 score.
+
+**Changes:**
+- Require both words be â‰¥3 characters for phonetic matching.
+- Require same first character OR same word length (Â±1).
+- Drop phonetic score from 0.9 â†’ 0.8.
+
+---
+
+## Section 2: Expanding Valid Matches (Reducing False Negatives)
+
+### -in'/-ing Suffix Normalization
+
+**Finding:** Lyrics contain "livin", "smokin", "talkin" etc. but ASR produces "living", "smoking", "talking". Systematic gap for hip-hop/rap.
+
+**Changes:**
+- In `wordsMatchScore()`, after exact match but before contraction/slang: check if one word ends in "in"/"in'" and the other ends in "ing" with the same stem. Treat as exact match (score 1.0).
+
+### Profanity â†” Censored Form Mappings
+
+**Finding:** "fucking" appears 6 times across sessions, never matches. ASR censors profanity.
+
+**Changes:**
+- Expand SLANG_MAP with ASR censorship outputs: "f***ing"â†’"fucking", starred/bleeped forms.
+- Add common ASR substitutions: "ducking"â†’"fucking", "shut"â†’"shit".
+
+### Contraction Expansion
+
+**Finding:** Only 24 contraction matches across 16 songs of rap â€” many missing.
+
+**Changes:**
+- Add: "bout"â†”"about", "em"â†”"them", "cause"â†”"because", "ima"â†”"i'm going to", "finna"â†”"fixing to", "aint"â†”"ain't"â†”"isn't".
+- Review contraction map against telemetry missed-words lists for additional gaps.
+
+---
+
+## Section 3: LRC Parsing Cleanup
+
+### Strip Parenthetical Markers
+
+**Finding:** Words like "(he", "dead)", "(amen)", "(complex)" are scored as targets. Parentheses become part of the word string.
+
+**Changes:**
+- During LRC parsing/word timing generation, strip leading `(` and trailing `)` from words.
+- If an entire phrase is parenthetical, classify those words as `adlib` weight (0.25).
+- Ensure the existing `inParentheses` flag is set correctly and parens are stripped from the word text.
+
+### Empty String Targets
+
+**Finding:** 3 instances of `""` as a target word.
+
+**Changes:**
+- Filter out empty/whitespace-only tokens during LRC line parsing, before they enter `wordTimings`.
+
+### Numeric Text
+
+**Finding:** "20", "911", "6" in lyrics don't match ASR's "twenty", "nine one one", "six".
+
+**Changes:**
+- Add a small number-to-words lookup (0â€“100 plus common numbers from telemetry: 911, 38, 48).
+- Apply during word normalization: if a target is numeric, also accept its spelled-out form, and vice versa.
+
+---
+
+## Section 4: Repeated Word Matching
+
+**Finding:** Lines like "alright, alright, alright" score 33% because only the first occurrence gets matched.
+
+**Changes:**
+- When a spoken word matches a target word, only consume the first *unmatched* index of that word. If index 0 is already matched, the next spoken instance should match index 1, then index 2.
+- The matching loop must skip already-matched indices when multiple target words are identical.
+- Existing merge logic (only upgrade, never downgrade) already protects against regressions.
+
+---
+
+## Section 5: Slow-Tempo Line Fixes
+
+**Finding:** 547 slow-tempo lines average 67.8% vs 94â€“95% for medium/fast. Biggest single score driver.
+
+### Zero-ASR Line Fencing
+
+Some lines get 0 ASR events but score 100% from stale accumulated transcript, or 0% when old text doesn't happen to match.
+
+**Changes:**
+- Track a per-line "ASR activity" flag. If zero ASR events fire during a line's active window, mark as "unscored" and exclude from running score calculation (neutral impact).
+- Prevents both false 100%s and unfair 0%s.
+
+### Extended Matching Window for Short Lines
+
+Lines with 2â€“3 words and short durations (<1.5s) expire before ASR can process them.
+
+**Changes:**
+- For slow-tempo lines with â‰¤3 words, extend overlap duration by 50%.
+- Extend pre-line window by ~200ms for short lines (player likely starts slightly early).
+
+### Not Changing
+- Not merging short lines with adjacent lines (too risky for display/transitions).
+- Not changing tempo classification itself (correctly categorized per the data).
+
+---
+
+## Priority Order
+
+| Priority | Change | Expected Impact | Risk |
+|----------|--------|----------------|------|
+| 1 | Strip parenthetical markers + empty string targets | Eliminates impossible-to-match targets | Very low |
+| 2 | -in'/-ing suffix normalization | Recovers many missed words across all songs | Low |
+| 3 | Tighten edit2 (min length 6, score 0.4) | Removes ~167 false positives | Low |
+| 4 | Tighten phonetic (min length 3, same-first-char or same-length) | Removes many false positives | Low-medium |
+| 5 | Repeated word matching | Fixes repeated-word pattern | Medium |
+| 6 | Zero-ASR line fencing | Eliminates false scores on silent lines | Medium |
+| 7 | Expand SLANG_MAP (profanity, contractions) | Recovers never-matched words | Low |
+| 8 | Extended window for short slow lines | Addresses biggest score driver category | Medium |
+| 9 | Numeric text normalization | Small impact, easy win | Low |
+
+---
+
+## Telemetry Key Metrics (Baseline)
+
+For comparing before/after:
+- **Mean weighted score:** 84.3%
+- **Slow-tempo line avg:** 67.8%
+- **Edit2 match count:** 945 (est. 167 false positives)
+- **Phonetic match count:** 890 (high false positive rate on short words)
+- **Contraction matches:** 24
+- **Slang matches:** 14
+- **Never-matched words:** "fucking" (6), "dropping" (5), "muh" (5), "broken" (4), "listening" (4)
+
+---
+
+## Implementation
+
 # Telemetry-Driven Algorithm Tuning Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Improve scoring accuracy and responsiveness by fixing false positives, reducing false negatives, cleaning up LRC parsing, and improving slow-tempo line handling — all driven by analysis of 16 gameplay telemetry sessions.
+**Goal:** Improve scoring accuracy and responsiveness by fixing false positives, reducing false negatives, cleaning up LRC parsing, and improving slow-tempo line handling â€” all driven by analysis of 16 gameplay telemetry sessions.
 
 **Architecture:** Changes span three files: `match-helpers.js` (matching algorithms, dictionaries), `player.js` (word parsing, line scoring, matching loops), and `sync-helpers.js` (overlap/window timing). Each task is independent and can be committed separately.
 
@@ -15,7 +178,7 @@
 Parenthetical characters like `(` and `)` are currently baked into target words (e.g., `"(he"`, `"dead)"`, `"(amen)"`), making them unmatchable by ASR. The `normalizeWord` function strips most punctuation but not parentheses.
 
 **Files:**
-- Modify: `static/player.js:230-232` — `normalizeWord()` function
+- Modify: `static/player.js:230-232` â€” `normalizeWord()` function
 
 **Step 1: Update `normalizeWord` to strip parentheses**
 
@@ -37,9 +200,9 @@ function normalizeWord(w) {
 
 Test manually by adding a quick console check:
 ```
-normalizeWord("(he")    → "he"
-normalizeWord("dead)")  → "dead"
-normalizeWord("(amen)") → "amen"
+normalizeWord("(he")    â†’ "he"
+normalizeWord("dead)")  â†’ "dead"
+normalizeWord("(amen)") â†’ "amen"
 ```
 
 **Step 3: Commit**
@@ -56,7 +219,7 @@ git commit -m "fix: strip parentheses from normalizeWord to fix unmatchable LRC 
 The telemetry shows 3 instances of `""` appearing as target words. These come from LRC lines that produce empty tokens after splitting and normalizing.
 
 **Files:**
-- Modify: `static/player.js:919-920` — word list creation in `setActiveLine()`
+- Modify: `static/player.js:919-920` â€” word list creation in `setActiveLine()`
 
 **Step 1: Add empty-word filter**
 
@@ -90,7 +253,7 @@ git commit -m "fix: filter empty strings from lineWords after normalization"
 Lyrics contain "livin", "smokin", "talkin" etc. but ASR produces "living", "smoking", "talking". This is a systematic mismatch in hip-hop/rap. The fix goes in `wordsMatchScore()` early in the matching pipeline.
 
 **Files:**
-- Modify: `static/player.js:175-200` — `wordsMatchScore()` function
+- Modify: `static/player.js:175-200` â€” `wordsMatchScore()` function
 
 **Step 1: Add suffix normalization check**
 
@@ -102,7 +265,7 @@ function wordsMatchScore(spoken, target, targetPhonetic) {
     if (spoken === target) return { score: 1.0, method: 'exact' };
 
     // 1b. -in'/-ing suffix normalization
-    // "livin" ↔ "living", "smokin" ↔ "smoking", etc.
+    // "livin" â†” "living", "smokin" â†” "smoking", etc.
     if (spoken.length >= 4 && target.length >= 4) {
         var sBase = spoken.endsWith('ing') ? spoken.slice(0, -3) :
                     (spoken.endsWith('in') ? spoken.slice(0, -2) : null);
@@ -116,16 +279,16 @@ function wordsMatchScore(spoken, target, targetPhonetic) {
     // ... rest unchanged
 ```
 
-This handles all combinations: "livin"→"living", "living"→"livin", "smokin"→"smoking", etc.
+This handles all combinations: "livin"â†’"living", "living"â†’"livin", "smokin"â†’"smoking", etc.
 
 **Step 2: Verify with test cases**
 
 ```
-wordsMatchScore("livin", "living")   → { score: 1.0, method: 'exact' }
-wordsMatchScore("smoking", "smokin") → { score: 1.0, method: 'exact' }
-wordsMatchScore("talkin", "talking") → { score: 1.0, method: 'exact' }
-wordsMatchScore("in", "ing")         → no match (length < 4, skipped)
-wordsMatchScore("bin", "bing")       → no match (length < 4, skipped)
+wordsMatchScore("livin", "living")   â†’ { score: 1.0, method: 'exact' }
+wordsMatchScore("smoking", "smokin") â†’ { score: 1.0, method: 'exact' }
+wordsMatchScore("talkin", "talking") â†’ { score: 1.0, method: 'exact' }
+wordsMatchScore("in", "ing")         â†’ no match (length < 4, skipped)
+wordsMatchScore("bin", "bing")       â†’ no match (length < 4, skipped)
 ```
 
 **Step 3: Commit**
@@ -139,11 +302,11 @@ git commit -m "feat: add -in/-ing suffix normalization for hip-hop lyric matchin
 
 ### Task 4: Tighten Edit-Distance-2 Matching
 
-Edit2 has ~18% false positive rate with matches like "cant"→"and", "god"→"and", "for"→"you". The fix raises the minimum word length for edit2 and lowers its score.
+Edit2 has ~18% false positive rate with matches like "cant"â†’"and", "god"â†’"and", "for"â†’"you". The fix raises the minimum word length for edit2 and lowers its score.
 
 **Files:**
-- Modify: `static/player.js:192-197` — edit distance section of `wordsMatchScore()`
-- Modify: `static/match-helpers.js:302-307` — `maxEditDistance()` function
+- Modify: `static/player.js:192-197` â€” edit distance section of `wordsMatchScore()`
+- Modify: `static/match-helpers.js:302-307` â€” `maxEditDistance()` function
 
 **Step 1: Restrict edit2 to longer words**
 
@@ -159,7 +322,7 @@ function maxEditDistance(len) {
 }
 ```
 
-New (raise edit2 threshold to ≥7 chars, cap at 2):
+New (raise edit2 threshold to â‰¥7 chars, cap at 2):
 ```javascript
 function maxEditDistance(len) {
     if (len <= 6) return 1;
@@ -181,27 +344,27 @@ if (dist === 2) return { score: 0.4, method: 'edit2' };
 **Step 3: Verify false positives are blocked**
 
 ```
-maxEditDistance(3) → 1  (blocks "cant"→"and" which has dist=2)
-maxEditDistance(5) → 1  (blocks "for"→"you" which has dist=2)
-maxEditDistance(7) → 2  (allows "smoking"→"smoling" which has dist=1... wait, that's edit1)
-maxEditDistance(8) → 2  (allows "sentence"→"sentance" which is a legitimate edit2)
+maxEditDistance(3) â†’ 1  (blocks "cant"â†’"and" which has dist=2)
+maxEditDistance(5) â†’ 1  (blocks "for"â†’"you" which has dist=2)
+maxEditDistance(7) â†’ 2  (allows "smoking"â†’"smoling" which has dist=1... wait, that's edit1)
+maxEditDistance(8) â†’ 2  (allows "sentence"â†’"sentance" which is a legitimate edit2)
 ```
 
 **Step 4: Commit**
 
 ```bash
 git add static/player.js static/match-helpers.js
-git commit -m "fix: tighten edit2 matching — require min 7 chars, lower score to 0.4"
+git commit -m "fix: tighten edit2 matching â€” require min 7 chars, lower score to 0.4"
 ```
 
 ---
 
 ### Task 5: Tighten Phonetic Matching
 
-False positives like "die"→"the", "one"→"in", "get"→"caught", "pussy"→"boss" all receive 0.9 score. The fix adds length and first-character guards.
+False positives like "die"â†’"the", "one"â†’"in", "get"â†’"caught", "pussy"â†’"boss" all receive 0.9 score. The fix adds length and first-character guards.
 
 **Files:**
-- Modify: `static/player.js:185-190` — phonetic section of `wordsMatchScore()`
+- Modify: `static/player.js:185-190` â€” phonetic section of `wordsMatchScore()`
 
 **Step 1: Add guards to phonetic matching**
 
@@ -219,7 +382,7 @@ Current:
 
 New:
 ```javascript
-    // 4. Phonetic match (guarded: both words ≥3 chars, same first letter or similar length)
+    // 4. Phonetic match (guarded: both words â‰¥3 chars, same first letter or similar length)
     if (spoken.length >= 3 && target.length >= 3) {
         var sp = _spokenLRU.get(spoken);
         var tp = targetPhonetic || doubleMetaphone(target);
@@ -231,22 +394,22 @@ New:
     }
 ```
 
-**Note:** The `_spokenLRU` variable is declared at line 155 — it's now accessed only inside the `if` block, which is fine since the `var` still references the outer scope.
+**Note:** The `_spokenLRU` variable is declared at line 155 â€” it's now accessed only inside the `if` block, which is fine since the `var` still references the outer scope.
 
 **Step 2: Verify false positives are blocked**
 
 ```
-"die" (3) vs "the" (3): same length ✓ BUT different first letter AND length diff=0 ≤1 ✓ — STILL PASSES
+"die" (3) vs "the" (3): same length âœ“ BUT different first letter AND length diff=0 â‰¤1 âœ“ â€” STILL PASSES
 ```
 
-Hmm, "die" and "the" have same length. Let's use a stricter gate: require same first letter OR length diff ≤1 AND length ≥4:
+Hmm, "die" and "the" have same length. Let's use a stricter gate: require same first letter OR length diff â‰¤1 AND length â‰¥4:
 
 Actually, let me reconsider. The key false positives:
-- "die"→"the": diff first letter, same length → passes length gate. Need first-letter gate to be required for short words.
-- "get"→"caught": diff first letter, length diff=2 → blocked by length gate ✓
-- "pussy"→"boss": diff first letter, length diff=1 → would pass length gate
+- "die"â†’"the": diff first letter, same length â†’ passes length gate. Need first-letter gate to be required for short words.
+- "get"â†’"caught": diff first letter, length diff=2 â†’ blocked by length gate âœ“
+- "pussy"â†’"boss": diff first letter, length diff=1 â†’ would pass length gate
 
-Better approach — require **both** words ≥3 chars AND (same first letter OR both words ≥5 chars with length diff ≤2):
+Better approach â€” require **both** words â‰¥3 chars AND (same first letter OR both words â‰¥5 chars with length diff â‰¤2):
 
 ```javascript
     // 4. Phonetic match (guarded)
@@ -264,19 +427,19 @@ Better approach — require **both** words ≥3 chars AND (same first letter OR 
 ```
 
 Verification:
-- "die"→"the": diff first letter, neither ≥5 → BLOCKED ✓
-- "one"→"in": "in" is length 2 → BLOCKED by outer ≥3 gate ✓
-- "get"→"caught": diff first letter, "get" is 3 (not ≥5) → BLOCKED ✓
-- "pussy"→"boss": diff first letter, "boss" is 4 (not ≥5) → BLOCKED ✓
-- "night"→"knight": same first letter="n"/"k" — diff first letter, both ≥5 ✓ → PASSES ✓
-- "fone"→"phone": diff first letter ("f"/"p"), both ≥4 but not ≥5 → BLOCKED. Acceptable loss, edit1 catches it.
-- "their"→"there": same first letter → PASSES ✓
+- "die"â†’"the": diff first letter, neither â‰¥5 â†’ BLOCKED âœ“
+- "one"â†’"in": "in" is length 2 â†’ BLOCKED by outer â‰¥3 gate âœ“
+- "get"â†’"caught": diff first letter, "get" is 3 (not â‰¥5) â†’ BLOCKED âœ“
+- "pussy"â†’"boss": diff first letter, "boss" is 4 (not â‰¥5) â†’ BLOCKED âœ“
+- "night"â†’"knight": same first letter="n"/"k" â€” diff first letter, both â‰¥5 âœ“ â†’ PASSES âœ“
+- "fone"â†’"phone": diff first letter ("f"/"p"), both â‰¥4 but not â‰¥5 â†’ BLOCKED. Acceptable loss, edit1 catches it.
+- "their"â†’"there": same first letter â†’ PASSES âœ“
 
 **Step 3: Commit**
 
 ```bash
 git add static/player.js
-git commit -m "fix: tighten phonetic matching — require same first char or both words ≥5 chars"
+git commit -m "fix: tighten phonetic matching â€” require same first char or both words â‰¥5 chars"
 ```
 
 ---
@@ -286,8 +449,8 @@ git commit -m "fix: tighten phonetic matching — require same first char or bot
 Lines like "alright, alright, alright" score 33% because the matching loop breaks after matching the first target occurrence, never reaching the second/third. The fix makes the loop skip already-matched indices for duplicate target words.
 
 **Files:**
-- Modify: `static/player.js:931-987` — `_collectMatches()` inner loop
-- Modify: `static/player.js:740-792` — `_collectMatchesWhisper()` inner loop
+- Modify: `static/player.js:931-987` â€” `_collectMatches()` inner loop
+- Modify: `static/player.js:740-792` â€” `_collectMatchesWhisper()` inner loop
 
 **Step 1: Update `_collectMatches` to skip matched indices**
 
@@ -310,7 +473,7 @@ The real issue from telemetry is likely that ASR produces "all right" (two words
 Let me reconsider. The fix should ensure that when the same spoken word at the same position would match multiple target indices, we handle it. Actually, the current code already handles multiple spoken words matching multiple target indices sequentially. The problem is:
 
 1. ASR might produce only one "alright" even though the player said it 3 times
-2. Phrase match ("all right"→"alright") consumes spoken words and only matches once
+2. Phrase match ("all right"â†’"alright") consumes spoken words and only matches once
 
 For case 1, a single spoken "alright" at position si should be allowed to match multiple target indices of "alright". Currently it can't because after matching li=0, spokenIdx advances to si+1, skipping past that spoken word for li=1.
 
@@ -347,7 +510,7 @@ With:
                     // If the next target word is the same, allow reusing this spoken position
                     var nextTarget = (li + 1 < this.lineWords.length) ? this.lineWords[li + 1] : null;
                     if (nextTarget === target) {
-                        // Don't advance spokenIdx — let next iteration re-match this spoken word
+                        // Don't advance spokenIdx â€” let next iteration re-match this spoken word
                     } else {
                         spokenIdx = si + 1;
                     }
@@ -399,7 +562,7 @@ git commit -m "fix: allow single spoken word to match repeated target words on s
 "fucking" is never matched across 6 appearances because ASR censors it. Add common ASR censorship patterns and substitutions.
 
 **Files:**
-- Modify: `static/match-helpers.js:70-97` — SLANG_MAP pairs array
+- Modify: `static/match-helpers.js:70-97` â€” SLANG_MAP pairs array
 
 **Step 1: Add new pairs to the SLANG_MAP pairs array**
 
@@ -444,7 +607,7 @@ git commit -m "feat: expand SLANG_MAP with ASR censorship patterns and add -chu 
 Lines with 0 ASR events during their window can score 100% from stale accumulated transcript or 0% unfairly. The fix tracks whether ASR fired during a line and excludes silent lines from scoring.
 
 **Files:**
-- Modify: `static/player.js` — `GameMode` constructor, ASR handler, `_scoreLine()`
+- Modify: `static/player.js` â€” `GameMode` constructor, ASR handler, `_scoreLine()`
 
 **Step 1: Add ASR activity tracking**
 
@@ -504,10 +667,10 @@ git commit -m "feat: track ASR activity per line, skip scoring for lines with ze
 
 ### Task 9: Extended Window for Short Slow Lines
 
-Short slow-tempo lines (≤3 words, <1.5s) expire before ASR can process. The fix extends overlap duration and adds a pre-line matching window.
+Short slow-tempo lines (â‰¤3 words, <1.5s) expire before ASR can process. The fix extends overlap duration and adds a pre-line matching window.
 
 **Files:**
-- Modify: `static/sync-helpers.js:36-43` — `getOverlapDuration()`
+- Modify: `static/sync-helpers.js:36-43` â€” `getOverlapDuration()`
 
 **Step 1: Add a line-word-count-aware overlap extension**
 
@@ -516,7 +679,7 @@ Create a new function in `sync-helpers.js` after `getOverlapDuration()`:
 ```javascript
 /**
  * Return adjusted overlap duration for short lines.
- * Short slow lines (≤3 words) get 50% more overlap time.
+ * Short slow lines (â‰¤3 words) get 50% more overlap time.
  * @param {'slow'|'normal'|'fast'} tempoClass
  * @param {number} wordCount - number of words on the line
  * @returns {number}
@@ -572,14 +735,14 @@ git commit -m "feat: extend overlap duration and pre-line window for short slow-
 Words like "20", "911", "6" in lyrics don't match ASR's "twenty", "nine one one", "six".
 
 **Files:**
-- Modify: `static/match-helpers.js` — add number lookup and expand SLANG_MAP
+- Modify: `static/match-helpers.js` â€” add number lookup and expand SLANG_MAP
 
 **Step 1: Add number pairs to SLANG_MAP**
 
 Add these pairs to the existing SLANG_MAP pairs array (after the existing number section at line 94-96):
 
 ```javascript
-        // Number ↔ word mappings
+        // Number â†” word mappings
         ['0', 'zero'], ['1', 'one'], ['2', 'two'], ['3', 'three'],
         ['4', 'four'], ['5', 'five'], ['6', 'six'], ['7', 'seven'],
         ['8', 'eight'], ['9', 'nine'], ['10', 'ten'],

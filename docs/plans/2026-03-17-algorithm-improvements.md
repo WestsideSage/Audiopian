@@ -1,8 +1,175 @@
+# Consolidated Plan Record
+
+This file merges the original design and implementation documents for this feature.
+
+## Design
+
+# Karaokee Algorithm Improvements Design
+
+**Date:** 2026-03-17
+**Goal:** Incremental improvements across lyric detection accuracy, real-time speech analysis, and matching performance â€” without regressing the current responsiveness feel.
+
+**Core problems:**
+- Contractions/slang in lyrics (e.g., "gonna") frequently missed because ASR normalizes to full form ("going to") and matching only works one direction
+- Latency across all line positions at high tempo â€” first words, mid-line, line boundaries
+- Missed matches on longer words where a single character difference exceeds the hard edit-distance cap of 1
+
+## 1. Bidirectional Contraction Matching
+
+### Problem
+`CONTRACTION_MAP` maps contractions to full forms (gonna â†’ going to) but:
+- `expandContractions()` is defined but **never called** in the matching pipeline
+- No reverse lookup exists â€” if lyrics say "gonna" and ASR returns "going to", no match
+- Multi-word expansions (2 spoken words vs 1 lyric word) aren't handled
+
+### Solution
+A three-layer contraction matching system:
+
+**Reverse contraction map** â€” auto-generated at load time. For every `{gonna: "going to"}`, create `{"going to": "gonna"}`. O(1) lookup in both directions.
+
+**Multi-word target collapsing** â€” when building `lineWords`, scan for adjacent words that form a known expansion (e.g., lyrics "going" + "to" â†’ could match "gonna"). Store as phrase groups alongside individual words.
+
+**ASR expansion matching** â€” when ASR returns "going to" but the lyric word is "gonna", check if the spoken multi-word sequence maps to the target contraction via the reverse map. Consume multiple spoken words for one lyric word match.
+
+**Integration point:** inject contraction awareness into `wordsMatch()` and `_collectMatches()` rather than pre-expanding, keeping the hot path efficient.
+
+## 2. N-gram Phrase Matching
+
+### Problem
+Word-by-word sequential matching fails when:
+- ASR regroups word boundaries ("alright" vs "all right")
+- Phrases get misheard as similar-sounding phrases ("let it go" â†’ "letter go")
+- Filler words inserted by ASR ("I am gonna") consume drift window slots
+
+### Solution
+
+**Equivalent phrase map** â€” static lookup of word-boundary variants:
+- `"alright" â†” "all right"`, `"everyday" â†” "every day"`, `"cannot" â†” "can not"`, `"into" â†” "in to"`, `"onto" â†” "on to"`, etc.
+- Distinct from contractions â€” these are word-boundary ambiguities, not slang.
+
+**Sliding 2-3 word phrase check** â€” during `_collectMatches()`, when a single word doesn't match, try concatenating the next 2-3 spoken words and comparing against the target (and vice versa). Example:
+- Spoken `["all", "right"]` â†’ concat `"allright"` â†’ matches target `"alright"`
+- Spoken `["letter"]` â†’ phonetic match against target phrase `"let her"`
+
+**Filler word skipping** â€” small set of filler words ASR commonly inserts (`"uh"`, `"um"`, `"like"`, `"you know"`) that can be skipped without consuming drift window slots.
+
+**Scoring:** phrase matches still count individual lyric words as matched. Spoken "alright" matching lyrics "all" + "right" lights both green.
+
+## 3. Whisper Prompt Hinting & Word-Level Timestamps
+
+### Problem
+- Whisper transcribes without context â€” normalizes casual speech and picks generic homophones
+- Word timing uses syllable-count interpolation, which misestimates and cascades into wrong time windows
+
+### Solution
+
+**Prompt hinting** â€” pass the current lyric line text as Whisper's `initial_prompt`:
+```python
+model.transcribe(audio_buf, language='en', beam_size=1,
+                 initial_prompt=hint_text)
+```
+- Client sends current line text alongside WAV chunk
+- Whisper biases toward expected vocabulary (returns "gonna" when lyrics say "gonna")
+- Single highest-impact change for contraction/slang accuracy
+
+**Word-level timestamps** â€” enable `word_timestamps=True` in faster-whisper:
+```python
+segments, _ = model.transcribe(audio_buf, language='en', beam_size=1,
+                               word_timestamps=True)
+```
+- Returns per-word start/end times within each chunk
+- Client uses these to validate/correct interpolated timing estimates
+- Not a replacement for syllable interpolation (needed before audio plays), but a real-time correction layer
+- Enables future "timing accuracy" scoring dimension
+
+**API changes:**
+- Request: adds `hint` field alongside WAV body
+- Response: `{transcript, words: [{text, start, end}, ...]}`
+
+## 4. Sliding Window ASR Buffer & Adaptive Edit Distance
+
+### Problem
+- Full transcript scan from `lineStartTranscriptPos` grows rapidly on fast songs â€” stale words accidentally fuzzy-match future lyrics
+- Edit distance hard-capped at 1 regardless of word length â€” "everybody" misheard as "every body" (2 edits) fails, while "a" â†’ "I" (1 edit) passes
+
+### Solution
+
+**Rolling spoken window** â€” scan only the most recent N spoken words (scaled by tempo):
+- Slow: last 20 words
+- Normal: last 15 words
+- Fast: last 12 words
+- Existing drift windows (`driftTrack1`/`driftTrack2`) operate within this tighter buffer
+
+**Syllable-scaled edit distance:**
+- Words 1-3 chars: edit distance â‰¤ 1
+- Words 4-6 chars: edit distance â‰¤ 1
+- Words 7-9 chars: edit distance â‰¤ 2
+- Words 10+ chars: edit distance â‰¤ 3
+- Catches longer misheard words without loosening short-word matching
+
+**Minimum word length gate** â€” skip edit distance matching entirely for words â‰¤ 2 characters. Short words ("I", "a", "to") generate too many false positives via fuzzy match. Require exact or phonetic match only.
+
+## 5. Pre-computed Phonetic Index
+
+### Problem
+Every `wordsMatch()` call computes Double Metaphone on both spoken and target words. Target words never change but are recomputed hundreds of times per second during fast sections.
+
+### Solution
+
+**Phonetic index at song load** â€” when `interpolateWordTimings()` runs, cache Double Metaphone codes for every lyric word:
+```
+phoneticIndex[lineIdx][wordIdx] = { primary: "KN", secondary: "N" }
+```
+One-time O(total words) cost at song load, stored alongside `allWordTimings`.
+
+**Modified `wordsMatch()`** â€” accepts pre-computed target codes instead of calling `doubleMetaphone(target)` every time. Halves phonetic computation on the hot path.
+
+**Spoken word LRU cache** â€” small Map (cap ~50 entries) caching `spokenWord â†’ [primary, secondary]`. ASR repeats recent words in interim results, so this eliminates redundant computation. Evict oldest entries when full.
+
+Pure performance optimization â€” no behavior change.
+
+## 6. Smoother Adaptive Whisper Chunking
+
+### Problem
+Chunk size changes abruptly at line boundaries (2s â†’ 0.75s â†’ 2s). First chunk of a fast section contains stale slow-section audio. Transition back to slow creates a transcription gap.
+
+### Solution
+
+**Flush-on-transition** â€” when chunk size changes, immediately flush accumulated AudioWorklet buffer as a partial chunk:
+- New message: `{type: 'flush'}` to AudioWorklet
+- Emits current buffer if > 1600 samples (100ms minimum)
+- Resets accumulator for fresh start at new chunk size
+
+**Overlapping chunks for fast sections** â€” 50% overlap during `fast` tempo:
+- Instead of [0-0.75s], [0.75-1.5s]: use [0-0.75s], [0.375-1.125s], [0.75-1.5s]
+- AudioWorklet maintains secondary ring buffer offset by half chunk size
+- New transcription arrives every ~0.375s instead of ~0.75s
+- Only active for `fast` tempo class to avoid unnecessary GPU load
+
+**Backend rate limiting** â€” in-flight counter prevents request queuing:
+- If 2+ requests already in-flight, skip the overlapping chunk
+- Non-overlapping chunks always go through
+
+## Summary
+
+| # | Change | Primary Benefit | Risk |
+|---|--------|----------------|------|
+| 1 | Bidirectional contraction matching | Fix gonna/going-to mismatches | Low â€” additive logic |
+| 2 | N-gram phrase matching + filler skip | Handle word boundary ambiguities | Low â€” fallback layer |
+| 3 | Whisper prompt hinting + word timestamps | Better ASR accuracy & real timing | Low â€” single param changes |
+| 4 | Sliding window + adaptive edit distance | Fewer false matches, catch long-word typos | Medium â€” changes matching behavior |
+| 5 | Pre-computed phonetic index | Less CPU during fast sections | Low â€” pure optimization |
+| 6 | Smoother adaptive Whisper chunking | Faster transcription on tempo transitions | Medium â€” AudioWorklet changes |
+
+---
+
+## Implementation
+
 # Algorithm Improvements Implementation Plan
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Improve lyric detection accuracy, real-time speech matching, and performance across all tempo ranges — especially for contraction/slang-heavy songs and high-WPS sections.
+**Goal:** Improve lyric detection accuracy, real-time speech matching, and performance across all tempo ranges â€” especially for contraction/slang-heavy songs and high-WPS sections.
 
 **Architecture:** Six independent improvement layers that each touch isolated parts of the matching pipeline. Tasks 1-2 add new matching logic in a new `static/match-helpers.js` file. Task 3 modifies the Flask backend and client fetch. Tasks 4-5 modify existing matching functions in `static/player.js`. Task 6 modifies `static/audio-processor.js` and the client chunk sender.
 
@@ -51,14 +218,14 @@ assert.strictEqual(REVERSE_CONTRACTION_MAP['kind of'], 'kinda');
 assert.strictEqual(REVERSE_CONTRACTION_MAP['about to'], 'bouta');
 
 // --- contractionsMatch: spoken contraction vs full-form target ---
-// Lyric says "going", ASR says "gonna" — should match via contraction expansion
+// Lyric says "going", ASR says "gonna" â€” should match via contraction expansion
 assert.strictEqual(contractionsMatch('gonna', 'going'), true,
     'contraction "gonna" should match first word of expansion "going to"');
 assert.strictEqual(contractionsMatch('hello', 'going'), false,
     'unrelated word should not match');
 
 // --- contractionsMatch: spoken full-form vs contraction target ---
-// Lyric says "gonna", ASR says "going" — need reverse lookup
+// Lyric says "gonna", ASR says "going" â€” need reverse lookup
 assert.strictEqual(contractionsMatch('going', 'gonna'), false,
     'single word "going" does not match "gonna" (need multi-word "going to")');
 
@@ -76,11 +243,11 @@ assert.strictEqual(multiWordContractionMatch(['i', 'am', 'going', 'to'], 2, 'gon
 assert.strictEqual(multiWordContractionMatch(['going'], 0, 'gonna'), 0,
     'not enough spoken words to form "going to"');
 
-// 3-word expansion: "i am going to" → "ima"
+// 3-word expansion: "i am going to" â†’ "ima"
 assert.strictEqual(multiWordContractionMatch(['i', 'am', 'going', 'to'], 0, 'ima'), 4,
     '"i am going to" should match "ima", consuming 4 words');
 
-// "do not know" → "dunno"
+// "do not know" â†’ "dunno"
 assert.strictEqual(multiWordContractionMatch(['do', 'not', 'know', 'why'], 0, 'dunno'), 3,
     '"do not know" should match "dunno", consuming 3 words');
 
@@ -90,7 +257,7 @@ console.log('All contraction matching tests passed.');
 ### Step 2: Run tests to verify they fail
 
 Run: `node tests/test_match_helpers.cjs`
-Expected: FAIL — `Cannot find module` or `ENOENT` because `static/match-helpers.js` doesn't exist yet.
+Expected: FAIL â€” `Cannot find module` or `ENOENT` because `static/match-helpers.js` doesn't exist yet.
 
 ### Step 3: Implement match-helpers.js
 
@@ -260,7 +427,7 @@ function wordsMatch(spoken, target) {
 }
 ```
 
-3. **Update `_collectMatches()`** to handle multi-word spoken → single target:
+3. **Update `_collectMatches()`** to handle multi-word spoken â†’ single target:
    After the `wordsMatch(spoken[si], target)` check fails, try `multiWordContractionMatch(spoken, si, target)`. If it returns N > 0, mark the target matched and advance `spokenIdx` by N.
 
 4. **Update `_collectMatchesWhisper()`** with the same multi-word logic.
@@ -332,7 +499,7 @@ console.log('All phrase matching tests passed.');
 ### Step 2: Run tests to verify they fail
 
 Run: `node tests/test_match_helpers.cjs`
-Expected: FAIL — `PHRASE_EQUIV_MAP` is undefined.
+Expected: FAIL â€” `PHRASE_EQUIV_MAP` is undefined.
 
 ### Step 3: Implement phrase matching in match-helpers.js
 
@@ -389,7 +556,7 @@ function phraseMatch(spokenWords, spokenIdx, targetWords, targetIdx) {
     var spokenWord = spokenWords[spokenIdx];
     var targetWord = targetWords[targetIdx];
 
-    // Direction 1: multiple spoken words → single target word
+    // Direction 1: multiple spoken words â†’ single target word
     var spokenCandidates = _phraseIndex[spokenWord];
     if (spokenCandidates) {
         for (var i = 0; i < spokenCandidates.length; i++) {
@@ -405,7 +572,7 @@ function phraseMatch(spokenWords, spokenIdx, targetWords, targetIdx) {
         }
     }
 
-    // Direction 2: single spoken word → multiple target words
+    // Direction 2: single spoken word â†’ multiple target words
     var equivOfSpoken = PHRASE_EQUIV_MAP[spokenWord];
     if (equivOfSpoken) {
         var equivWords = equivOfSpoken.split(' ');
@@ -662,7 +829,7 @@ console.log('All edit distance tests passed.');
 ### Step 2: Run tests to verify they fail
 
 Run: `node tests/test_match_helpers.cjs`
-Expected: FAIL — `maxEditDistance` is undefined.
+Expected: FAIL â€” `maxEditDistance` is undefined.
 
 ### Step 3: Implement in match-helpers.js
 
@@ -1027,7 +1194,7 @@ Expected: All pass with no regressions.
 1. **Contraction test:** Load a song with "gonna"/"wanna" in lyrics. Verify words light up green.
 2. **Phrase test:** Find a song with "alright" or "all right". Verify matching works both forms.
 3. **Fast section test:** Load a song with rap verses. Check debug HUD shows correct tempo class.
-4. **Prompt hint test:** DevTools Network tab — verify `X-Lyric-Hint` header on `/transcribe` requests.
+4. **Prompt hint test:** DevTools Network tab â€” verify `X-Lyric-Hint` header on `/transcribe` requests.
 5. **Word timestamps test:** Verify `/transcribe` response JSON includes `words` array.
 6. **Overlap chunks test:** During fast sections, verify more frequent `/transcribe` requests.
 
@@ -1040,22 +1207,22 @@ Fix and commit individually.
 ## Dependency Graph
 
 ```
-Task 1 (contractions) ──┐
-Task 2 (phrases)     ───┤── sequential (both write match-helpers.js)
-                        │
-Task 3 (Whisper)     ───┤── independent (backend + client fetch)
-                        │
-Task 4 (edit dist)   ───┤── depends on Task 1 (match-helpers.js exists)
-Task 5 (phonetic)    ───┤── depends on Task 4 (wordsMatch signature)
-                        │
-Task 6 (chunking)    ───┤── independent (audio-processor.js)
-Task 7 (sliding win) ───┤── independent (sync-helpers.js)
-                        │
-Task 8 (integration) ───┘── depends on all above
+Task 1 (contractions) â”€â”€â”
+Task 2 (phrases)     â”€â”€â”€â”¤â”€â”€ sequential (both write match-helpers.js)
+                        â”‚
+Task 3 (Whisper)     â”€â”€â”€â”¤â”€â”€ independent (backend + client fetch)
+                        â”‚
+Task 4 (edit dist)   â”€â”€â”€â”¤â”€â”€ depends on Task 1 (match-helpers.js exists)
+Task 5 (phonetic)    â”€â”€â”€â”¤â”€â”€ depends on Task 4 (wordsMatch signature)
+                        â”‚
+Task 6 (chunking)    â”€â”€â”€â”¤â”€â”€ independent (audio-processor.js)
+Task 7 (sliding win) â”€â”€â”€â”¤â”€â”€ independent (sync-helpers.js)
+                        â”‚
+Task 8 (integration) â”€â”€â”€â”˜â”€â”€ depends on all above
 ```
 
 **Parallelizable groups:**
-- Group A: Tasks 1 → 2 → 4 → 5 (sequential)
+- Group A: Tasks 1 â†’ 2 â†’ 4 â†’ 5 (sequential)
 - Group B: Task 3 (independent)
 - Group C: Task 6 (independent)
 - Group D: Task 7 (independent)
