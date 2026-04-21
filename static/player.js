@@ -759,12 +759,16 @@ class GameMode {
         }, 2000);
     }
 
-    _appendWhisperTranscript(text) {
-        var words = normalizeWords((this.whisperBuffer + ' ' + (text || '')).trim());
+    _trimTranscriptWindow(buffer, text) {
+        var words = normalizeWords(((buffer || '') + ' ' + (text || '')).trim());
         if (words.length > 200) {
             words = words.slice(words.length - 200);
         }
-        this.whisperBuffer = words.join(' ');
+        return words.join(' ');
+    }
+
+    _appendWhisperTranscript(text) {
+        this.whisperBuffer = this._trimTranscriptWindow(this.whisperBuffer, text);
     }
 
     async _startWhisperTrack() {
@@ -855,10 +859,11 @@ class GameMode {
         this._chunksDispatched++;
         this._whisperInFlight++;
         const wav = encodeWav(float32, 16000);
+        const dispatchedLineIdx = this.activeLineIdx;
         try {
             var headers = { 'Content-Type': 'audio/wav' };
-            if (this.activeLineIdx >= 0 && lyrics[this.activeLineIdx]) {
-                headers['X-Lyric-Hint'] = lyrics[this.activeLineIdx].text;
+            if (dispatchedLineIdx >= 0 && lyrics[dispatchedLineIdx]) {
+                headers['X-Lyric-Hint'] = lyrics[dispatchedLineIdx].text;
             }
             const resp = await fetch('/transcribe', {
                 method: 'POST',
@@ -889,9 +894,15 @@ class GameMode {
             this._whisperServerStatus.state = 'ready'; // confirmed working
 
             if (data.transcript && this.active) {
-                this._appendWhisperTranscript(data.transcript);
-                this.lineHadAsrEvent = true;
-                this._collectMatchesWhisper(this.whisperBuffer);
+                if (dispatchedLineIdx === this.activeLineIdx) {
+                    this._appendWhisperTranscript(data.transcript);
+                    this.lineHadAsrEvent = true;
+                    this._collectMatchesWhisper(this.whisperBuffer);
+                } else if (this.prevLine && this.prevLine.lineIdx === dispatchedLineIdx) {
+                    this.prevLine.whisperBuffer = this._trimTranscriptWindow(this.prevLine.whisperBuffer, data.transcript);
+                    this.prevLine.lineHadAsrEvent = true;
+                    this._matchPrevLine(this.prevLine.whisperBuffer, 'track2');
+                }
                 this._logAsr('final', data.transcript, data.words || [], 'whisper');
                 this._whisperResponses++;
                 if (data.words && data.words.length > 0) {
