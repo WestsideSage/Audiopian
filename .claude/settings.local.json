@@ -130,7 +130,15 @@
       "Bash(wc -l ./docs/plans/*.md)",
       "Bash(du -sh ./temp/*)",
       "Bash(pip show:*)",
-      "Bash(grep -r \"from.*src/\" static/ app.py *.py)"
+      "Bash(grep -r \"from.*src/\" static/ app.py *.py)",
+      "WebFetch(domain:openai.com)",
+      "WebFetch(domain:platform.openai.com)",
+      "Bash(node tests/test_realtime_whisper_helpers.cjs)",
+      "Bash(node tests/test_scoring.cjs)",
+      "Bash(node tests/test_phrase_engine.cjs)",
+      "Bash(node tests/test_telemetry_replay.cjs)",
+      "Bash(node -e ' *)",
+      "Bash(ls -la \"C:/Users/Maurice/Downloads/\" | grep karaokee | head -10)"
     ]
   }
 }

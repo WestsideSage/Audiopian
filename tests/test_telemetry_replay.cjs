@@ -84,4 +84,21 @@ telemetry.replay.lines.forEach(function(line) {
     assert.deepStrictEqual(actual.missedWords, transition.missedWords, line.fromText + ' transition missedWords');
 });
 
+if (telemetry.phraseEngine) {
+    var traces = telemetry.phraseEngine.traces || [];
+    var confirmed = traces.find(function(trace) { return trace.phraseId === 'p0'; });
+    var vadOnly = traces.find(function(trace) { return trace.phraseId === 'p1'; });
+
+    assert.ok(confirmed, 'missing confirmed phrase trace');
+    assert.strictEqual(confirmed.cleared, true, 'confirmed phrase should clear');
+    assert.strictEqual(confirmed.lyricStatus, 'confirmed', 'confirmed phrase lyric status');
+
+    assert.ok(vadOnly, 'missing vad-only phrase trace');
+    assert.strictEqual(vadOnly.cleared, false, 'vad-only phrase should not clear');
+    assert.ok(
+        (vadOnly.rejectedCandidates || []).some(function(candidate) { return candidate.reason === 'weak_source'; }),
+        'vad-only trace should explain rejected lyric evidence'
+    );
+}
+
 console.log('Telemetry replay fixture passed.');

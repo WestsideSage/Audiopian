@@ -1,5 +1,6 @@
 from lyrics import parse_lrc, fetch_lyrics, _score_candidate
 from unittest.mock import MagicMock, patch
+import requests
 
 
 def test_parse_lrc_basic():
@@ -99,3 +100,25 @@ def test_fetch_lyrics_returns_empty_when_no_synced_candidates_parse():
 
     with patch("lyrics.requests.get", return_value=mock_response):
         assert fetch_lyrics("Song", "Artist", duration=120) == []
+
+
+def test_fetch_lyrics_retries_after_lrclib_timeout():
+    mock_response = MagicMock()
+    mock_response.json.return_value = [
+        {
+            "trackName": "Let It Fly",
+            "artistName": "Lil Wayne",
+            "duration": 210,
+            "syncedLyrics": "[00:01.00] Let it fly",
+        }
+    ]
+    mock_response.raise_for_status.return_value = None
+
+    with patch(
+        "lyrics.requests.get",
+        side_effect=[requests.exceptions.ReadTimeout("timed out"), mock_response],
+    ) as mock_get:
+        result = fetch_lyrics("Let It Fly", "Lil Wayne", duration=210)
+
+    assert mock_get.call_count == 2
+    assert result == [{"time": 1.0, "text": "Let it fly"}]

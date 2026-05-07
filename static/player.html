@@ -330,6 +330,7 @@
         <div id="time-display">0:00 / 0:00</div>
         <span style="font-size:0.8rem;color:#aaa">🔊</span>
         <input type="range" id="volume" min="0" max="1" step="0.05" value="1">
+        <div id="asr-provider-display" style="font-size:0.78rem;color:#aaa;min-width:190px;text-align:left;">ASR: checking...</div>
         <div id="lrc-offset-control" style="display:none; align-items:center; gap:6px; font-size:13px; color:#aaa;">
           <span>Lyrics offset</span>
           <button id="offsetMinus" title="Shift lyrics earlier">−0.5s</button>
@@ -352,6 +353,29 @@
                 <div>Lines perfect: <span id="modalLines">0/0</span></div>
                 <div>Best streak: <span id="modalStreak">0</span> lines</div>
             </div>
+            <div class="benchmark-feedback" id="benchmarkFeedback" style="display:none">
+                <label>Run intent
+                    <select id="benchmarkIntent">
+                        <option value="">Unlabeled</option>
+                        <option value="good_expert_run">Good expert run</option>
+                        <option value="humming_cheese">Humming cheese</option>
+                        <option value="late_delivery">Late delivery</option>
+                        <option value="partial_memory">Partial memory</option>
+                        <option value="silent_section_test">Silent section test</option>
+                    </select>
+                </label>
+                <label>Fairness
+                    <select id="benchmarkFairness">
+                        <option value="">Unjudged</option>
+                        <option value="fair">Fair</option>
+                        <option value="too_strict">Too strict</option>
+                        <option value="too_forgiving">Too forgiving</option>
+                        <option value="recognizer_lagged">Recognizer lagged</option>
+                        <option value="lyrics_misaligned">Lyrics misaligned</option>
+                    </select>
+                </label>
+                <textarea id="benchmarkNotes" rows="3" placeholder="Short note for AI analysis"></textarea>
+            </div>
             <div class="game-modal-actions">
                 <button class="ctrl-btn" onclick="replayGame()">Play Again</button>
                 <button class="ctrl-btn" onclick="window.location.href='/'">Back</button>
@@ -362,6 +386,8 @@
     <script src="/static/sync-helpers.js"></script>
     <script src="/static/match-helpers.js"></script>
     <script src="/static/scoring.js"></script>
+    <script src="/static/phrase-engine.js"></script>
+    <script src="/static/realtime-whisper.js"></script>
     <script src="/static/player.js"></script>
 </body>
 </html>

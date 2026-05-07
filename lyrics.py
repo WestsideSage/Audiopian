@@ -4,6 +4,10 @@ import requests
 
 log = logging.getLogger(__name__)
 
+LRCLIB_SEARCH_URL = "https://lrclib.net/api/search"
+LRCLIB_TIMEOUT_SECONDS = 10
+LRCLIB_MAX_ATTEMPTS = 2
+
 
 def parse_lrc(lrc_text: str) -> list[dict]:
     """Parse LRC format string into list of {time: float, text: str} dicts."""
@@ -64,13 +68,28 @@ def fetch_lyrics(title: str, artist: str, duration: int = 0) -> list[dict]:
     Ranks candidates by title/artist/duration similarity instead of
     returning the first parseable result.
     """
+    query = f"{title} {artist}".strip()
+    last_error = None
+    for attempt in range(1, LRCLIB_MAX_ATTEMPTS + 1):
+        try:
+            resp = requests.get(
+                LRCLIB_SEARCH_URL,
+                params={"q": query},
+                timeout=LRCLIB_TIMEOUT_SECONDS,
+            )
+            break
+        except requests.exceptions.RequestException as exc:
+            last_error = exc
+            if attempt >= LRCLIB_MAX_ATTEMPTS:
+                log.exception("Failed to fetch lyrics for %s - %s", title, artist)
+                return []
+            log.warning("LRCLIB timed out for %s - %s; retrying", title, artist)
+    else:
+        if last_error:
+            log.exception("Failed to fetch lyrics for %s - %s", title, artist)
+        return []
+
     try:
-        query = f"{title} {artist}".strip()
-        resp = requests.get(
-            "https://lrclib.net/api/search",
-            params={"q": query},
-            timeout=10
-        )
         resp.raise_for_status()
         results = resp.json()
 

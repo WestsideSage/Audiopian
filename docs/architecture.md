@@ -12,8 +12,9 @@ Karaokee ships as a Flask app plus server-served static files.
    - `sync-helpers.js`
    - `match-helpers.js`
    - `scoring.js`
+   - `phrase-engine.js`
    - `player.js`
-6. `player.js` coordinates playback, line activation, speech recognition, Whisper dispatch, VAD hints, scoring, and telemetry export.
+6. `player.js` coordinates playback, line activation, speech recognition, Whisper dispatch, VAD hints, scoring, shadow phrase tracing, and telemetry export.
 
 ## Main Data Flow
 
@@ -33,7 +34,8 @@ Karaokee ships as a Flask app plus server-served static files.
 4. Whisper receives chunked WAV audio from `audio-processor.js` and can add slower late confirmations.
 5. Matching updates per-word slot state.
 6. `_scoreLine()` computes weighted line results when a line closes.
-7. Running totals, streaks, and modal results are updated in the DOM.
+7. `phrase-engine.js` receives shadow evidence for phrase-level trace analysis; it does not drive player-facing scores.
+8. Running totals, streaks, and modal results are updated in the DOM.
 
 ## State Boundaries
 
@@ -41,6 +43,7 @@ Karaokee ships as a Flask app plus server-served static files.
 - Per-line state is reset by `_resetLineState()`.
 - Per-session counters are reset by `_resetSessionCounters()`.
 - Pure matching and scoring helpers live in `static/match-helpers.js`, `static/sync-helpers.js`, and `static/scoring.js`.
+- Shadow-mode phrase planning and trace helpers live in `static/phrase-engine.js`.
 
 ## Module-Split Decision
 

@@ -342,3 +342,136 @@ def test_transcribe_returns_500_on_transcription_error(client, monkeypatch):
         assert resp.status_code == 500
     finally:
         _app_module._whisper_state = 'idle'
+
+
+def test_transcribe_cuda_runtime_error_retries_cpu(client, monkeypatch):
+    class BadCudaModel:
+        def transcribe(self, *args, **kwargs):
+            raise RuntimeError('Library cublas64_12.dll is not found or cannot be loaded')
+
+    class CpuModel:
+        def transcribe(self, *args, **kwargs):
+            segment = MagicMock()
+            segment.text = 'cpu fallback worked'
+            segment.words = []
+            return [segment], None
+
+    original_state = _app_module._whisper_state
+    original_model = _app_module._whisper_model
+    original_device = _app_module._whisper_active_device
+    original_compute = _app_module._whisper_active_compute
+
+    loaded = []
+
+    def fake_load_model(device, compute_type):
+        loaded.append((device, compute_type))
+        return CpuModel()
+
+    _app_module._whisper_state = 'ready'
+    _app_module._whisper_model = BadCudaModel()
+    _app_module._whisper_active_device = 'cuda'
+    _app_module._whisper_active_compute = 'float16'
+    monkeypatch.setattr(_app_module, '_load_whisper_model', fake_load_model)
+
+    try:
+        resp = client.post('/transcribe', data=_make_wav(),
+                           content_type='audio/wav')
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert data['transcript'] == 'cpu fallback worked'
+        assert loaded == [('cpu', _app_module.WHISPER_CPU_COMPUTE)]
+        assert _app_module._whisper_active_device == 'cpu'
+        assert _app_module._whisper_state == 'ready'
+    finally:
+        _app_module._whisper_state = original_state
+        _app_module._whisper_model = original_model
+        _app_module._whisper_active_device = original_device
+        _app_module._whisper_active_compute = original_compute
+
+
+def test_realtime_transcription_session_disabled_for_local_provider(client):
+    original_provider = _app_module._whisper_active_provider
+    original_state = _app_module._whisper_state
+    _app_module._whisper_active_provider = 'local'
+    _app_module._whisper_state = 'ready'
+    try:
+        resp = client.post('/realtime-transcription-session', json={})
+        assert resp.status_code == 404
+    finally:
+        _app_module._whisper_active_provider = original_provider
+        _app_module._whisper_state = original_state
+
+
+def test_realtime_transcription_session_returns_openai_session(client, monkeypatch):
+    original_provider = _app_module._whisper_active_provider
+    original_state = _app_module._whisper_state
+    _app_module._whisper_active_provider = 'openai_realtime'
+    _app_module._whisper_state = 'ready'
+
+    def fake_create_session(prompt=None):
+        assert prompt == 'test lyric hint'
+        return {
+            'id': 'sess_test',
+            'client_secret': {
+                'value': 'ek_test',
+                'expires_at': 123,
+            },
+        }
+
+    monkeypatch.setattr(_app_module, '_create_openai_realtime_transcription_session', fake_create_session)
+
+    try:
+        resp = client.post('/realtime-transcription-session', json={'prompt': 'test lyric hint'})
+        data = resp.get_json()
+        assert resp.status_code == 200
+        assert data['id'] == 'sess_test'
+        assert data['client_secret']['value'] == 'ek_test'
+    finally:
+        _app_module._whisper_active_provider = original_provider
+        _app_module._whisper_state = original_state
+
+
+def test_create_openai_realtime_transcription_session_uses_client_secret_schema(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {'value': 'ek_direct', 'session': {'type': 'transcription'}}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured['url'] = url
+        captured['headers'] = headers
+        captured['json'] = json
+        captured['timeout'] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(_app_module, 'OPENAI_API_KEY', 'sk-test')
+    monkeypatch.setattr(_app_module.requests, 'post', fake_post)
+
+    result = _app_module._create_openai_realtime_transcription_session(prompt='test lyric hint')
+
+    assert result['value'] == 'ek_direct'
+    assert captured['url'].endswith('/v1/realtime/client_secrets')
+    assert captured['json']['session']['type'] == 'transcription'
+    assert captured['json']['session']['audio']['input']['transcription']['model'] == _app_module.OPENAI_TRANSCRIBE_MODEL
+    assert 'prompt' not in captured['json']['session']['audio']['input']['transcription']
+    assert 'turn_detection' not in captured['json']['session']['audio']['input']
+    assert captured['json']['expires_after']['seconds'] == 600
+
+
+def test_transcribe_returns_409_for_realtime_provider(client):
+    original_provider = _app_module._whisper_active_provider
+    original_state = _app_module._whisper_state
+    _app_module._whisper_active_provider = 'openai_realtime'
+    _app_module._whisper_state = 'ready'
+    try:
+        resp = client.post('/transcribe', data=_make_wav(), content_type='audio/wav')
+        data = resp.get_json()
+        assert resp.status_code == 409
+        assert data['error'] == 'use realtime transcription session'
+    finally:
+        _app_module._whisper_active_provider = original_provider
+        _app_module._whisper_state = original_state

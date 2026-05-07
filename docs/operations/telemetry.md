@@ -34,6 +34,19 @@ Current telemetry is useful for analysis but not sufficient by itself to determi
 - when a failure mode is found, add a focused pure regression case rather than relying on schema-only checks
 - use `tests/test_telemetry_replay.cjs` as the current replay harness pattern; it consumes a telemetry-shaped JSON fixture with an explicit `replay` section because production exports are not yet replay-complete
 
+## Phrase Engine Shadow Trace
+
+Debug telemetry may include `phraseEngine`:
+
+- `version`: trace schema version.
+- `mode`: currently `shadow`; it does not drive player-facing scores.
+- `difficulty`: `easy`, `medium`, `hard`, or `expert`.
+- `benchmark`: optional user labels for intent, outcome, fairness, and notes.
+- `plan`: generated phrase timing, anchors, and thresholds.
+- `traces`: phrase-level evidence, consumed tokens, rejected candidates, flow status, lyric status, and settlement result.
+
+This section is intentionally verbose in debug/benchmark mode. Normal play should keep telemetry lighter once a non-debug telemetry path exists.
+
 ## Current Policy
 
 - stub-only telemetry tests were removed

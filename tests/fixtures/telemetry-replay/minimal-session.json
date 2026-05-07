@@ -11,9 +11,9 @@
       "trigger": "score",
       "matchedWords": 3,
       "totalWords": 3,
-      "weightedMatched": 2,
+      "weightedMatched": 2.125,
       "weightedTotal": 2.5,
-      "missedWords": ["your"]
+      "missedWords": []
     },
     {
       "fromIdx": 1,
@@ -39,9 +39,9 @@
         "expected": {
           "matchedWords": 3,
           "totalWords": 3,
-          "weightedMatched": 2,
+          "weightedMatched": 2.125,
           "weightedTotal": 2.5,
-          "missedWords": ["your"],
+          "missedWords": [],
           "perfect": false
         }
       },
@@ -61,5 +61,41 @@
         }
       }
     ]
+  },
+  "phraseEngine": {
+    "version": 1,
+    "mode": "shadow",
+    "difficulty": "hard",
+    "benchmark": {
+      "intent": "good_expert_run",
+      "fairness": "fair",
+      "notes": "fixture validates phrase trace shape"
+    },
+    "traces": [
+      {
+        "phraseId": "p0",
+        "lyricStatus": "confirmed",
+        "flowStatus": "clean",
+        "cleared": true,
+        "anchorsHit": 2,
+        "anchorsRequired": 2,
+        "rejectedCandidates": []
+      },
+      {
+        "phraseId": "p1",
+        "lyricStatus": "missing",
+        "flowStatus": "clean",
+        "cleared": false,
+        "anchorsHit": 0,
+        "anchorsRequired": 2,
+        "rejectedCandidates": [
+          { "reason": "weak_source", "source": "vad" }
+        ]
+      }
+    ],
+    "invariants": {
+      "confirmedPhraseClears": true,
+      "vadOnlyDoesNotClear": true
+    }
   }
 }
