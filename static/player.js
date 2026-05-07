@@ -399,6 +399,7 @@ normalizeWords = scoringHelpers.normalizeWords;
 estimateSyllables = scoringHelpers.estimateSyllables;
 interpolateWordTimings = scoringHelpers.interpolateWordTimings;
 var computeLineScore = scoringHelpers.computeLineScore;
+var mergeConfirmedMatches = scoringHelpers.mergeConfirmedMatches;
 
 class GameMode {
     constructor() {
@@ -411,6 +412,7 @@ class GameMode {
         this.matchedSet        = new Map(); // word index → match score (0.0–1.0)
         this.vadMatchedSet  = new Map(); // indices matched via VAD (optimistic)
         this.asrConfirmedSet = new Set(); // VAD-matched words later confirmed by ASR
+        this.wordSourceMap     = new Map(); // word index -> vad | browser_sr | whisper
         this.transcript        = '';      // accumulated final transcript (never reset)
         this.transcriptWords   = [];      // normalized final transcript cached at append time
         this.lineStartWordCount = 0;      // word count in transcript when current line started
@@ -438,14 +440,22 @@ class GameMode {
         this._whisperStream = null;
         this._whisperCtx    = null;
         this._whisperNode   = null;
+        this._whisperRealtimeWs = null;
+        this._whisperRealtimePc = null;
+        this._whisperRealtimeDc = null;
+        this._whisperRealtimeSession = null;
+        this._whisperRealtimeTranscript = new Map();
+        this._whisperRealtimeCallsUrl = 'https://api.openai.com/v1/realtime/calls';
         this.whisperBuffer  = '';
         this._whisperInFlight = 0;
 
         // Whisper server state (populated from /whisper-status at game start)
-        this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null };
+        this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null, provider: null, model: null };
+        this._whisperNextStatusPollAt = 0;
+        this._whisperBackoffUntil = 0;
 
         // Whisper client track state (populated by _startWhisperTrack outcome)
-        this._whisperTrackStatus  = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0 };
+        this._whisperTrackStatus  = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0, provider: null };
 
         // Whisper chunk telemetry counters
         this._chunksDispatched          = 0;
@@ -454,14 +464,28 @@ class GameMode {
         this._chunksFailed500           = 0;
         this._chunksDroppedWhileLoading = 0;
         this._chunksFailedNetwork       = 0;
+        this._chunksDroppedNotReady     = 0;
         this._whisperResponses          = 0;
         this._whisperResponsesWithWords = 0;
         this._whisperWordsTotal         = 0;
+        this._whisperRealtimeDeltas     = 0;
+        this._whisperRealtimeCompletions = 0;
+        this._whisperRealtimeEvents     = 0;
+        this._whisperRealtimeFailures   = 0;
+        this._whisperRealtimeCommitsSent = 0;
+        this._whisperRealtimeCommitTimer = null;
+        this._whisperRealtimeLastEvent  = '';
+        this._whisperRealtimeLastError  = '';
+        this._lastWhisperTranscriptText = '';
+        this._lastWhisperTranscriptAt   = null;
 
         // Diagnostic
         this._dbBuf = [];
         this._telemetry = null;   // populated by _initTelemetry() when debug mode is on
         this._lineStartAudioTime = null;
+        this._phrasePlan = null;
+        this._phraseSession = null;
+        this._phraseDifficulty = 'medium';
 
         // Predictive timing state
         this.allWordTimings = [];    // interpolated word timings for all lines
@@ -492,6 +516,17 @@ class GameMode {
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
         this._initTelemetry();   // always init so download button works whenever D is pressed
+        if (window.KaraokeePhraseEngine) {
+            this._phrasePlan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
+                difficulty: this._phraseDifficulty,
+                audioDuration: audio && isFinite(audio.duration) ? audio.duration : null
+            });
+            this._phraseSession = KaraokeePhraseEngine.createPhraseSession(this._phrasePlan);
+            if (this._telemetry && this._telemetry.phraseEngine) {
+                this._telemetry.phraseEngine.difficulty = this._phraseDifficulty;
+                this._telemetry.phraseEngine.plan = this._phrasePlan;
+            }
+        }
         for (var li = 0; li < this.allWordTimings.length; li++) {
             var lt = this.allWordTimings[li];
             var relClass = classifyLineTempoRelative(lt.wps || 0, this.songTempoProfile);
@@ -513,11 +548,15 @@ class GameMode {
                 this._whisperServerStatus = {
                     state:     data.status || 'unknown',
                     reason:    data.error  || null,
+                    provider:  data.provider || null,
+                    model:     data.model || null,
                     checkedAt: Date.now(),
                 };
+                this._renderAsrProviderStatus();
             }.bind(this))
             .catch(function() {
-                this._whisperServerStatus = { state: 'error', reason: 'status fetch failed', checkedAt: Date.now() };
+                this._whisperServerStatus = { state: 'error', reason: 'status fetch failed', checkedAt: Date.now(), provider: null, model: null };
+                this._renderAsrProviderStatus();
             }.bind(this));
 
         document.getElementById('score-display').style.display = 'flex';
@@ -573,6 +612,7 @@ class GameMode {
         this.matchedSet = new Map();
         this.vadMatchedSet = new Map();
         this.asrConfirmedSet = new Set();
+        this.wordSourceMap = new Map();
         this.lineStartWordCount = this.transcriptWords.length;
         this.lineStartTranscriptPos = this.lineStartWordCount;
         this.hotWordIndex = -1;
@@ -604,6 +644,9 @@ class GameMode {
         this._lastResultTime = Date.now();
         this._dbBuf = [];
         this._telemetry = null;
+        this._phrasePlan = null;
+        this._phraseSession = null;
+        this._phraseDifficulty = 'medium';
         this.wordTimings = [];
         this.hotWordIndex = -1;
         this.isSpeaking = false;
@@ -614,17 +657,29 @@ class GameMode {
         this._vadAnalyserBuf = null;
         this._energyThreshold = 0.01;
         this._whisperInFlight = 0;
-        this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null };
-        this._whisperTrackStatus = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0 };
+        this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null, provider: null, model: null };
+        this._whisperNextStatusPollAt = 0;
+        this._whisperBackoffUntil = 0;
+        this._whisperTrackStatus = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0, provider: null };
         this._chunksDispatched = 0;
         this._chunksSucceeded = 0;
         this._chunksFailed503 = 0;
         this._chunksFailed500 = 0;
         this._chunksDroppedWhileLoading = 0;
         this._chunksFailedNetwork = 0;
+        this._chunksDroppedNotReady = 0;
         this._whisperResponses = 0;
         this._whisperResponsesWithWords = 0;
         this._whisperWordsTotal = 0;
+        this._whisperRealtimeDeltas = 0;
+        this._whisperRealtimeCompletions = 0;
+        this._whisperRealtimeEvents = 0;
+        this._whisperRealtimeFailures = 0;
+        this._whisperRealtimeCommitsSent = 0;
+        this._whisperRealtimeLastEvent = '';
+        this._whisperRealtimeLastError = '';
+        this._lastWhisperTranscriptText = '';
+        this._lastWhisperTranscriptAt = null;
         this.allWordTimings = [];
         this.songTempoProfile = null;
     }
@@ -673,6 +728,13 @@ class GameMode {
                 self.transcriptWords = self.transcriptWords.concat(normalizeWords(finalText));
             }
             self.latestInterim = interim;
+            self._addPhraseEvidence({
+                source: finalText ? 'browser_final' : 'browser_interim',
+                text: finalText || interim,
+                words: [],
+                receivedAtSec: performance.now() / 1000,
+                audioTimeSec: audio && isFinite(audio.currentTime) ? audio.currentTime : null
+            });
 
             // HOT-WORD PRIORITY: check predicted word first for instant green
             var hotMatched = self._matchHotWord(self.transcript + interim);
@@ -691,16 +753,13 @@ class GameMode {
                 self._collectMatches(self.transcript + latest[a].transcript, unionMap);
             }
 
-            // Sticky: once matched, stay matched. Only upgrade scores, never downgrade.
+            var beforeConfirmed = new Set(self.asrConfirmedSet);
+            mergeConfirmedMatches(self.matchedSet, self.vadMatchedSet, self.asrConfirmedSet, unionMap);
             unionMap.forEach(function(score, i) {
-                var existing = self.matchedSet.get(i);
-                if (existing === undefined || score > existing) {
-                    self.matchedSet.set(i, score);
-                }
-                if (self.vadMatchedSet.has(i) && !self.asrConfirmedSet.has(i)) {
-                    self.asrConfirmedSet.add(i);
+                if (!beforeConfirmed.has(i) && self.asrConfirmedSet.has(i)) {
                     self._logPromotion('browser_sr', i, score);
                 }
+                self._setWordSource(i, 'browser_sr');
             });
             self._updateWordSpans();
 
@@ -771,44 +830,318 @@ class GameMode {
         this.whisperBuffer = this._trimTranscriptWindow(this.whisperBuffer, text);
     }
 
+    _renderAsrProviderStatus() {
+        var el = document.getElementById('asr-provider-display');
+        if (!el) return;
+        var status = this._whisperServerStatus || {};
+        var provider = status.provider || 'unknown';
+        var model = status.model || 'unknown';
+        var state = status.state || 'unknown';
+        if (provider === 'openai_realtime') {
+            el.textContent = 'ASR: GPT Realtime Whisper (' + model + ') - ' + state;
+            el.style.color = state === 'ready' ? '#00e676' : '#f5a623';
+        } else if (provider === 'local') {
+            el.textContent = 'ASR: local Whisper (' + model + ') - ' + state;
+            el.style.color = state === 'ready' ? '#aaa' : '#f5a623';
+        } else {
+            el.textContent = 'ASR: ' + provider + ' (' + model + ') - ' + state;
+            el.style.color = '#aaa';
+        }
+    }
+
+    _isRealtimeWhisperProvider() {
+        return !!(this._whisperServerStatus && this._whisperServerStatus.provider === 'openai_realtime');
+    }
+
+    _buildRealtimeWhisperPrompt() {
+        var bits = [];
+        var titleEl = document.getElementById('song-title');
+        if (titleEl && titleEl.textContent) bits.push(titleEl.textContent);
+        if (lyrics && lyrics.length) {
+            bits.push(lyrics.slice(0, 8).map(function(line) { return line.text || ''; }).join(' '));
+        }
+        return bits.join(' ').slice(0, 900);
+    }
+
+    _openRealtimeWhisperConnection() {
+        if (!window.KaraokeeRealtimeWhisper) {
+            return Promise.reject(new Error('Realtime Whisper helper is unavailable'));
+        }
+        var prompt = this._buildRealtimeWhisperPrompt();
+        return fetch('/realtime-transcription-session', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt }),
+        })
+            .then(function(resp) {
+                if (!resp.ok) {
+                    throw new Error('Realtime transcription session failed with HTTP ' + resp.status);
+                }
+                return resp.json();
+            })
+            .then(function(session) {
+                this._whisperRealtimeSession = session;
+                var secret = KaraokeeRealtimeWhisper.extractClientSecret(session);
+                var pc = new RTCPeerConnection();
+                var dc = pc.createDataChannel('oai-events');
+                this._whisperRealtimePc = pc;
+                this._whisperRealtimeDc = dc;
+
+                if (!this._whisperStream) {
+                    throw new Error('Realtime Whisper mic stream is not available');
+                }
+                this._whisperStream.getAudioTracks().forEach(function(track) {
+                    pc.addTrack(track, this._whisperStream);
+                }.bind(this));
+
+                dc.addEventListener('message', function(event) {
+                    this._handleRealtimeWhisperRawEvent(event.data);
+                }.bind(this));
+                dc.addEventListener('open', function() {
+                    this._whisperRealtimeLastEvent = 'data_channel.open';
+                    this._startRealtimeWhisperCommitTimer();
+                    this._renderAsrProviderStatus();
+                }.bind(this));
+                dc.addEventListener('close', function() {
+                    this._whisperRealtimeLastEvent = 'data_channel.close';
+                    this._stopRealtimeWhisperCommitTimer();
+                }.bind(this));
+                dc.addEventListener('error', function() {
+                    this._chunksFailedNetwork++;
+                    this._whisperRealtimeLastError = 'data channel error';
+                }.bind(this));
+
+                return pc.createOffer()
+                    .then(function(offer) {
+                        return pc.setLocalDescription(offer).then(function() { return offer; });
+                    })
+                    .then(function(offer) {
+                        return fetch(this._whisperRealtimeCallsUrl, {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': 'Bearer ' + secret,
+                                'Content-Type': 'application/sdp',
+                            },
+                            body: offer.sdp,
+                        });
+                    }.bind(this))
+                    .then(function(resp) {
+                        if (!resp.ok) {
+                            return resp.text().then(function(text) {
+                                throw new Error('Realtime WebRTC answer failed with HTTP ' + resp.status + ': ' + text.slice(0, 240));
+                            });
+                        }
+                        return resp.text();
+                    })
+                    .then(function(answerSdp) {
+                        return pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+                    })
+                    .then(function() {
+                        return pc;
+                    });
+            }.bind(this));
+    }
+
+    _startRealtimeWhisperCommitTimer() {
+        this._stopRealtimeWhisperCommitTimer();
+        var self = this;
+        this._whisperRealtimeCommitTimer = setInterval(function() {
+            var dc = self._whisperRealtimeDc;
+            if (!dc || dc.readyState !== 'open') return;
+            if (!window.KaraokeeRealtimeWhisper) return;
+            try {
+                dc.send(JSON.stringify(KaraokeeRealtimeWhisper.buildCommitEvent()));
+                self._whisperRealtimeCommitsSent++;
+            } catch (err) {
+                self._whisperRealtimeLastError = err && err.message ? err.message : 'commit send failed';
+            }
+        }, 1500);
+    }
+
+    _stopRealtimeWhisperCommitTimer() {
+        if (this._whisperRealtimeCommitTimer) {
+            clearInterval(this._whisperRealtimeCommitTimer);
+            this._whisperRealtimeCommitTimer = null;
+        }
+    }
+
+    _handleRealtimeWhisperRawEvent(rawEvent) {
+        if (typeof Blob !== 'undefined' && rawEvent instanceof Blob) {
+            rawEvent.text().then(function(text) {
+                this._handleRealtimeWhisperEvent(text);
+            }.bind(this)).catch(function(err) {
+                this._whisperRealtimeLastError = err.message || String(err);
+            }.bind(this));
+            return;
+        }
+        this._handleRealtimeWhisperEvent(rawEvent);
+    }
+
+    _handleRealtimeWhisperEvent(rawEvent) {
+        var event = null;
+        try { event = JSON.parse(rawEvent); } catch (_err) {
+            this._whisperRealtimeLastError = 'unparseable event';
+            return;
+        }
+        if (!event || !event.type) return;
+        this._whisperRealtimeEvents++;
+        this._whisperRealtimeLastEvent = event.type;
+        if (window._kDebug) console.log('[Realtime Whisper event]', event);
+        if (event.type === 'conversation.item.input_audio_transcription.delta') {
+            this._whisperRealtimeDeltas++;
+            if (event.item_id) {
+                var current = this._whisperRealtimeTranscript.get(event.item_id) || '';
+                this._whisperRealtimeTranscript.set(event.item_id, current + (event.delta || ''));
+            }
+            return;
+        }
+        if (event.type === 'conversation.item.input_audio_transcription.completed') {
+            var transcript = event.transcript || '';
+            if (!transcript && event.item_id) {
+                transcript = this._whisperRealtimeTranscript.get(event.item_id) || '';
+            }
+            if (event.item_id) this._whisperRealtimeTranscript.delete(event.item_id);
+            this._chunksSucceeded++;
+            this._whisperRealtimeCompletions++;
+            this._lastWhisperTranscriptText = transcript;
+            this._lastWhisperTranscriptAt = performance.now();
+            this._handleWhisperTranscript(transcript, [], null);
+            return;
+        }
+        if (event.type === 'conversation.item.input_audio_transcription.failed') {
+            this._whisperRealtimeFailures++;
+            this._whisperRealtimeLastError = event.error && event.error.message ? event.error.message : 'transcription failed';
+            this._chunksFailed500++;
+            return;
+        }
+        if (event.type === 'error') {
+            var message = event.error && event.error.message ? event.error.message : 'Realtime Whisper error';
+            this._whisperRealtimeFailures++;
+            this._whisperRealtimeLastError = message;
+            this._whisperServerStatus = {
+                state: 'error',
+                reason: message,
+                provider: 'openai_realtime',
+                model: this._whisperServerStatus.model || 'gpt-realtime-whisper',
+                checkedAt: Date.now()
+            };
+            this._chunksFailed500++;
+            this._renderAsrProviderStatus();
+        }
+    }
+
+    _handleWhisperTranscript(transcript, words, dispatchedLineIdx) {
+        if (!transcript || !this.active) return;
+        var routeToActive = (dispatchedLineIdx === null || dispatchedLineIdx === undefined || dispatchedLineIdx === this.activeLineIdx);
+        if (routeToActive) {
+            this._appendWhisperTranscript(transcript);
+            this.lineHadAsrEvent = true;
+            this._collectMatchesWhisper(this.whisperBuffer);
+        }
+        var routeToPrev = this.prevLine && (
+            dispatchedLineIdx === null
+            || dispatchedLineIdx === undefined
+            || this.prevLine.lineIdx === dispatchedLineIdx
+        );
+        if (routeToPrev) {
+            this.prevLine.whisperBuffer = this._trimTranscriptWindow(this.prevLine.whisperBuffer, transcript);
+            this.prevLine.lineHadAsrEvent = true;
+            this._matchPrevLine(this.prevLine.whisperBuffer, 'track2');
+        }
+        this._logAsr('final', transcript, words || [], 'whisper');
+        this._addPhraseEvidence({
+            source: 'whisper',
+            text: transcript || '',
+            words: words || [],
+            receivedAtSec: performance.now() / 1000,
+            audioTimeSec: audio && isFinite(audio.currentTime) ? audio.currentTime : null
+        });
+        this._whisperResponses++;
+        if (words && words.length > 0) {
+            this._whisperResponsesWithWords++;
+            this._whisperWordsTotal += words.length;
+            this._lastWhisperWords = words;
+        }
+        this._updateWordSpans();
+    }
+
+    _setWordSource(wordIndex, source) {
+        if (wordIndex === undefined || wordIndex === null || wordIndex < 0) return;
+        var rank = { vad: 1, browser_sr: 2, whisper: 3 };
+        var existing = this.wordSourceMap.get(wordIndex);
+        if (!existing || (rank[source] || 0) >= (rank[existing] || 0)) {
+            this.wordSourceMap.set(wordIndex, source);
+        }
+    }
+
+    _countWordSources(sourceMap) {
+        var counts = { vad: 0, browser_sr: 0, whisper: 0, unknown: 0 };
+        var map = sourceMap || this.wordSourceMap;
+        if (!map) return counts;
+        map.forEach(function(source) {
+            if (counts[source] === undefined) counts.unknown++;
+            else counts[source]++;
+        });
+        return counts;
+    }
+
     async _startWhisperTrack() {
         this._whisperTrackStatus.startAttempts++;
         try {
             this._whisperTrackStatus.state = 'starting';
+            await this._checkWhisperServerStatus();
+            this._whisperTrackStatus.provider = this._whisperServerStatus.provider || 'local';
             this._whisperStream = await navigator.mediaDevices.getUserMedia({
                 audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
             });
-            this._whisperCtx    = new AudioContext({ sampleRate: 16000 });
-            await this._whisperCtx.audioWorklet.addModule('/static/audio-processor.js');
+            var sampleRate = this._isRealtimeWhisperProvider() ? 24000 : 16000;
+            this._whisperCtx    = new AudioContext({ sampleRate: sampleRate });
             const src  = this._whisperCtx.createMediaStreamSource(this._whisperStream);
-            this._whisperNode = new AudioWorkletNode(this._whisperCtx, 'chunk-processor');
             // VAD AnalyserNode — polled every 100ms, decoupled from Whisper chunks
             this._vadAnalyser = this._whisperCtx.createAnalyser();
             this._vadAnalyser.fftSize = 256;
             this._vadAnalyserBuf = new Float32Array(this._vadAnalyser.fftSize);
             src.connect(this._vadAnalyser);
-            this._whisperNode.port.onmessage = (e) => {
-                if (!this.active) return;
-                var msg = e.data;
-                if (msg && msg.type === 'energy') {
-                    // isSpeaking and baseline calibration are now handled in updateHotWord via AnalyserNode
-                } else if (msg && msg.type === 'chunk') {
-                    this._sendChunkToWhisper(msg.data);
-                } else if (msg && msg.type === 'overlap-chunk') {
-                    if (this._whisperInFlight < 2) {
-                        this._sendChunkToWhisper(msg.data);
+            if (this._isRealtimeWhisperProvider()) {
+                await this._openRealtimeWhisperConnection();
+            } else {
+                await this._whisperCtx.audioWorklet.addModule('/static/audio-processor.js');
+                this._whisperNode = new AudioWorkletNode(this._whisperCtx, 'chunk-processor');
+                this._whisperNode.port.onmessage = (e) => {
+                    if (!this.active) return;
+                    var msg = e.data;
+                    if (msg && msg.type === 'energy') {
+                        // isSpeaking and baseline calibration are now handled in updateHotWord via AnalyserNode
+                    } else if (msg && msg.type === 'chunk') {
+                        if (this._canDispatchWhisperChunk()) {
+                            this._sendChunkToWhisper(msg.data);
+                        } else {
+                            this._dropWhisperChunkNotReady();
+                        }
+                    } else if (msg && msg.type === 'overlap-chunk') {
+                        if (this._whisperInFlight < 2 && this._canDispatchWhisperChunk()) {
+                            this._sendChunkToWhisper(msg.data);
+                        } else {
+                            this._dropWhisperChunkNotReady();
+                        }
+                    } else if (msg instanceof Float32Array) {
+                        // Backward compat: raw Float32Array (shouldn't happen but safe)
+                        if (this._canDispatchWhisperChunk()) {
+                            this._sendChunkToWhisper(msg);
+                        } else {
+                            this._dropWhisperChunkNotReady();
+                        }
                     }
-                } else if (msg instanceof Float32Array) {
-                    // Backward compat: raw Float32Array (shouldn't happen but safe)
-                    this._sendChunkToWhisper(msg);
-                }
-            };
-            src.connect(this._whisperNode);
+                };
+                src.connect(this._whisperNode);
+            }
             this._whisperTrackStatus.state = 'ready';
+            this._renderAsrProviderStatus();
         } catch (err) {
             this._whisperTrackStatus.state = 'error';
             this._whisperTrackStatus.reason = err.message || String(err);
             this._whisperTrackStatus.startFailures++;
+            this._renderAsrProviderStatus();
             console.warn('[Whisper track] unavailable:', this._whisperTrackStatus.reason);
             this._whisperStream = null;
             this._whisperCtx    = null;
@@ -817,6 +1150,21 @@ class GameMode {
     }
 
     _stopWhisperTrack() {
+        this._stopRealtimeWhisperCommitTimer();
+        if (this._whisperRealtimeWs) {
+            try { this._whisperRealtimeWs.close(); } catch(e) {}
+            this._whisperRealtimeWs = null;
+        }
+        if (this._whisperRealtimeDc) {
+            try { this._whisperRealtimeDc.close(); } catch(e) {}
+            this._whisperRealtimeDc = null;
+        }
+        if (this._whisperRealtimePc) {
+            try { this._whisperRealtimePc.close(); } catch(e) {}
+            this._whisperRealtimePc = null;
+        }
+        this._whisperRealtimeSession = null;
+        this._whisperRealtimeTranscript.clear();
         if (this._whisperNode) {
             this._whisperNode.disconnect();
             this._whisperNode = null;
@@ -841,22 +1189,58 @@ class GameMode {
                 this._whisperServerStatus = {
                     state:     data.status || 'unknown',
                     reason:    data.error  || null,
+                    provider:  data.provider || null,
+                    model:     data.model || null,
                     checkedAt: Date.now(),
                 };
             }.bind(this))
             .catch(function() { /* silent — best effort */ }.bind(this));
     }
 
+    _pollWhisperStatusThrottled(intervalMs) {
+        var now = Date.now();
+        intervalMs = intervalMs || 3000;
+        if (now < this._whisperNextStatusPollAt) return;
+        this._whisperNextStatusPollAt = now + intervalMs;
+        this._checkWhisperServerStatus();
+    }
+
+    _canDispatchWhisperChunk() {
+        var now = Date.now();
+        if (now < this._whisperBackoffUntil) return false;
+        if (this._isRealtimeWhisperProvider()) {
+            return !!(this._whisperServerStatus
+                && this._whisperServerStatus.state === 'ready'
+                && this._whisperRealtimeWs
+                && this._whisperRealtimeWs.readyState === WebSocket.OPEN);
+        }
+        return !!(this._whisperServerStatus && this._whisperServerStatus.state === 'ready');
+    }
+
+    _dropWhisperChunkNotReady() {
+        var state = this._whisperServerStatus ? this._whisperServerStatus.state : 'unknown';
+        if (state === 'loading') this._chunksDroppedWhileLoading++;
+        else this._chunksDroppedNotReady++;
+        this._pollWhisperStatusThrottled(state === 'loading' ? 2000 : 5000);
+    }
+
     async _sendChunkToWhisper(float32) {
-        // Circuit breaker: if server said it's loading, drop chunk and poll instead
-        if (this._whisperServerStatus.state === 'loading') {
-            this._chunksDroppedWhileLoading++;
-            // Poll once per dropped chunk (rate-limited by chunk cadence ~2s)
-            this._checkWhisperServerStatus();
+        if (!this._canDispatchWhisperChunk()) {
+            this._dropWhisperChunkNotReady();
             return;
         }
 
         this._chunksDispatched++;
+        if (this._isRealtimeWhisperProvider()) {
+            try {
+                var encoded = KaraokeeRealtimeWhisper.float32ToPcm16Base64(float32);
+                this._whisperRealtimeWs.send(JSON.stringify(KaraokeeRealtimeWhisper.buildAppendAudioEvent(encoded)));
+            } catch (_err) {
+                this._chunksFailedNetwork++;
+            }
+            return;
+        }
+
         this._whisperInFlight++;
         const wav = encodeWav(float32, 16000);
         const dispatchedLineIdx = this.activeLineIdx;
@@ -873,9 +1257,17 @@ class GameMode {
 
             if (resp.status === 503) {
                 this._chunksFailed503++;
-                // Enter circuit-breaker: server model not ready, pause dispatch
-                this._whisperServerStatus.state = 'loading';
-                this._checkWhisperServerStatus(); // async poll to detect when ready
+                var statusPayload = null;
+                try { statusPayload = await resp.json(); } catch (_jsonErr) {}
+                this._whisperServerStatus = {
+                    state: statusPayload && statusPayload.status ? statusPayload.status : 'loading',
+                    reason: statusPayload && statusPayload.error ? statusPayload.error : 'model not ready',
+                    provider: this._whisperServerStatus.provider || null,
+                    model: this._whisperServerStatus.model || null,
+                    checkedAt: Date.now()
+                };
+                this._whisperBackoffUntil = Date.now() + 5000;
+                this._pollWhisperStatusThrottled(5000);
                 return;
             }
             if (resp.status === 500) {
@@ -892,27 +1284,9 @@ class GameMode {
             const data = await resp.json();
             this._chunksSucceeded++;
             this._whisperServerStatus.state = 'ready'; // confirmed working
+            this._whisperBackoffUntil = 0;
 
-            if (data.transcript && this.active) {
-                if (dispatchedLineIdx === this.activeLineIdx) {
-                    this._appendWhisperTranscript(data.transcript);
-                    this.lineHadAsrEvent = true;
-                    this._collectMatchesWhisper(this.whisperBuffer);
-                } else if (this.prevLine && this.prevLine.lineIdx === dispatchedLineIdx) {
-                    this.prevLine.whisperBuffer = this._trimTranscriptWindow(this.prevLine.whisperBuffer, data.transcript);
-                    this.prevLine.lineHadAsrEvent = true;
-                    this._matchPrevLine(this.prevLine.whisperBuffer, 'track2');
-                }
-                this._logAsr('final', data.transcript, data.words || [], 'whisper');
-                this._whisperResponses++;
-                if (data.words && data.words.length > 0) {
-                    this._whisperResponsesWithWords++;
-                    this._whisperWordsTotal += data.words.length;
-                }
-            }
-            if (data.words && data.words.length > 0 && this.active) {
-                this._lastWhisperWords = data.words;
-            }
+            this._handleWhisperTranscript(data.transcript, data.words || [], dispatchedLineIdx);
         } catch (_err) {
             this._chunksFailedNetwork++;
             /* fire-and-forget — network errors are expected on flaky connections */
@@ -933,7 +1307,7 @@ class GameMode {
         // Score the previous line with its final match state
         if (prev.lineWords.length > 0) {
             this._scoreLine(prev.lineIdx, prev.lineWords, prev.matchedSet, prev.lineHadAsrEvent,
-                            prev.vadMatchedSet, prev.asrConfirmedSet);
+                            prev.vadMatchedSet, prev.asrConfirmedSet, prev.wordSourceMap);
         }
     }
 
@@ -961,6 +1335,10 @@ class GameMode {
             for (var si = cursor; si < Math.min(cursor + driftWindow, spoken.length); si++) {
                 if (wordsMatch(spoken[si], target, targetPhonetic)) {
                     prev.matchedSet.set(li, 1.0);
+                    if (prev.wordSourceMap) prev.wordSourceMap.set(li, track === 'track2' ? 'whisper' : 'browser_sr');
+                    if (prev.vadMatchedSet && prev.vadMatchedSet.has(li) && prev.asrConfirmedSet && !prev.asrConfirmedSet.has(li)) {
+                        prev.asrConfirmedSet.add(li);
+                    }
                     cursor = si + 1;
                     anyMatched = true;
                     // Light the span green on the previous line
@@ -982,8 +1360,8 @@ class GameMode {
         const spoken = normalizeWords(transcript);
         const whisperMap = new Map();
         const windowSize = getSpokenWindowSize((this.wordTimings && this.wordTimings.tempoClass) || 'normal');
-        var maxWindow = this.lineWords.length * 3;
-        let spokenIdx = Math.max(0, spoken.length - Math.min(windowSize, maxWindow));
+        var perLineCap = Math.max(windowSize, this.lineWords.length * 4);
+        let spokenIdx = Math.max(0, spoken.length - perLineCap);
         var now = audio.currentTime;
         var driftWindow = this.currentParams.driftTrack2;
         for (let li = 0; li < this.lineWords.length; li++) {
@@ -993,7 +1371,11 @@ class GameMode {
             const target = this.lineWords[li];
             const targetPhonetic = this.wordTimings[li] ? this.wordTimings[li].phonetic : undefined;
             for (let si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
-                if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
+                // Skip filler tokens unless the target IS that filler word — otherwise
+                // a sung "uh" against a lyric "uh" gets discarded before matching.
+                if (FILLER_WORDS.has(spoken[si]) && !FILLER_WORDS.has(target)) {
+                    spokenIdx = si + 1; si = spokenIdx - 1; continue;
+                }
 
                 var consumed = multiWordContractionMatch(spoken, si, target);
                 if (consumed > 0) {
@@ -1025,6 +1407,7 @@ class GameMode {
                 this.asrConfirmedSet.add(i);
                 this._logPromotion('whisper', i, score);
             }
+            this._setWordSource(i, 'whisper');
         }.bind(this));
         this._updateWordSpans();
 
@@ -1043,6 +1426,22 @@ class GameMode {
         // If there's already a prevLine overlay, finalize it first (fast succession)
         this._finalizePrevLine();
 
+        // Run the last available browser transcript/interim pass before the outgoing
+        // line is snapshotted for delayed scoring.
+        if (this.lineWords.length > 0 && (this.transcript || this.latestInterim)) {
+            var finalMap = new Map();
+            this._collectMatches(this.transcript + ' ' + this.latestInterim, finalMap);
+            var finalBeforeConfirmed = new Set(this.asrConfirmedSet);
+            mergeConfirmedMatches(this.matchedSet, this.vadMatchedSet, this.asrConfirmedSet, finalMap);
+            finalMap.forEach(function(score, idx) {
+                if (!finalBeforeConfirmed.has(idx) && this.asrConfirmedSet.has(idx)) {
+                    this._logPromotion('browser_sr', idx, score);
+                }
+                this._setWordSource(idx, 'browser_sr');
+            }.bind(this));
+            this._updateWordSpans();
+        }
+
         // Create overlay for the outgoing line (if it had words to match)
         if (this.activeLineIdx >= 0 && this.lineWords.length > 0) {
             var outgoingTempoClass = (this.wordTimings && this.wordTimings.tempoClass) || 'normal';
@@ -1055,6 +1454,7 @@ class GameMode {
                 matchedSet:             new Map(this.matchedSet),
                 vadMatchedSet:          new Map(this.vadMatchedSet),
                 asrConfirmedSet:        new Set(this.asrConfirmedSet),
+                wordSourceMap:          new Map(this.wordSourceMap),
                 lineStartWordCount:     this.lineStartWordCount,
                 lineStartTranscriptPos: this.lineStartTranscriptPos,
                 wordTimings:            this.wordTimings,
@@ -1074,20 +1474,6 @@ class GameMode {
                     self._finalizePrevLine();
                 }
             }, totalDelay);
-        }
-
-        // --- Final match pass on outgoing line before transition ---
-        if (this.lineWords.length > 0 && this.transcript) {
-            var finalMap = new Map();
-            this._collectMatches(this.transcript + ' ' + this.latestInterim, finalMap);
-            // Merge any new matches into matchedSet (upgrade only)
-            finalMap.forEach(function(score, idx) {
-                var existing = this.matchedSet.get(idx);
-                if (existing === undefined || score > existing) {
-                    this.matchedSet.set(idx, score);
-                }
-            }.bind(this));
-            this._updateWordSpans();
         }
 
         // Diagnostic: log transition
@@ -1111,7 +1497,8 @@ class GameMode {
                 this.matchedSet.size,
                 this.lineWords.length,
                 this.lineWords.filter(function(w, i) { return !this.matchedSet.has(i); }.bind(this)),
-                this._lineStartAudioTime
+                this._lineStartAudioTime,
+                this._countWordSources(this.wordSourceMap)
             );
         }
 
@@ -1181,7 +1568,11 @@ class GameMode {
             var target = this.lineWords[li];
             var targetPhonetic = this.wordTimings[li] ? this.wordTimings[li].phonetic : undefined;
             for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
-                if (FILLER_WORDS.has(spoken[si])) { spokenIdx = si + 1; si = spokenIdx - 1; continue; }
+                // Skip filler tokens unless the target IS that filler word — otherwise
+                // a sung "uh" against a lyric "uh" gets discarded before matching.
+                if (FILLER_WORDS.has(spoken[si]) && !FILLER_WORDS.has(target)) {
+                    spokenIdx = si + 1; si = spokenIdx - 1; continue;
+                }
                 this._lineComparisonCount++;
 
                 // Try multi-word contraction first (consumes multiple spoken words)
@@ -1309,13 +1700,34 @@ class GameMode {
             if (!this.matchedSet.has(newHot)) {
                 this.matchedSet.set(newHot, 0.25);       // provisional — shows amber; upgradeable by ASR
                 this.vadMatchedSet.set(newHot, 0.25);
+                this._setWordSource(newHot, 'vad');
                 this._updateWordSpans();
                 this._logMatch(
                     this.wordTimings[newHot] ? this.wordTimings[newHot].word : '',
                     this.lineWords[newHot] || '',
                     'vad-provisional', -1, false, 0.25, true, newHot
                 );
+                this._addPhraseEvidence({
+                    source: 'vad',
+                    text: '',
+                    words: [],
+                    receivedAtSec: performance.now() / 1000,
+                    audioTimeSec: audio && isFinite(audio.currentTime) ? audio.currentTime : null
+                });
             }
+        }
+    }
+
+    _addPhraseEvidence(evidence) {
+        if (!this._phraseSession || !window.KaraokeePhraseEngine) return;
+        try {
+            KaraokeePhraseEngine.addEvidence(this._phraseSession, evidence);
+            KaraokeePhraseEngine.settlePhrases(
+                this._phraseSession,
+                audio && isFinite(audio.currentTime) ? audio.currentTime : 0
+            );
+        } catch (e) {
+            console.warn('[PhraseEngine] evidence ignored:', e);
         }
     }
 
@@ -1350,8 +1762,10 @@ class GameMode {
                     }
                 }
                 this.matchedSet.set(this.hotWordIndex, 1.0);
+                this._setWordSource(this.hotWordIndex, 'browser_sr');
                 if (this.vadMatchedSet.has(this.hotWordIndex)) {
                     this.asrConfirmedSet.add(this.hotWordIndex);
+                    this._setWordSource(this.hotWordIndex, 'browser_sr');
                     this._logMatch(
                         spoken[i], target, 'vad-confirmed', -1, false, 1.0, true, this.hotWordIndex
                     );
@@ -1504,7 +1918,15 @@ class GameMode {
             asr:         [],
             matches:     [],
             promotions:  [],   // VAD→ASR upgrade events (both browser SR and Whisper paths)
-            transitions: []
+            transitions: [],
+            phraseEngine: {
+                version: 1,
+                mode: 'shadow',
+                difficulty: this._phraseDifficulty || 'medium',
+                benchmark: null,
+                plan: null,
+                traces: []
+            }
         };
     }
 
@@ -1629,7 +2051,7 @@ class GameMode {
      * @param {string[]} missedWords
      * @param {number} lineStartAudioTime  audio.currentTime when this line started
      */
-    _logTransition(fromIdx, toIdx, trigger, fromText, matchedWords, totalWords, missedWords, lineStartAudioTime) {
+    _logTransition(fromIdx, toIdx, trigger, fromText, matchedWords, totalWords, missedWords, lineStartAudioTime, sourceCounts) {
         if (!this._telemetry) return;
         try {
             var tempoClass = 'medium';
@@ -1672,6 +2094,7 @@ class GameMode {
                 earlyMs:      earlyMs,
                 lateMs:       lateMs,
                 totalComparisons: this._lineComparisonCount,
+                sourceCounts: sourceCounts || { vad: 0, browser_sr: 0, whisper: 0, unknown: 0 },
             });
         } catch (e) { /* telemetry must never crash the game */ }
     }
@@ -1693,8 +2116,15 @@ class GameMode {
             }
             // Richer Whisper observability fields (supplement, not replace, whisperAvailable)
             this._telemetry.meta.whisperStatusAtStart  = this._whisperServerStatus ? Object.assign({}, this._whisperServerStatus) : null;
-            this._telemetry.meta.whisperStatusFinal    = { state: this._whisperServerStatus ? this._whisperServerStatus.state : 'unknown', reason: this._whisperServerStatus ? this._whisperServerStatus.reason : null };
+            this._telemetry.meta.whisperStatusFinal    = {
+                state: this._whisperServerStatus ? this._whisperServerStatus.state : 'unknown',
+                reason: this._whisperServerStatus ? this._whisperServerStatus.reason : null,
+                provider: this._whisperServerStatus ? this._whisperServerStatus.provider : null,
+                model: this._whisperServerStatus ? this._whisperServerStatus.model : null
+            };
             this._telemetry.meta.whisperTrackStatus    = this._whisperTrackStatus ? Object.assign({}, this._whisperTrackStatus) : null;
+            this._telemetry.meta.whisperProvider       = this._whisperServerStatus ? this._whisperServerStatus.provider : null;
+            this._telemetry.meta.whisperModel          = this._whisperServerStatus ? this._whisperServerStatus.model : null;
             this._telemetry.meta.whisperChunkCounters  = {
                 dispatched:          this._chunksDispatched          || 0,
                 succeeded:           this._chunksSucceeded           || 0,
@@ -1702,10 +2132,32 @@ class GameMode {
                 failed500:           this._chunksFailed500           || 0,
                 failedNetwork:       this._chunksFailedNetwork       || 0,
                 droppedWhileLoading: this._chunksDroppedWhileLoading || 0,
+                droppedNotReady:     this._chunksDroppedNotReady     || 0,
             };
             this._telemetry.meta.whisperResponses          = this._whisperResponses          || 0;
             this._telemetry.meta.whisperResponsesWithWords = this._whisperResponsesWithWords  || 0;
             this._telemetry.meta.whisperWordsTotal         = this._whisperWordsTotal          || 0;
+            this._telemetry.meta.whisperRealtimeDeltas     = this._whisperRealtimeDeltas      || 0;
+            this._telemetry.meta.whisperRealtimeCompletions = this._whisperRealtimeCompletions || 0;
+            this._telemetry.meta.whisperRealtimeEvents     = this._whisperRealtimeEvents      || 0;
+            this._telemetry.meta.whisperRealtimeFailures   = this._whisperRealtimeFailures    || 0;
+            this._telemetry.meta.whisperRealtimeCommitsSent = this._whisperRealtimeCommitsSent || 0;
+            this._telemetry.meta.whisperRealtimeLastEvent  = this._whisperRealtimeLastEvent   || '';
+            this._telemetry.meta.whisperRealtimeLastError  = this._whisperRealtimeLastError   || '';
+            this._telemetry.meta.finalWordSourceCounts     = this._countWordSources(this.wordSourceMap);
+            var intentEl = document.getElementById('benchmarkIntent');
+            var fairnessEl = document.getElementById('benchmarkFairness');
+            var notesEl = document.getElementById('benchmarkNotes');
+            if (this._telemetry.phraseEngine) {
+                this._telemetry.phraseEngine.benchmark = {
+                    intent: intentEl ? intentEl.value : '',
+                    fairness: fairnessEl ? fairnessEl.value : '',
+                    notes: notesEl ? notesEl.value : ''
+                };
+                if (this._phraseSession && window.KaraokeePhraseEngine) {
+                    this._telemetry.phraseEngine.traces = KaraokeePhraseEngine.getPhraseTrace(this._phraseSession);
+                }
+            }
             var json = JSON.stringify(this._telemetry, null, 2);
             var ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
             var name = 'karaokee-telemetry-' + ts + '.json';
@@ -1806,6 +2258,8 @@ class GameMode {
         const vadHits = this.vadMatchedSet ? this.vadMatchedSet.size : 0;
         const confirmed = this.asrConfirmedSet ? this.asrConfirmedSet.size : 0;
         html += `<div class="dbg-row"><span class="dbg-label">VAD   </span>hits:${vadHits} | asr-conf:${confirmed}/${this.lineWords.length}</div>`;
+        const sourceCounts = this._countWordSources(this.wordSourceMap);
+        html += `<div class="dbg-row"><span class="dbg-label">Src   </span>vad:${sourceCounts.vad} browser:${sourceCounts.browser_sr} whisper:${sourceCounts.whisper} unknown:${sourceCounts.unknown}</div>`;
         // Whisper server + track state
         const wSrv   = (this._whisperServerStatus && this._whisperServerStatus.state) || 'unknown';
         const wTrk   = (this._whisperTrackStatus  && this._whisperTrackStatus.state)  || 'idle';
@@ -1815,7 +2269,14 @@ class GameMode {
         const w500   = this._chunksFailed500           || 0;
         const wNet   = this._chunksFailedNetwork       || 0;
         const wDrop  = this._chunksDroppedWhileLoading || 0;
-        html += `<div class="dbg-row"><span class="dbg-label">Whisp </span>srv:${wSrv} trk:${wTrk} | sent:${wDisp} ok:${wOk} 503:${w503} 500:${w500} net:${wNet} drop:${wDrop}</div>`;
+        const wNotReady = this._chunksDroppedNotReady  || 0;
+        const wReason = (this._whisperTrackStatus && this._whisperTrackStatus.reason) ? ` | reason:${this._whisperTrackStatus.reason}` : '';
+        html += `<div class="dbg-row"><span class="dbg-label">Whisp </span>srv:${wSrv} trk:${wTrk} | sent:${wDisp} ok:${wOk} 503:${w503} 500:${w500} net:${wNet} drop:${wDrop} not-ready:${wNotReady}${wReason}</div>`;
+        const dcState = this._whisperRealtimeDc ? this._whisperRealtimeDc.readyState : 'none';
+        const pcState = this._whisperRealtimePc ? this._whisperRealtimePc.connectionState : 'none';
+        html += `<div class="dbg-row"><span class="dbg-label">RT-W  </span>pc:${pcState} dc:${dcState} events:${this._whisperRealtimeEvents || 0} deltas:${this._whisperRealtimeDeltas || 0} complete:${this._whisperRealtimeCompletions || 0} commit:${this._whisperRealtimeCommitsSent || 0} fail:${this._whisperRealtimeFailures || 0}</div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">RT-E  </span>last:${this._whisperRealtimeLastEvent || '\u2014'} err:${this._whisperRealtimeLastError || '\u2014'}</div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">RT-T  </span>last:"${(this._lastWhisperTranscriptText || '\u2014').slice(-80)}"</div>`;
 
         // Overlap state
         const overlapActive = this.prevLine && performance.now() < this.prevLine.overlapEnd;
@@ -1853,6 +2314,8 @@ class GameMode {
         document.getElementById('modalWords').textContent = `${this.matchedWords}/${this.totalWords}`;
         document.getElementById('modalLines').textContent = `${this.perfectLines}/${this.linesScored}`;
         document.getElementById('modalStreak').textContent = this.bestStreak;
+        var feedback = document.getElementById('benchmarkFeedback');
+        if (feedback) feedback.style.display = window._kDebug ? 'block' : 'none';
         document.getElementById('lrc-offset-control').style.display = 'none';
         document.getElementById('gameModal').style.display = 'flex';
     }

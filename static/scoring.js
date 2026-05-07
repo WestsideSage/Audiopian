@@ -266,6 +266,11 @@
 
     var spokenMetaphoneLRU = new MetaphoneLRU(50);
 
+    var SILENT_PREFIX_RE = /^(GN|KN|PN|WR|AE)/i;
+    function hasSilentPrefix(word) {
+        return SILENT_PREFIX_RE.test(word);
+    }
+
     function wordsMatch(spoken, target, targetPhonetic) {
         if (spoken === target) return true;
 
@@ -286,7 +291,8 @@
             if (sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])))) {
                 var sameFirst = spoken[0] === target[0];
                 var bothLong = spoken.length >= 5 && target.length >= 5 && Math.abs(spoken.length - target.length) <= 2;
-                if (sameFirst || bothLong) return true;
+                var silentPrefix = hasSilentPrefix(spoken) || hasSilentPrefix(target);
+                if (sameFirst || bothLong || silentPrefix) return true;
             }
         }
 
@@ -324,14 +330,16 @@
             if (sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])))) {
                 var sameFirst = spoken[0] === target[0];
                 var bothLong = spoken.length >= 5 && target.length >= 5 && Math.abs(spoken.length - target.length) <= 2;
-                if (sameFirst || bothLong) {
+                var silentPrefix = hasSilentPrefix(spoken) || hasSilentPrefix(target);
+                if (sameFirst || bothLong || silentPrefix) {
                     return { score: 0.8, method: 'phonetic' };
                 }
             }
         }
 
         if (!skipFuzzyMatch(target) && !skipFuzzyMatch(spoken)) {
-            var dist = (Math.abs(spoken.length - target.length) <= 3) ? editDistance(spoken, target) : Infinity;
+            var maxDist = matchHelpers.maxEditDistance(Math.min(spoken.length, target.length));
+            var dist = (Math.abs(spoken.length - target.length) <= maxDist) ? editDistance(spoken, target) : Infinity;
             if (dist === 1) return { score: 0.75, method: 'edit1' };
             if (dist === 2 && isEdit2PrefixTruncation(spoken, target)) return { score: 0.4, method: 'edit2' };
         }
@@ -449,7 +457,7 @@
     function effectiveMatchScore(rawScore, idx, vadMatchedSet, asrConfirmedSet) {
         if (rawScore > 0 && vadMatchedSet && vadMatchedSet.has && vadMatchedSet.has(idx) &&
             !(asrConfirmedSet && asrConfirmedSet.has && asrConfirmedSet.has(idx))) {
-            return 0;
+            return Math.min(rawScore, 0.25);
         }
         return rawScore;
     }
@@ -508,6 +516,18 @@
         return matches;
     }
 
+    function mergeConfirmedMatches(matchedSet, vadMatchedSet, asrConfirmedSet, scoreMap) {
+        scoreMap.forEach(function(score, idx) {
+            var existing = matchedSet.get(idx);
+            if (existing === undefined || score > existing) {
+                matchedSet.set(idx, score);
+            }
+            if (vadMatchedSet && vadMatchedSet.has(idx) && asrConfirmedSet && !asrConfirmedSet.has(idx)) {
+                asrConfirmedSet.add(idx);
+            }
+        });
+    }
+
     function resetSpokenMatchCache() {
         spokenMetaphoneLRU.reset();
     }
@@ -524,6 +544,7 @@
         effectiveMatchScore: effectiveMatchScore,
         computeLineScore: computeLineScore,
         collectSequentialWordMatches: collectSequentialWordMatches,
+        mergeConfirmedMatches: mergeConfirmedMatches,
         resetSpokenMatchCache: resetSpokenMatchCache
     };
 });

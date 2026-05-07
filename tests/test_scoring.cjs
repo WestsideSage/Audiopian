@@ -54,6 +54,13 @@ var matchCases = [
     { spoken: 'cite', target: 'site', method: 'edit1', score: 0.75 },
     { spoken: 'minde', target: 'minds', method: 'edit1', score: 0.75 },
     { spoken: 'worlf', target: 'world', method: 'edit1', score: 0.75 },
+    // Silent-prefix phonetic matches (knew/new, wrote/rote, etc.)
+    // Metaphone skips KN/WR/GN/PN/AE prefixes, so original first letters
+    // differ but the post-skip phonetic onset agrees. Should match.
+    { spoken: 'knew', target: 'new', method: 'phonetic', score: 0.8 },
+    { spoken: 'new', target: 'knew', method: 'phonetic', score: 0.8 },
+    { spoken: 'wrote', target: 'rote', method: 'phonetic', score: 0.8 },
+    { spoken: 'gnaw', target: 'naw', method: 'phonetic', score: 0.8 },
     { spoken: 'cat', target: 'dog', method: 'none', score: 0.0 },
     { spoken: 'alpha', target: 'omega', method: 'none', score: 0.0 },
     { spoken: 'going', target: 'gonna', method: 'none', score: 0.0 },
@@ -107,9 +114,9 @@ var lineCases = [
         expected: { totalWords: 2, matchedWords: 2, weightedTotal: 2.0, weightedMatched: 1.79, missedWordIndices: [], missedWords: [], perfect: false }
     },
     {
-        label: 'vad only downgraded',
+        label: 'vad only keeps partial flow credit',
         args: [['hey'], [{ weight: 1.0 }], new Map([[0, 1.0]]), new Map([[0, 1.0]]), new Set()],
-        expected: { totalWords: 1, matchedWords: 1, weightedTotal: 1.0, weightedMatched: 0.0, missedWordIndices: [0], missedWords: ['hey'], perfect: false }
+        expected: { totalWords: 1, matchedWords: 1, weightedTotal: 1.0, weightedMatched: 0.25, missedWordIndices: [], missedWords: [], perfect: false }
     },
     {
         label: 'vad confirmed by asr keeps full credit',
@@ -119,7 +126,7 @@ var lineCases = [
     {
         label: 'mixed weights with adlib',
         args: [['my', 'boy', 'yeah'], [{ weight: 1.0 }, { weight: 1.0 }, { weight: 0.25 }], new Map([[0, 1.0], [1, 0.8], [2, 1.0]]), new Map([[2, 1.0]]), new Set([0, 1])],
-        expected: { totalWords: 3, matchedWords: 3, weightedTotal: 2.25, weightedMatched: 1.8, missedWordIndices: [2], missedWords: ['yeah'], perfect: false }
+        expected: { totalWords: 3, matchedWords: 3, weightedTotal: 2.25, weightedMatched: 1.8625, missedWordIndices: [], missedWords: [], perfect: false }
     },
     {
         label: 'missed words tracked',
@@ -144,7 +151,7 @@ var lineCases = [
     {
         label: 'confirmed and unconfirmed vad mix',
         args: [['one', 'two'], [{ weight: 1.0 }, { weight: 1.0 }], new Map([[0, 1.0], [1, 1.0]]), new Map([[0, 1.0], [1, 1.0]]), new Set([1])],
-        expected: { totalWords: 2, matchedWords: 2, weightedTotal: 2.0, weightedMatched: 1.0, missedWordIndices: [0], missedWords: ['one'], perfect: false }
+        expected: { totalWords: 2, matchedWords: 2, weightedTotal: 2.0, weightedMatched: 1.25, missedWordIndices: [], missedWords: [], perfect: false }
     },
     {
         label: 'low weight miss still fails threshold',
@@ -180,5 +187,12 @@ var repeatedTargets = scoring.collectSequentialWordMatches(
     [{ phonetic: scoring.doubleMetaphone('la') }, { phonetic: scoring.doubleMetaphone('la') }, { phonetic: scoring.doubleMetaphone('la') }]
 );
 assert.deepStrictEqual(Array.from(repeatedTargets.keys()), [0], 'one spoken token should only credit one repeated target slot');
+
+var mergedMatches = new Map([[0, 0.25], [1, 0.25]]);
+var vadOnly = new Map([[0, 0.25], [1, 0.25]]);
+var confirmed = new Set([0]);
+scoring.mergeConfirmedMatches(mergedMatches, vadOnly, confirmed, new Map([[1, 1.0]]));
+assert.strictEqual(mergedMatches.get(1), 1.0, 'mergeConfirmedMatches upgrades matched score');
+assert.ok(confirmed.has(1), 'mergeConfirmedMatches promotes VAD word when ASR later matches it');
 
 console.log('All scoring tests passed.');
