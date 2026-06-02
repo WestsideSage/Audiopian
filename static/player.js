@@ -1245,14 +1245,10 @@ class GameMode {
         const wav = encodeWav(float32, 16000);
         const dispatchedLineIdx = this.activeLineIdx;
         try {
-            var headers = { 'Content-Type': 'audio/wav' };
-            if (dispatchedLineIdx >= 0 && lyrics[dispatchedLineIdx]) {
-                headers['X-Lyric-Hint'] = lyrics[dispatchedLineIdx].text;
-            }
             const resp = await fetch('/transcribe', {
                 method: 'POST',
                 body: wav,
-                headers: headers,
+                headers: { 'Content-Type': 'audio/wav' },
             });
 
             if (resp.status === 503) {

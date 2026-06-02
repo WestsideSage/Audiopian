@@ -76,11 +76,20 @@ def _is_cuda_runtime_error(exc):
     )
 
 
-def _transcribe_with_model(model, wav_bytes, hint):
+def _transcribe_with_model(model, wav_bytes):
     audio_buf = io.BytesIO(wav_bytes)
-    kwargs = dict(language='en', beam_size=1, word_timestamps=True)
-    if hint:
-        kwargs['initial_prompt'] = hint
+    # No lyric prompt: priming the decoder with the target line makes it emit
+    # that line on hum/music/silence (answer-key injection). vad_filter +
+    # no_speech_threshold reject non-vocal chunks; condition_on_previous_text=False
+    # stops hallucinated text carrying across chunks.
+    kwargs = dict(
+        language='en',
+        beam_size=1,
+        word_timestamps=True,
+        vad_filter=True,
+        no_speech_threshold=0.6,
+        condition_on_previous_text=False,
+    )
 
     segments, _ = model.transcribe(audio_buf, **kwargs)
     segments = list(segments)
@@ -99,7 +108,7 @@ def _transcribe_with_model(model, wav_bytes, hint):
     return text, words
 
 
-def _transcribe_with_openai(wav_bytes, hint):
+def _transcribe_with_openai(wav_bytes):
     if not OPENAI_API_KEY:
         raise RuntimeError('OPENAI_API_KEY is required when WHISPER_PROVIDER=openai')
 
@@ -107,8 +116,6 @@ def _transcribe_with_openai(wav_bytes, hint):
         'model': OPENAI_TRANSCRIBE_MODEL,
         'response_format': 'json',
     }
-    if hint:
-        data['prompt'] = hint
 
     response = requests.post(
         OPENAI_TRANSCRIBE_URL,
@@ -372,15 +379,14 @@ def transcribe():
     if len(wav_bytes) < 100:
         return jsonify(transcript='', words=[])
 
-    hint = request.headers.get('X-Lyric-Hint')
     try:
         provider = _whisper_active_provider or _resolve_whisper_provider()
         if provider == 'openai_realtime':
             return jsonify(error='use realtime transcription session', status=_whisper_state), 409
         if provider == 'openai':
-            text, words = _transcribe_with_openai(wav_bytes, hint)
+            text, words = _transcribe_with_openai(wav_bytes)
         else:
-            text, words = _transcribe_with_model(_whisper_model, wav_bytes, hint)
+            text, words = _transcribe_with_model(_whisper_model, wav_bytes)
         return jsonify(transcript=text, words=words)
     except Exception as exc:
         if _whisper_active_device != 'cpu' and _is_cuda_runtime_error(exc):
@@ -388,7 +394,7 @@ def transcribe():
             if model is None:
                 return jsonify(error='model not ready', status=_whisper_state), 503
             try:
-                text, words = _transcribe_with_model(model, wav_bytes, hint)
+                text, words = _transcribe_with_model(model, wav_bytes)
                 return jsonify(transcript=text, words=words)
             except Exception:
                 app.logger.exception('Whisper transcription error after CPU fallback')

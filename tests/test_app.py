@@ -156,8 +156,8 @@ def test_transcribe_whisper_exception_returns_500(client, monkeypatch):
     assert resp.status_code == 500
 
 
-def test_transcribe_with_hint(client, monkeypatch):
-    """When hint is provided via header, it should be passed as initial_prompt."""
+def test_transcribe_ignores_lyric_hint(client, monkeypatch):
+    """A lyric hint header must NOT be passed to the model (no answer-key prompt)."""
     mock_model = MagicMock()
     mock_segment = MagicMock()
     mock_segment.text = 'gonna be alright'
@@ -174,12 +174,14 @@ def test_transcribe_with_hint(client, monkeypatch):
         _app_module._whisper_state = 'idle'
 
     assert resp.status_code == 200
-    call_kwargs = mock_model.transcribe.call_args
-    assert call_kwargs[1].get('initial_prompt') == 'gonna be alright'
+    call_kwargs = mock_model.transcribe.call_args[1]
+    assert 'initial_prompt' not in call_kwargs
+    assert call_kwargs.get('vad_filter') is True
+    assert call_kwargs.get('condition_on_previous_text') is False
 
 
-def test_transcribe_without_hint(client, monkeypatch):
-    """Without hint header, initial_prompt should not be passed."""
+def test_transcribe_sets_no_speech_guards(client, monkeypatch):
+    """Transcription enables vad_filter / no_speech_threshold and disables cross-chunk conditioning."""
     mock_model = MagicMock()
     mock_segment = MagicMock()
     mock_segment.text = 'going to be all right'
@@ -195,8 +197,11 @@ def test_transcribe_without_hint(client, monkeypatch):
         _app_module._whisper_state = 'idle'
 
     assert resp.status_code == 200
-    call_kwargs = mock_model.transcribe.call_args
-    assert 'initial_prompt' not in call_kwargs[1] or call_kwargs[1]['initial_prompt'] is None
+    call_kwargs = mock_model.transcribe.call_args[1]
+    assert 'initial_prompt' not in call_kwargs
+    assert call_kwargs.get('vad_filter') is True
+    assert call_kwargs.get('no_speech_threshold') == 0.6
+    assert call_kwargs.get('condition_on_previous_text') is False
 
 
 def test_transcribe_returns_word_timestamps(client, monkeypatch):
