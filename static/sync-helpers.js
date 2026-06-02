@@ -63,11 +63,17 @@ function getAdjustedOverlapDuration(tempoClass, wordCount) {
  * @returns {number}
  */
 function getScoreDelay(tempoClass) {
+    // Delay (seconds) before a line is finalized/scored, measured from the end of
+    // the overlap zone. Lengthened for fast/normal so the recognizer (browser SR
+    // or realtime Whisper, both ~0.7-2s latency) has time to return a line's LAST
+    // words before it is scored — fixes the "last word goes red even though I said
+    // it" line-boundary race. Paired with prevLine.overlapEnd extended to the full
+    // overlap+scoreDelay window in setActiveLine.
     switch (tempoClass) {
         case 'slow':   return 1.2;
-        case 'fast':   return 0.5;
+        case 'fast':   return 1.0;
         case 'normal': // fall through
-        default:       return 0.8;
+        default:       return 1.0;
     }
 }
 

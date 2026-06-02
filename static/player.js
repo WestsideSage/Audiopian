@@ -956,7 +956,9 @@ class GameMode {
             } catch (err) {
                 self._whisperRealtimeLastError = err && err.message ? err.message : 'commit send failed';
             }
-        }, 1500);
+        // 700ms (was 1500): commit the realtime audio buffer more often so a line's
+        // last words are transcribed and returned before the line is finalized.
+        }, 700);
     }
 
     _stopRealtimeWhisperCommitTimer() {
@@ -1454,7 +1456,11 @@ class GameMode {
                 lineStartTranscriptPos: this.lineStartTranscriptPos,
                 wordTimings:            this.wordTimings,
                 params:                 this.currentParams,
-                overlapEnd:             performance.now() + (overlapDuration * 1000),
+                // Keep the previous line creditable for the FULL window until it is
+                // finalized (overlap + scoreDelay), not just the overlap. Closes the
+                // dead gap where a line's late-arriving last words were dropped because
+                // _matchPrevLine had already stopped crediting but scoring hadn't run.
+                overlapEnd:             performance.now() + ((overlapDuration + scoreDelay) * 1000),
                 whisperBuffer:          this.whisperBuffer,
                 lineHadAsrEvent:        this.lineHadAsrEvent,
             };

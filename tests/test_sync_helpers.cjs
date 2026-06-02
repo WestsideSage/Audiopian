@@ -58,10 +58,12 @@ assert.strictEqual(getOverlapDuration('fast'), 0.5);
 assert.strictEqual(getOverlapDuration('unknown'), 0.8);
 
 // --- getScoreDelay ---
+// Lengthened so a line is not finalized before the recognizer returns its last
+// words (the last-word line-boundary race). slow already generous.
 assert.strictEqual(getScoreDelay('slow'), 1.2);
-assert.strictEqual(getScoreDelay('normal'), 0.8);
-assert.strictEqual(getScoreDelay('fast'), 0.5);
-assert.strictEqual(getScoreDelay('unknown'), 0.8);
+assert.strictEqual(getScoreDelay('normal'), 1.0);
+assert.strictEqual(getScoreDelay('fast'), 1.0);
+assert.strictEqual(getScoreDelay('unknown'), 1.0);
 
 // --- interpolateWordTimings tempo metadata ---
 // We test the WPS calculation formula that interpolateWordTimings will use.
