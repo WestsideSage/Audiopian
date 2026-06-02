@@ -5,6 +5,12 @@ import yt_dlp
 TEMP_DIR = os.path.join(os.path.dirname(__file__), "temp")
 AUDIO_PATH = os.path.join(TEMP_DIR, "audio.webm")
 
+# YouTube now requires solving a JavaScript "n-signature" challenge to obtain
+# playable stream URLs; without a JS runtime yt-dlp builds URLs the CDN rejects
+# with HTTP 403. yt-dlp only enables Deno by default, so point it at Node, which
+# this project already depends on. Requires the `yt-dlp-ejs` package (the solver).
+JS_RUNTIMES = {"node": {}}
+
 
 def parse_title_artist(title: str, uploader: str) -> tuple[str, str]:
     """Parse artist and title from a YouTube title string.
@@ -21,7 +27,7 @@ def parse_title_artist(title: str, uploader: str) -> tuple[str, str]:
 
 def extract_metadata(url: str) -> dict:
     """Extract title and artist from a YouTube URL without downloading."""
-    ydl_opts = {"quiet": True, "skip_download": True}
+    ydl_opts = {"quiet": True, "skip_download": True, "js_runtimes": JS_RUNTIMES}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
@@ -46,6 +52,7 @@ def download_audio(url: str) -> str:
         "outtmpl": AUDIO_PATH,
         "quiet": True,
         "overwrites": True,
+        "js_runtimes": JS_RUNTIMES,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
