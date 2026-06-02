@@ -420,6 +420,52 @@
         return session;
     }
 
+    function clamp01(value) {
+        if (!isFinite(value)) return 0;
+        if (value < 0) return 0;
+        if (value > 1) return 1;
+        return value;
+    }
+
+    function getLiveScore(session) {
+        var lyrics = 1;
+        var timing = 1;
+        var stability = 1;
+        if (session && session.states) {
+            var sumHit = 0;
+            var sumReq = 0;
+            var clearedCount = 0;
+            var cleanCount = 0;
+            var rescuedCount = 0;
+            Object.keys(session.states).forEach(function(phraseId) {
+                var state = session.states[phraseId];
+                var phrase = state.phrase || {};
+                var required = phrase.anchorsRequired || 0;
+                if (required > 0) {
+                    var hit = Object.keys(state.anchorHits).length;
+                    if (hit > required) hit = required;
+                    sumHit += hit;
+                    sumReq += required;
+                }
+                if (state.cleared) {
+                    clearedCount++;
+                    if (state.flowStatus === 'clean') cleanCount++;
+                    if (state.rescuedByWhisper) rescuedCount++;
+                }
+            });
+            lyrics = sumReq > 0 ? clamp01(sumHit / sumReq) : 1;
+            timing = clearedCount > 0 ? cleanCount / clearedCount : 1;
+            stability = clearedCount > 0 ? 1 - (rescuedCount / clearedCount) : 1;
+        }
+        var composite = 0.6 * lyrics + 0.25 * timing + 0.15 * stability;
+        return {
+            lyrics: lyrics,
+            timing: timing,
+            stability: stability,
+            composite: composite
+        };
+    }
+
     function getPhraseTrace(session) {
         if (!session || !session.plan) return [];
         return (session.plan.phrases || []).map(function(phrase) {
@@ -454,6 +500,7 @@
         createPhraseSession: createPhraseSession,
         addEvidence: addEvidence,
         settlePhrases: settlePhrases,
-        getPhraseTrace: getPhraseTrace
+        getPhraseTrace: getPhraseTrace,
+        getLiveScore: getLiveScore
     };
 });
