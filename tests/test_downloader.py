@@ -132,3 +132,21 @@ def test_extract_metadata_enables_node_js_runtime():
         extract_metadata("https://youtube.com/watch?v=fake")
     opts = MockYDL.call_args[0][0]
     assert opts.get("js_runtimes") == {"node": {}}
+
+
+def test_download_audio_uses_cookies_when_env_set(monkeypatch):
+    """Setting YTDLP_COOKIES_BROWSER opts into authenticated downloads (anti-SABR)."""
+    monkeypatch.setenv("YTDLP_COOKIES_BROWSER", "chrome")
+    with patch("downloader.yt_dlp.YoutubeDL") as MockYDL:
+        download_audio("https://youtube.com/watch?v=fake")
+    opts = MockYDL.call_args[0][0]
+    assert opts.get("cookiesfrombrowser") == ("chrome",)
+
+
+def test_download_audio_no_cookies_by_default(monkeypatch):
+    """Without the env var, no browser cookies are used (default behavior unchanged)."""
+    monkeypatch.delenv("YTDLP_COOKIES_BROWSER", raising=False)
+    with patch("downloader.yt_dlp.YoutubeDL") as MockYDL:
+        download_audio("https://youtube.com/watch?v=fake")
+    opts = MockYDL.call_args[0][0]
+    assert "cookiesfrombrowser" not in opts

@@ -12,6 +12,17 @@ AUDIO_PATH = os.path.join(TEMP_DIR, "audio.webm")
 JS_RUNTIMES = {"node": {}}
 
 
+def _cookies_opts() -> dict:
+    """Opt-in browser-cookie auth. Set YTDLP_COOKIES_BROWSER=chrome|firefox|edge|...
+
+    Heavily-gated videos get SABR-forced / 403'd for anonymous sessions even with
+    a PO token; an authenticated (logged-in) session is far less likely to be
+    gated. Off by default so the anonymous path is unchanged.
+    """
+    browser = os.environ.get("YTDLP_COOKIES_BROWSER", "").strip().lower()
+    return {"cookiesfrombrowser": (browser,)} if browser else {}
+
+
 def parse_title_artist(title: str, uploader: str) -> tuple[str, str]:
     """Parse artist and title from a YouTube title string.
 
@@ -27,7 +38,7 @@ def parse_title_artist(title: str, uploader: str) -> tuple[str, str]:
 
 def extract_metadata(url: str) -> dict:
     """Extract title and artist from a YouTube URL without downloading."""
-    ydl_opts = {"quiet": True, "skip_download": True, "js_runtimes": JS_RUNTIMES}
+    ydl_opts = {"quiet": True, "skip_download": True, "js_runtimes": JS_RUNTIMES, **_cookies_opts()}
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
@@ -53,6 +64,7 @@ def download_audio(url: str) -> str:
         "quiet": True,
         "overwrites": True,
         "js_runtimes": JS_RUNTIMES,
+        **_cookies_opts(),
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
