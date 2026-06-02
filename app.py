@@ -1,13 +1,18 @@
 import io
 import os
+import glob
+import mimetypes
 import threading
 import requests
 from flask import Flask, request, jsonify, send_file, send_from_directory
-from downloader import extract_metadata, download_audio, AUDIO_PATH, search_youtube
+from downloader import extract_metadata, download_audio, AUDIO_PATH, TEMP_DIR, search_youtube
 from lyrics import fetch_lyrics
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(_HERE, "static"), static_url_path="/static")
+
+# Audio file extensions accepted by the local-file upload path (/load-local).
+ALLOWED_AUDIO_EXT = {".mp3", ".m4a", ".webm", ".ogg", ".opus", ".wav", ".flac", ".aac"}
 
 WHISPER_MODEL   = os.environ.get('WHISPER_MODEL',   'large-v3-turbo')
 WHISPER_DEVICE  = os.environ.get('WHISPER_DEVICE',  'cuda')
@@ -304,11 +309,44 @@ def load():
     return jsonify(response)
 
 
+@app.route("/load-local", methods=["POST"])
+def load_local():
+    """Load a user-provided local audio file (multipart upload) and fetch synced
+    lyrics by title/artist. Lets the app be used (and the scoring tested) without
+    YouTube. Saves to temp/audio.<ext>; /audio serves the most recent one."""
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        return jsonify(error="No audio file provided"), 400
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_AUDIO_EXT:
+        return jsonify(error=f"Unsupported audio type: {ext or 'unknown'}"), 400
+
+    title = (request.form.get("title") or "").strip()
+    artist = (request.form.get("artist") or "").strip()
+    if not title:
+        title = os.path.splitext(os.path.basename(file.filename))[0].strip()
+
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    file.save(os.path.join(TEMP_DIR, "audio" + ext))
+
+    lyrics = fetch_lyrics(title, artist) if (title and artist) else []
+    response = {"title": title, "artist": artist, "audioUrl": "/audio", "lyrics": lyrics}
+    if not lyrics:
+        response["lyricsError"] = "No lyrics found. Edit artist/title and retry."
+    return jsonify(response)
+
+
 @app.route("/audio")
 def audio():
-    if not os.path.exists(AUDIO_PATH):
+    # Serve the most recently loaded temp/audio.* file (a YouTube .webm download
+    # or an uploaded local file of any supported type), with a guessed mimetype.
+    matches = glob.glob(os.path.join(TEMP_DIR, "audio.*"))
+    if not matches:
         return jsonify({"error": "No audio loaded"}), 404
-    return send_file(AUDIO_PATH, mimetype="audio/webm")
+    path = max(matches, key=os.path.getmtime)
+    mime = mimetypes.guess_type(path)[0] or "audio/webm"
+    return send_file(path, mimetype=mime)
 
 
 

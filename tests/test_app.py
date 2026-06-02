@@ -87,6 +87,44 @@ def test_search_missing_query(client):
     assert resp.status_code == 400
 
 
+def test_load_local_saves_file_and_returns_lyrics(client):
+    import os
+    import app as _am
+    with patch("app.fetch_lyrics") as mock_lyrics:
+        mock_lyrics.return_value = [{"time": 0.5, "text": "yo"}]
+        resp = client.post(
+            "/load-local",
+            data={"title": "Local Song", "artist": "Me",
+                  "file": (io.BytesIO(b"ID3 fake audio bytes"), "mysong.mp3")},
+            content_type="multipart/form-data",
+        )
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["title"] == "Local Song"
+    assert data["artist"] == "Me"
+    assert data["lyrics"] == [{"time": 0.5, "text": "yo"}]
+    assert data["audioUrl"] == "/audio"
+    saved = os.path.join(_am.TEMP_DIR, "audio.mp3")
+    assert os.path.exists(saved)
+    os.remove(saved)
+
+
+def test_load_local_missing_file_returns_400(client):
+    resp = client.post("/load-local", data={"title": "X", "artist": "Y"},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 400
+
+
+def test_load_local_rejects_unsupported_extension(client):
+    resp = client.post(
+        "/load-local",
+        data={"title": "X", "artist": "Y",
+              "file": (io.BytesIO(b"data"), "notes.txt")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+
+
 import struct
 import wave
 import io

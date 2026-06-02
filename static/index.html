@@ -32,6 +32,11 @@
         <button id="retryBtn" onclick="retryLyrics()" style="display:none;margin-top:10px;background:#334;">
             Retry with edited title/artist
         </button>
+
+        <div class="search-divider">or load a local audio file</div>
+        <p style="font-size:0.78rem;color:#666;margin:-8px 0 10px">Fill in Artist + Title above for synced lyrics, then choose a file you already own.</p>
+        <input type="file" id="localFile" accept="audio/*" style="margin-bottom:10px" />
+        <button id="loadLocalBtn" onclick="loadLocal()">🎵 Load Local File</button>
     </div>
 
     <script>
@@ -164,6 +169,44 @@
             existing.artist = artist;
             sessionStorage.setItem('songData', JSON.stringify(existing));
             setStatus('Lyrics found! Loading player...', 'success');
+            window.location.href = '/player';
+        }
+
+        // --- Load a local audio file (bypasses YouTube entirely) ---
+        async function loadLocal() {
+            const file = document.getElementById('localFile').files[0];
+            if (!file) { setStatus('Please choose an audio file.', 'error'); return; }
+
+            const localBtn = document.getElementById('loadLocalBtn');
+            localBtn.disabled = true;
+            setStatus('Uploading file...', '');
+
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('title', document.getElementById('title').value.trim());
+            fd.append('artist', document.getElementById('artist').value.trim());
+
+            const resp = await fetch('/load-local', { method: 'POST', body: fd });
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({}));
+                setStatus(err.error || 'Failed to load file.', 'error');
+                localBtn.disabled = false;
+                return;
+            }
+
+            const data = await resp.json();
+            if (!document.getElementById('artist').value) document.getElementById('artist').value = data.artist;
+            if (!document.getElementById('title').value) document.getElementById('title').value = data.title;
+
+            if (data.lyricsError) {
+                setStatus(data.lyricsError, 'error');
+                document.getElementById('retryBtn').style.display = 'block';
+                localBtn.disabled = false;
+                return;
+            }
+
+            setStatus('Ready! Loading player...', 'success');
+            sessionStorage.setItem('songData', JSON.stringify(data));
             window.location.href = '/player';
         }
 
