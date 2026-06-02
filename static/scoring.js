@@ -455,9 +455,12 @@
     }
 
     function effectiveMatchScore(rawScore, idx, vadMatchedSet, asrConfirmedSet) {
+        // VAD energy proves sound was made, not that the right word was sung.
+        // A word matched only by VAD (not yet ASR-confirmed) earns NO lyric credit;
+        // its "engagement" value is accounted separately by the phrase-engine flow score.
         if (rawScore > 0 && vadMatchedSet && vadMatchedSet.has && vadMatchedSet.has(idx) &&
             !(asrConfirmedSet && asrConfirmedSet.has && asrConfirmedSet.has(idx))) {
-            return Math.min(rawScore, 0.25);
+            return 0;
         }
         return rawScore;
     }
@@ -474,11 +477,11 @@
             weightedTotal += weight;
 
             var rawScore = rawMatchScore(matchedSet, i);
-            if (rawScore > 0) matchedWords++;
-
             var effectiveScore = effectiveMatchScore(rawScore, i, vadMatchedSet, asrConfirmedSet);
-            if (effectiveScore > 0) weightedMatched += weight * effectiveScore;
-            else {
+            if (effectiveScore > 0) {
+                matchedWords++;
+                weightedMatched += weight * effectiveScore;
+            } else {
                 missedWordIndices.push(i);
                 missedWords.push(lineWords[i]);
             }

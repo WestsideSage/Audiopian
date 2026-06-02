@@ -78,6 +78,11 @@ matchCases.forEach(function(testCase) {
     assert.strictEqual(result.score, testCase.score, testCase.spoken + ' -> ' + testCase.target + ' score');
 });
 
+// effectiveMatchScore: VAD-only words earn no lyric credit; ASR-confirmed earns full
+assert.strictEqual(scoring.effectiveMatchScore(1.0, 0, new Map([[0, 1.0]]), new Set()), 0, 'vad-only word scores 0');
+assert.strictEqual(scoring.effectiveMatchScore(1.0, 0, new Map([[0, 1.0]]), new Set([0])), 1.0, 'asr-confirmed vad word scores full');
+assert.strictEqual(scoring.effectiveMatchScore(0.8, 0, new Map(), new Set()), 0.8, 'non-vad word scores its raw value');
+
 var lyrics = [
     { time: 0, text: 'My boy' },
     { time: 2, text: 'let it fly' }
@@ -114,9 +119,9 @@ var lineCases = [
         expected: { totalWords: 2, matchedWords: 2, weightedTotal: 2.0, weightedMatched: 1.79, missedWordIndices: [], missedWords: [], perfect: false }
     },
     {
-        label: 'vad only keeps partial flow credit',
+        label: 'vad only earns no lyric credit',
         args: [['hey'], [{ weight: 1.0 }], new Map([[0, 1.0]]), new Map([[0, 1.0]]), new Set()],
-        expected: { totalWords: 1, matchedWords: 1, weightedTotal: 1.0, weightedMatched: 0.25, missedWordIndices: [], missedWords: [], perfect: false }
+        expected: { totalWords: 1, matchedWords: 0, weightedTotal: 1.0, weightedMatched: 0.0, missedWordIndices: [0], missedWords: ['hey'], perfect: false }
     },
     {
         label: 'vad confirmed by asr keeps full credit',
@@ -124,9 +129,9 @@ var lineCases = [
         expected: { totalWords: 1, matchedWords: 1, weightedTotal: 1.0, weightedMatched: 1.0, missedWordIndices: [], missedWords: [], perfect: true }
     },
     {
-        label: 'mixed weights with adlib',
+        label: 'mixed weights with unconfirmed vad adlib',
         args: [['my', 'boy', 'yeah'], [{ weight: 1.0 }, { weight: 1.0 }, { weight: 0.25 }], new Map([[0, 1.0], [1, 0.8], [2, 1.0]]), new Map([[2, 1.0]]), new Set([0, 1])],
-        expected: { totalWords: 3, matchedWords: 3, weightedTotal: 2.25, weightedMatched: 1.8625, missedWordIndices: [], missedWords: [], perfect: false }
+        expected: { totalWords: 3, matchedWords: 2, weightedTotal: 2.25, weightedMatched: 1.8, missedWordIndices: [2], missedWords: ['yeah'], perfect: false }
     },
     {
         label: 'missed words tracked',
@@ -151,7 +156,7 @@ var lineCases = [
     {
         label: 'confirmed and unconfirmed vad mix',
         args: [['one', 'two'], [{ weight: 1.0 }, { weight: 1.0 }], new Map([[0, 1.0], [1, 1.0]]), new Map([[0, 1.0], [1, 1.0]]), new Set([1])],
-        expected: { totalWords: 2, matchedWords: 2, weightedTotal: 2.0, weightedMatched: 1.25, missedWordIndices: [], missedWords: [], perfect: false }
+        expected: { totalWords: 2, matchedWords: 1, weightedTotal: 2.0, weightedMatched: 1.0, missedWordIndices: [0], missedWords: ['one'], perfect: false }
     },
     {
         label: 'low weight miss still fails threshold',
