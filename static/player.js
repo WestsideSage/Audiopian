@@ -400,6 +400,7 @@ estimateSyllables = scoringHelpers.estimateSyllables;
 interpolateWordTimings = scoringHelpers.interpolateWordTimings;
 var computeLineScore = scoringHelpers.computeLineScore;
 var mergeConfirmedMatches = scoringHelpers.mergeConfirmedMatches;
+var findMatchInWindow = scoringHelpers.findMatchInWindow;
 
 class GameMode {
     constructor() {
@@ -1328,23 +1329,21 @@ class GameMode {
             if (prev.matchedSet.has(li)) { cursor++; continue; }
             var target = prev.lineWords[li];
             var targetPhonetic = prev.wordTimings && prev.wordTimings[li] ? prev.wordTimings[li].phonetic : undefined;
-            for (var si = cursor; si < Math.min(cursor + driftWindow, spoken.length); si++) {
-                if (wordsMatch(spoken[si], target, targetPhonetic)) {
-                    prev.matchedSet.set(li, 1.0);
-                    if (prev.wordSourceMap) prev.wordSourceMap.set(li, track === 'track2' ? 'whisper' : 'browser_sr');
-                    if (prev.vadMatchedSet && prev.vadMatchedSet.has(li) && prev.asrConfirmedSet && !prev.asrConfirmedSet.has(li)) {
-                        prev.asrConfirmedSet.add(li);
-                    }
-                    cursor = si + 1;
-                    anyMatched = true;
-                    // Light the span green on the previous line
-                    var allLines = lyricsScroll.querySelectorAll('.lyric-line');
-                    var lineEl = allLines[prev.lineIdx];
-                    if (lineEl) {
-                        var span = lineEl.querySelectorAll('.word-span')[li];
-                        if (span) { span.classList.remove('missed'); span.classList.add('matched'); }
-                    }
-                    break;
+            var m = findMatchInWindow(spoken, cursor, driftWindow, target, targetPhonetic);
+            if (m) {
+                prev.matchedSet.set(li, m.score);
+                if (prev.wordSourceMap) prev.wordSourceMap.set(li, track === 'track2' ? 'whisper' : 'browser_sr');
+                if (prev.vadMatchedSet && prev.vadMatchedSet.has(li) && prev.asrConfirmedSet && !prev.asrConfirmedSet.has(li)) {
+                    prev.asrConfirmedSet.add(li);
+                }
+                cursor = m.spokenIdx + 1;
+                anyMatched = true;
+                // Light the span on the previous line — green for strong, amber for weak
+                var allLines = lyricsScroll.querySelectorAll('.lyric-line');
+                var lineEl = allLines[prev.lineIdx];
+                if (lineEl) {
+                    var span = lineEl.querySelectorAll('.word-span')[li];
+                    if (span) { span.classList.remove('missed'); span.classList.add(m.score >= 0.75 ? 'matched' : 'matched-partial'); }
                 }
             }
         }

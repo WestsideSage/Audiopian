@@ -200,4 +200,14 @@ scoring.mergeConfirmedMatches(mergedMatches, vadOnly, confirmed, new Map([[1, 1.
 assert.strictEqual(mergedMatches.get(1), 1.0, 'mergeConfirmedMatches upgrades matched score');
 assert.ok(confirmed.has(1), 'mergeConfirmedMatches promotes VAD word when ASR later matches it');
 
+// findMatchInWindow: returns the first graded match within a bounded window, else null
+var fm1 = scoring.findMatchInWindow(['the', 'sky', 'is', 'blue'], 0, 4, 'sky', scoring.doubleMetaphone('sky'));
+assert.deepStrictEqual([fm1.spokenIdx, fm1.score], [1, 1.0], 'findMatchInWindow exact match');
+var fm2 = scoring.findMatchInWindow(['knight'], 0, 4, 'night', scoring.doubleMetaphone('night'));
+assert.strictEqual(fm2.score, 0.8, 'findMatchInWindow phonetic scores 0.8, not flat 1.0');
+assert.strictEqual(scoring.findMatchInWindow(['cat', 'dog'], 0, 2, 'sky', scoring.doubleMetaphone('sky')), null, 'findMatchInWindow no match returns null');
+assert.strictEqual(scoring.findMatchInWindow(['a', 'b', 'sky'], 0, 2, 'sky', scoring.doubleMetaphone('sky')), null, 'findMatchInWindow respects window bound');
+var fm3 = scoring.findMatchInWindow(['sky', 'sky'], 0, 2, 'sky', scoring.doubleMetaphone('sky'));
+assert.strictEqual(fm3.spokenIdx, 0, 'findMatchInWindow returns the first match');
+
 console.log('All scoring tests passed.');

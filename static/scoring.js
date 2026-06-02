@@ -519,6 +519,15 @@
         return matches;
     }
 
+    function findMatchInWindow(spokenWords, startIdx, windowSize, target, targetPhonetic) {
+        var end = Math.min(startIdx + windowSize, spokenWords.length);
+        for (var si = startIdx; si < end; si++) {
+            var r = wordsMatchScore(spokenWords[si], target, targetPhonetic);
+            if (r.score > 0) return { spokenIdx: si, score: r.score, method: r.method };
+        }
+        return null;
+    }
+
     function mergeConfirmedMatches(matchedSet, vadMatchedSet, asrConfirmedSet, scoreMap) {
         scoreMap.forEach(function(score, idx) {
             var existing = matchedSet.get(idx);
@@ -547,6 +556,7 @@
         effectiveMatchScore: effectiveMatchScore,
         computeLineScore: computeLineScore,
         collectSequentialWordMatches: collectSequentialWordMatches,
+        findMatchInWindow: findMatchInWindow,
         mergeConfirmedMatches: mergeConfirmedMatches,
         resetSpokenMatchCache: resetSpokenMatchCache
     };
