@@ -20,6 +20,11 @@ WHISPER_COMPUTE = os.environ.get('WHISPER_COMPUTE', 'float16')
 WHISPER_CPU_COMPUTE = os.environ.get('WHISPER_CPU_COMPUTE', 'int8')
 WHISPER_PROVIDER = os.environ.get('WHISPER_PROVIDER', 'auto').lower()
 OPENAI_TRANSCRIBE_MODEL = os.environ.get('OPENAI_TRANSCRIBE_MODEL', 'gpt-realtime-whisper')
+# gpt-realtime-whisper latency/accuracy tradeoff: minimal|low|medium|high|xhigh.
+# Lower = earlier partial text (less lag); higher = more audio context (better word
+# error rate). Opt-in — when empty, OpenAI's default applies. A/B lever for the
+# fast-rap lag-vs-coverage tradeoff.
+OPENAI_TRANSCRIBE_DELAY = os.environ.get('OPENAI_TRANSCRIBE_DELAY', '').strip()
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 OPENAI_TRANSCRIBE_URL = os.environ.get(
     'OPENAI_TRANSCRIBE_URL',
@@ -147,6 +152,8 @@ def _create_openai_realtime_transcription_session(prompt=None):
     }
     if prompt and OPENAI_TRANSCRIBE_MODEL != 'gpt-realtime-whisper':
         transcription['prompt'] = prompt
+    if OPENAI_TRANSCRIBE_DELAY and OPENAI_TRANSCRIBE_MODEL == 'gpt-realtime-whisper':
+        transcription['delay'] = OPENAI_TRANSCRIBE_DELAY
 
     audio_input = {
         'format': {

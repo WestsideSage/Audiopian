@@ -505,6 +505,36 @@ def test_create_openai_realtime_transcription_session_uses_client_secret_schema(
     assert captured['json']['expires_after']['seconds'] == 600
 
 
+def test_realtime_transcription_session_sets_delay_when_configured(monkeypatch):
+    """OPENAI_TRANSCRIBE_DELAY (minimal|low|medium|high|xhigh) tunes gpt-realtime-whisper's
+    latency/accuracy tradeoff. Opt-in: omitted from the request unless configured."""
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {'value': 'ek', 'session': {'type': 'transcription'}}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured['json'] = json
+        return FakeResponse()
+
+    monkeypatch.setattr(_app_module, 'OPENAI_API_KEY', 'sk-test')
+    monkeypatch.setattr(_app_module.requests, 'post', fake_post)
+
+    # default (unset) -> field omitted; OpenAI's default delay applies
+    monkeypatch.setattr(_app_module, 'OPENAI_TRANSCRIBE_DELAY', '')
+    _app_module._create_openai_realtime_transcription_session()
+    assert 'delay' not in captured['json']['session']['audio']['input']['transcription']
+
+    # configured -> passed through
+    monkeypatch.setattr(_app_module, 'OPENAI_TRANSCRIBE_DELAY', 'low')
+    _app_module._create_openai_realtime_transcription_session()
+    assert captured['json']['session']['audio']['input']['transcription']['delay'] == 'low'
+
+
 def test_transcribe_returns_409_for_realtime_provider(client):
     original_provider = _app_module._whisper_active_provider
     original_state = _app_module._whisper_state
