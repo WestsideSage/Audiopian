@@ -1865,8 +1865,49 @@ class GameMode {
         this._updateRunningScore();
     }
 
+    /**
+     * "So-far" honest lyric-coverage %: of the anchors required by phrases that
+     * have already passed their end (status !== 'open'), what fraction did we hit?
+     * Converges to KaraokeePhraseEngine.getLiveScore().lyrics at song end, but reads
+     * as a real running accuracy mid-song instead of crawling up from 0 against the
+     * whole-song denominator. Returns null until the first phrase has occurred.
+     */
+    _liveHonestPct() {
+        if (!this._phraseSession || !this._phraseSession.states) return null;
+        var sumHit = 0, sumReq = 0;
+        var states = this._phraseSession.states;
+        for (var id in states) {
+            var st = states[id];
+            if (!st || st.status === 'open') continue;
+            var req = (st.phrase && st.phrase.anchorsRequired) || 0;
+            if (req <= 0) continue;
+            var hit = Object.keys(st.anchorHits).length;
+            if (hit > req) hit = req;
+            sumHit += hit; sumReq += req;
+        }
+        if (sumReq === 0) return null;
+        return Math.round((sumHit / sumReq) * 100);
+    }
+
+    /**
+     * Driven from the 100ms updateLyrics loop so phrases settle even in silence.
+     * When karaokee_v2 is on, owns the #score-pct headline (honest %); when off,
+     * _updateRunningScore keeps the legacy V1 % for A/B.
+     */
+    _tickArcade() {
+        if (!this.active || !this._phraseSession || !window.KaraokeePhraseEngine) return;
+        var now = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
+        try { KaraokeePhraseEngine.settlePhrases(this._phraseSession, now); } catch (e) {}
+        if (window.KARAOKEE_V2) {
+            var pct = this._liveHonestPct();
+            var el = document.getElementById('score-pct');
+            if (el && pct != null) el.textContent = pct + '%';
+        }
+    }
+
     _updateRunningScore() {
         this._renderV2Panel();
+        if (window.KARAOKEE_V2) return;          // honest % headline owned by _tickArcade()
         if (this.weightedTotal === 0) return;
         const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
         document.getElementById('score-pct').textContent = pct + '%';
@@ -2448,7 +2489,7 @@ function updateLyrics() {
     }
 
     // Update hot word tracking every poll even if line hasn't changed
-    if (gameMode.active) gameMode.updateHotWord();
+    if (gameMode.active) { gameMode.updateHotWord(); gameMode._tickArcade(); }
 
     if (idx === currentLineIndex) return;
     currentLineIndex = idx;
