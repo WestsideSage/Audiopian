@@ -19,3 +19,5 @@ output_telemetry/
 *.swp
 *.swo
 node_modules/
+.superpowers/
+.serena/

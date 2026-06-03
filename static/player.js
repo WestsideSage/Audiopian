@@ -518,6 +518,7 @@ class GameMode {
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
         this._initTelemetry();   // always init so download button works whenever D is pressed
+        this._phraseDifficulty = localStorage.getItem('arcadeDifficulty') || 'medium';
         if (window.KaraokeePhraseEngine) {
             this._phrasePlan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
                 difficulty: this._phraseDifficulty,
@@ -529,6 +530,14 @@ class GameMode {
                 this._telemetry.phraseEngine.plan = this._phrasePlan;
             }
         }
+        var _dsLock = document.getElementById('diffSelect');
+        if (_dsLock) {
+            _dsLock.classList.add('locked');
+            var _dsBtns = _dsLock.querySelectorAll('button');
+            for (var _i = 0; _i < _dsBtns.length; _i++) _dsBtns[_i].setAttribute('aria-disabled', 'true');
+        }
+        var _dpShow = document.getElementById('diff-pill');
+        if (_dpShow) { _dpShow.textContent = (this._phraseDifficulty || 'medium').toUpperCase(); _dpShow.style.display = 'inline-block'; }
         for (var li = 0; li < this.allWordTimings.length; li++) {
             var lt = this.allWordTimings[li];
             var relClass = classifyLineTempoRelative(lt.wps || 0, this.songTempoProfile);
@@ -587,6 +596,13 @@ class GameMode {
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
         var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
+        var _dsUnlock = document.getElementById('diffSelect');
+        if (_dsUnlock) {
+            _dsUnlock.classList.remove('locked');
+            var _ubtns = _dsUnlock.querySelectorAll('button');
+            for (var _u = 0; _u < _ubtns.length; _u++) _ubtns[_u].removeAttribute('aria-disabled');
+        }
+        var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
     }
 
     /**
@@ -1849,8 +1865,49 @@ class GameMode {
         this._updateRunningScore();
     }
 
+    /**
+     * "So-far" honest lyric-coverage %: of the anchors required by phrases that
+     * have already passed their end (status !== 'open'), what fraction did we hit?
+     * Converges to KaraokeePhraseEngine.getLiveScore().lyrics at song end, but reads
+     * as a real running accuracy mid-song instead of crawling up from 0 against the
+     * whole-song denominator. Returns null until the first phrase has occurred.
+     */
+    _liveHonestPct() {
+        if (!this._phraseSession || !this._phraseSession.states) return null;
+        var sumHit = 0, sumReq = 0;
+        var states = this._phraseSession.states;
+        for (var id in states) {
+            var st = states[id];
+            if (!st || st.status === 'open') continue;
+            var req = (st.phrase && st.phrase.anchorsRequired) || 0;
+            if (req <= 0) continue;
+            var hit = Object.keys(st.anchorHits).length;
+            if (hit > req) hit = req;
+            sumHit += hit; sumReq += req;
+        }
+        if (sumReq === 0) return null;
+        return Math.round((sumHit / sumReq) * 100);
+    }
+
+    /**
+     * Driven from the 100ms updateLyrics loop so phrases settle even in silence.
+     * When karaokee_v2 is on, owns the #score-pct headline (honest %); when off,
+     * _updateRunningScore keeps the legacy V1 % for A/B.
+     */
+    _tickArcade() {
+        if (!this.active || !this._phraseSession || !window.KaraokeePhraseEngine) return;
+        var now = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
+        try { KaraokeePhraseEngine.settlePhrases(this._phraseSession, now); } catch (e) {}
+        if (window.KARAOKEE_V2) {
+            var pct = this._liveHonestPct();
+            var el = document.getElementById('score-pct');
+            if (el && pct != null) el.textContent = pct + '%';
+        }
+    }
+
     _updateRunningScore() {
         this._renderV2Panel();
+        if (window.KARAOKEE_V2) return;          // honest % headline owned by _tickArcade()
         if (this.weightedTotal === 0) return;
         const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
         document.getElementById('score-pct').textContent = pct + '%';
@@ -2432,7 +2489,7 @@ function updateLyrics() {
     }
 
     // Update hot word tracking every poll even if line hasn't changed
-    if (gameMode.active) gameMode.updateHotWord();
+    if (gameMode.active) { gameMode.updateHotWord(); gameMode._tickArcade(); }
 
     if (idx === currentLineIndex) return;
     currentLineIndex = idx;
@@ -2543,6 +2600,32 @@ document.addEventListener('keydown', (e) => {
         console.log('[SCORING V2]', window.KARAOKEE_V2 ? 'ON — adaptive VAD + phrase-engine panel' : 'OFF');
     }
 });
+
+// Difficulty selector — persists to localStorage, locks while a run is active.
+(function initDifficultySelect() {
+    var sel = document.getElementById('diffSelect');
+    if (!sel) return;
+    function paint(d) {
+        var btns = sel.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+            var on = btns[i].getAttribute('data-diff') === d;
+            btns[i].classList.toggle('active', on);
+            btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        var pill = document.getElementById('diff-pill');
+        if (pill) pill.textContent = (d || 'medium').toUpperCase();
+    }
+    paint(localStorage.getItem('arcadeDifficulty') || 'medium');
+    sel.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('button[data-diff]') : null;
+        if (!btn) return;
+        if (gameMode && gameMode.active) return;      // locked mid-run
+        var d = btn.getAttribute('data-diff');
+        localStorage.setItem('arcadeDifficulty', d);
+        if (gameMode) gameMode._phraseDifficulty = d;
+        paint(d);
+    });
+})();
 
 // Format seconds as m:ss
 function fmt(s) {
