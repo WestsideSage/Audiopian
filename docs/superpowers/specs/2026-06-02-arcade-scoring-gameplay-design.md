@@ -3,7 +3,7 @@
 **Date:** 2026-06-02
 **Author:** Westside Sage (+ Claude)
 **Builds on:** [`2026-06-02-scoring-v2-design.md`](2026-06-02-scoring-v2-design.md) (the phrase engine this promotes)
-**Status:** Approved (design). One coherent system, staged for implementation. Implementation plan to follow.
+**Status:** Approved (design); Phase 1 merged. 2026-06-03 addendum (§14): difficulty-gate flow + Stages 2–3 built behind the `karaokee_v2` flag (flag-flip to default-on still gated on the human validation sing-test).
 
 ---
 
@@ -34,7 +34,7 @@ Scoring V2 (the phrase engine, `static/phrase-engine.js`) is built and runs live
 | HUD layout | **Floating cluster** over full-width lyrics (top-right): points · multiplier+ramp · 🔥streak; % + difficulty pill in a thin header |
 | Hot-streak visual | **Bold** — active lyric line burns in a fire gradient, corner ember glow, "ON FIRE" tag; lyrics stay readable |
 | End screen | **Grade hero** — big S/A/B/C/D letter grade, points, accuracy, max multiplier, longest streak, perfects; **NEW BEST** ribbon |
-| Difficulty selection | **On the player, pre-song** (segmented control by the Game button); locks at song start; remembered in `localStorage` (default `medium`) |
+| Difficulty selection | **Difficulty gate on song load** (overlay cards + "Just listen" escape) — see §14; persisted in `localStorage` (default `medium`); the gate is the single run entry point |
 
 ---
 
@@ -102,7 +102,7 @@ award  = round(base × (perfect ? 1 + PERFECT_BONUS : 1) × currentMultiplier)
 - **On Fire — bold (B):** at max multiplier, the active lyric line renders in a fire gradient, a soft ember glow enters from the corner, and an "ON FIRE" tag appears on the cluster. Reverts on streak reset.
 - **End screen — grade hero (A):** replaces the current modal. Big letter grade, points total, then accuracy / max combo / longest streak / perfects; **NEW BEST** ribbon when the run beats the stored high score. Keeps the existing benchmark-feedback `<select>`s (telemetry).
 - **High scores:** persisted in `localStorage`, keyed by **song + difficulty** (`hiscore_<songKey>_<difficulty>`). This is what makes a run worth replaying.
-- **Difficulty selector:** a segmented `easy/medium/hard/expert` control on the player (near the Game button), pre-song, persisted (default `medium`), feeding `buildPhrasePlan` and `createArcadeState`. Locked once a run starts.
+- **Difficulty gate (revised — see §14):** a load-time overlay with `easy/medium/hard/expert` cards + a "Just listen" escape hatch, persisted (default `medium`), feeding `buildPhrasePlan` and `createArcadeState`. Replaces the bottom-bar segmented selector; re-shown on Play Again and when starting a run from passive mode.
 
 ---
 
@@ -167,6 +167,20 @@ Each stage: all `.cjs` + `pytest` suites green, `node --check` clean on edited J
 ## 12. Open Items
 
 - **Perfect-phrase threshold** — resolve *before Stage 2* by measuring all / required+1 / ≥80%-of-anchors fire rates on honest runs in `tests/fixtures/telemetry-replay/`. Pick the definition the recognizer reliably delivers on good singing.
+
+## 14. Addendum (2026-06-03): Difficulty-gate flow + Stage 2/3 build behind the flag
+
+Playtest feedback drove two changes to the §6 UI and §8 staging, approved 2026-06-03.
+
+**Difficulty-gate flow (replaces the bottom-bar segmented selector).** The Phase 1 segmented control conflated "press 🎮 Game" with "start the run," so difficulty locked the instant a run began — the player could never change it ("stuck on Medium / greyed out"). Replace it with a **difficulty gate** built into the existing prep overlay:
+- Song loads → overlay shows **Easy / Medium / Hard / Expert** cards + a **"Just listen — no scoring"** escape hatch.
+- Pick a difficulty → overlay dismisses, audio plays, the scored run starts from the top on that difficulty.
+- The header **difficulty pill** remains the in-run status indicator; the bottom-bar segmented selector is **retired**.
+- **Single entry point:** the gate is the only way to start a run — shown on load, re-shown on **Play Again** (defaulted to last difficulty), and re-opened when 🎮 Game is pressed from "Just listen" passive mode.
+
+**Stages 2 + 3 built now, behind the flag (gate relocated, not waived).** The owner lifted the validation gate for *building* Stages 2–3 (combo HUD + grade/high-score end screen) — **not** for the flag-flip. Per §4.3/§8, Stages 2–3 ship **behind `karaokee_v2`** (press `V`, persisted): the new flow + arcade layer are the V2 experience; legacy V1 remains the default for A/B. **The flip to `karaokee_v2` default-on still requires the human validation sing-test (§8 step 2)** — unchanged. A live HUD aids that validation (cheese visibly fails to build the multiplier).
+
+**§12 perfect-phrase threshold.** `tests/fixtures/telemetry-replay/` currently holds only `minimal-session.json` (a smoke fixture), so the empirical fire-rate calibration isn't yet possible. Ship `isPerfect` as a tunable constant with a conservative, honest-friendly default ("all anchors," the candidate most resistant to recognizer-completeness inflation); calibrate against real honest-run telemetry once recorded. Remains an explicit open item.
 
 ## 13. References
 
