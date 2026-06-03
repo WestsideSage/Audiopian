@@ -124,11 +124,19 @@
         return p;
     }
 
-    function gradeFor(pct) {
-        if (pct >= 95) return 'S';
-        if (pct >= 85) return 'A';
-        if (pct >= 72) return 'B';
-        if (pct >= 58) return 'C';
+    var GRADE_CUTOFFS = {
+        easy:   { S: 80, A: 64, B: 48, C: 32 },
+        medium: { S: 87, A: 73, B: 59, C: 45 },
+        hard:   { S: 92, A: 81, B: 69, C: 56 },
+        expert: { S: 96, A: 88, B: 77, C: 64 }
+    };
+
+    function gradeFor(pct, difficulty) {
+        var c = GRADE_CUTOFFS[difficulty] || GRADE_CUTOFFS.medium;
+        if (pct >= c.S) return 'S';
+        if (pct >= c.A) return 'A';
+        if (pct >= c.B) return 'B';
+        if (pct >= c.C) return 'C';
         return 'D';
     }
 
