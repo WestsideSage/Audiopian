@@ -87,6 +87,44 @@ def test_search_missing_query(client):
     assert resp.status_code == 400
 
 
+def test_load_local_saves_file_and_returns_lyrics(client):
+    import os
+    import app as _am
+    with patch("app.fetch_lyrics") as mock_lyrics:
+        mock_lyrics.return_value = [{"time": 0.5, "text": "yo"}]
+        resp = client.post(
+            "/load-local",
+            data={"title": "Local Song", "artist": "Me",
+                  "file": (io.BytesIO(b"ID3 fake audio bytes"), "mysong.mp3")},
+            content_type="multipart/form-data",
+        )
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["title"] == "Local Song"
+    assert data["artist"] == "Me"
+    assert data["lyrics"] == [{"time": 0.5, "text": "yo"}]
+    assert data["audioUrl"] == "/audio"
+    saved = os.path.join(_am.TEMP_DIR, "audio.mp3")
+    assert os.path.exists(saved)
+    os.remove(saved)
+
+
+def test_load_local_missing_file_returns_400(client):
+    resp = client.post("/load-local", data={"title": "X", "artist": "Y"},
+                       content_type="multipart/form-data")
+    assert resp.status_code == 400
+
+
+def test_load_local_rejects_unsupported_extension(client):
+    resp = client.post(
+        "/load-local",
+        data={"title": "X", "artist": "Y",
+              "file": (io.BytesIO(b"data"), "notes.txt")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 400
+
+
 import struct
 import wave
 import io
@@ -156,8 +194,8 @@ def test_transcribe_whisper_exception_returns_500(client, monkeypatch):
     assert resp.status_code == 500
 
 
-def test_transcribe_with_hint(client, monkeypatch):
-    """When hint is provided via header, it should be passed as initial_prompt."""
+def test_transcribe_ignores_lyric_hint(client, monkeypatch):
+    """A lyric hint header must NOT be passed to the model (no answer-key prompt)."""
     mock_model = MagicMock()
     mock_segment = MagicMock()
     mock_segment.text = 'gonna be alright'
@@ -174,12 +212,14 @@ def test_transcribe_with_hint(client, monkeypatch):
         _app_module._whisper_state = 'idle'
 
     assert resp.status_code == 200
-    call_kwargs = mock_model.transcribe.call_args
-    assert call_kwargs[1].get('initial_prompt') == 'gonna be alright'
+    call_kwargs = mock_model.transcribe.call_args[1]
+    assert 'initial_prompt' not in call_kwargs
+    assert call_kwargs.get('vad_filter') is True
+    assert call_kwargs.get('condition_on_previous_text') is False
 
 
-def test_transcribe_without_hint(client, monkeypatch):
-    """Without hint header, initial_prompt should not be passed."""
+def test_transcribe_sets_no_speech_guards(client, monkeypatch):
+    """Transcription enables vad_filter / no_speech_threshold and disables cross-chunk conditioning."""
     mock_model = MagicMock()
     mock_segment = MagicMock()
     mock_segment.text = 'going to be all right'
@@ -195,8 +235,11 @@ def test_transcribe_without_hint(client, monkeypatch):
         _app_module._whisper_state = 'idle'
 
     assert resp.status_code == 200
-    call_kwargs = mock_model.transcribe.call_args
-    assert 'initial_prompt' not in call_kwargs[1] or call_kwargs[1]['initial_prompt'] is None
+    call_kwargs = mock_model.transcribe.call_args[1]
+    assert 'initial_prompt' not in call_kwargs
+    assert call_kwargs.get('vad_filter') is True
+    assert call_kwargs.get('no_speech_threshold') == 0.6
+    assert call_kwargs.get('condition_on_previous_text') is False
 
 
 def test_transcribe_returns_word_timestamps(client, monkeypatch):
@@ -460,6 +503,36 @@ def test_create_openai_realtime_transcription_session_uses_client_secret_schema(
     assert 'prompt' not in captured['json']['session']['audio']['input']['transcription']
     assert 'turn_detection' not in captured['json']['session']['audio']['input']
     assert captured['json']['expires_after']['seconds'] == 600
+
+
+def test_realtime_transcription_session_sets_delay_when_configured(monkeypatch):
+    """OPENAI_TRANSCRIBE_DELAY (minimal|low|medium|high|xhigh) tunes gpt-realtime-whisper's
+    latency/accuracy tradeoff. Opt-in: omitted from the request unless configured."""
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {'value': 'ek', 'session': {'type': 'transcription'}}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured['json'] = json
+        return FakeResponse()
+
+    monkeypatch.setattr(_app_module, 'OPENAI_API_KEY', 'sk-test')
+    monkeypatch.setattr(_app_module.requests, 'post', fake_post)
+
+    # default (unset) -> field omitted; OpenAI's default delay applies
+    monkeypatch.setattr(_app_module, 'OPENAI_TRANSCRIBE_DELAY', '')
+    _app_module._create_openai_realtime_transcription_session()
+    assert 'delay' not in captured['json']['session']['audio']['input']['transcription']
+
+    # configured -> passed through
+    monkeypatch.setattr(_app_module, 'OPENAI_TRANSCRIBE_DELAY', 'low')
+    _app_module._create_openai_realtime_transcription_session()
+    assert captured['json']['session']['audio']['input']['transcription']['delay'] == 'low'
 
 
 def test_transcribe_returns_409_for_realtime_provider(client):

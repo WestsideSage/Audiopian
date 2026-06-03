@@ -1,13 +1,18 @@
 import io
 import os
+import glob
+import mimetypes
 import threading
 import requests
 from flask import Flask, request, jsonify, send_file, send_from_directory
-from downloader import extract_metadata, download_audio, AUDIO_PATH, search_youtube
+from downloader import extract_metadata, download_audio, AUDIO_PATH, TEMP_DIR, search_youtube
 from lyrics import fetch_lyrics
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(_HERE, "static"), static_url_path="/static")
+
+# Audio file extensions accepted by the local-file upload path (/load-local).
+ALLOWED_AUDIO_EXT = {".mp3", ".m4a", ".webm", ".ogg", ".opus", ".wav", ".flac", ".aac"}
 
 WHISPER_MODEL   = os.environ.get('WHISPER_MODEL',   'large-v3-turbo')
 WHISPER_DEVICE  = os.environ.get('WHISPER_DEVICE',  'cuda')
@@ -15,6 +20,11 @@ WHISPER_COMPUTE = os.environ.get('WHISPER_COMPUTE', 'float16')
 WHISPER_CPU_COMPUTE = os.environ.get('WHISPER_CPU_COMPUTE', 'int8')
 WHISPER_PROVIDER = os.environ.get('WHISPER_PROVIDER', 'auto').lower()
 OPENAI_TRANSCRIBE_MODEL = os.environ.get('OPENAI_TRANSCRIBE_MODEL', 'gpt-realtime-whisper')
+# gpt-realtime-whisper latency/accuracy tradeoff: minimal|low|medium|high|xhigh.
+# Lower = earlier partial text (less lag); higher = more audio context (better word
+# error rate). Opt-in — when empty, OpenAI's default applies. A/B lever for the
+# fast-rap lag-vs-coverage tradeoff.
+OPENAI_TRANSCRIBE_DELAY = os.environ.get('OPENAI_TRANSCRIBE_DELAY', '').strip()
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
 OPENAI_TRANSCRIBE_URL = os.environ.get(
     'OPENAI_TRANSCRIBE_URL',
@@ -76,11 +86,20 @@ def _is_cuda_runtime_error(exc):
     )
 
 
-def _transcribe_with_model(model, wav_bytes, hint):
+def _transcribe_with_model(model, wav_bytes):
     audio_buf = io.BytesIO(wav_bytes)
-    kwargs = dict(language='en', beam_size=1, word_timestamps=True)
-    if hint:
-        kwargs['initial_prompt'] = hint
+    # No lyric prompt: priming the decoder with the target line makes it emit
+    # that line on hum/music/silence (answer-key injection). vad_filter +
+    # no_speech_threshold reject non-vocal chunks; condition_on_previous_text=False
+    # stops hallucinated text carrying across chunks.
+    kwargs = dict(
+        language='en',
+        beam_size=1,
+        word_timestamps=True,
+        vad_filter=True,
+        no_speech_threshold=0.6,
+        condition_on_previous_text=False,
+    )
 
     segments, _ = model.transcribe(audio_buf, **kwargs)
     segments = list(segments)
@@ -99,7 +118,7 @@ def _transcribe_with_model(model, wav_bytes, hint):
     return text, words
 
 
-def _transcribe_with_openai(wav_bytes, hint):
+def _transcribe_with_openai(wav_bytes):
     if not OPENAI_API_KEY:
         raise RuntimeError('OPENAI_API_KEY is required when WHISPER_PROVIDER=openai')
 
@@ -107,8 +126,6 @@ def _transcribe_with_openai(wav_bytes, hint):
         'model': OPENAI_TRANSCRIBE_MODEL,
         'response_format': 'json',
     }
-    if hint:
-        data['prompt'] = hint
 
     response = requests.post(
         OPENAI_TRANSCRIBE_URL,
@@ -135,6 +152,8 @@ def _create_openai_realtime_transcription_session(prompt=None):
     }
     if prompt and OPENAI_TRANSCRIBE_MODEL != 'gpt-realtime-whisper':
         transcription['prompt'] = prompt
+    if OPENAI_TRANSCRIBE_DELAY and OPENAI_TRANSCRIBE_MODEL == 'gpt-realtime-whisper':
+        transcription['delay'] = OPENAI_TRANSCRIBE_DELAY
 
     audio_input = {
         'format': {
@@ -297,11 +316,44 @@ def load():
     return jsonify(response)
 
 
+@app.route("/load-local", methods=["POST"])
+def load_local():
+    """Load a user-provided local audio file (multipart upload) and fetch synced
+    lyrics by title/artist. Lets the app be used (and the scoring tested) without
+    YouTube. Saves to temp/audio.<ext>; /audio serves the most recent one."""
+    file = request.files.get("file")
+    if file is None or not file.filename:
+        return jsonify(error="No audio file provided"), 400
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_AUDIO_EXT:
+        return jsonify(error=f"Unsupported audio type: {ext or 'unknown'}"), 400
+
+    title = (request.form.get("title") or "").strip()
+    artist = (request.form.get("artist") or "").strip()
+    if not title:
+        title = os.path.splitext(os.path.basename(file.filename))[0].strip()
+
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    file.save(os.path.join(TEMP_DIR, "audio" + ext))
+
+    lyrics = fetch_lyrics(title, artist) if (title and artist) else []
+    response = {"title": title, "artist": artist, "audioUrl": "/audio", "lyrics": lyrics}
+    if not lyrics:
+        response["lyricsError"] = "No lyrics found. Edit artist/title and retry."
+    return jsonify(response)
+
+
 @app.route("/audio")
 def audio():
-    if not os.path.exists(AUDIO_PATH):
+    # Serve the most recently loaded temp/audio.* file (a YouTube .webm download
+    # or an uploaded local file of any supported type), with a guessed mimetype.
+    matches = glob.glob(os.path.join(TEMP_DIR, "audio.*"))
+    if not matches:
         return jsonify({"error": "No audio loaded"}), 404
-    return send_file(AUDIO_PATH, mimetype="audio/webm")
+    path = max(matches, key=os.path.getmtime)
+    mime = mimetypes.guess_type(path)[0] or "audio/webm"
+    return send_file(path, mimetype=mime)
 
 
 
@@ -329,6 +381,9 @@ def whisper_status():
         provider=provider,
         device=_whisper_active_device,
         compute_type=_whisper_active_compute,
+        # Active gpt-realtime-whisper latency setting (or null = OpenAI default), so
+        # an A/B of OPENAI_TRANSCRIBE_DELAY is verifiable at a glance.
+        delay=(OPENAI_TRANSCRIBE_DELAY or None) if provider == 'openai_realtime' else None,
     )
 
 
@@ -372,15 +427,14 @@ def transcribe():
     if len(wav_bytes) < 100:
         return jsonify(transcript='', words=[])
 
-    hint = request.headers.get('X-Lyric-Hint')
     try:
         provider = _whisper_active_provider or _resolve_whisper_provider()
         if provider == 'openai_realtime':
             return jsonify(error='use realtime transcription session', status=_whisper_state), 409
         if provider == 'openai':
-            text, words = _transcribe_with_openai(wav_bytes, hint)
+            text, words = _transcribe_with_openai(wav_bytes)
         else:
-            text, words = _transcribe_with_model(_whisper_model, wav_bytes, hint)
+            text, words = _transcribe_with_model(_whisper_model, wav_bytes)
         return jsonify(transcript=text, words=words)
     except Exception as exc:
         if _whisper_active_device != 'cpu' and _is_cuda_runtime_error(exc):
@@ -388,7 +442,7 @@ def transcribe():
             if model is None:
                 return jsonify(error='model not ready', status=_whisper_state), 503
             try:
-                text, words = _transcribe_with_model(model, wav_bytes, hint)
+                text, words = _transcribe_with_model(model, wav_bytes)
                 return jsonify(transcript=text, words=words)
             except Exception:
                 app.logger.exception('Whisper transcription error after CPU fallback')

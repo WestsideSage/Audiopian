@@ -9,11 +9,11 @@
       "toIdx": 1,
       "fromText": "Free your mind",
       "trigger": "score",
-      "matchedWords": 3,
+      "matchedWords": 2,
       "totalWords": 3,
-      "weightedMatched": 2.125,
+      "weightedMatched": 2.0,
       "weightedTotal": 2.5,
-      "missedWords": []
+      "missedWords": ["your"]
     },
     {
       "fromIdx": 1,
@@ -37,11 +37,11 @@
         "vadMatchedIndices": [1],
         "asrConfirmedIndices": [0, 2],
         "expected": {
-          "matchedWords": 3,
+          "matchedWords": 2,
           "totalWords": 3,
-          "weightedMatched": 2.125,
+          "weightedMatched": 2.0,
           "weightedTotal": 2.5,
-          "missedWords": [],
+          "missedWords": ["your"],
           "perfect": false
         }
       },

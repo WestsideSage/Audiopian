@@ -455,9 +455,12 @@
     }
 
     function effectiveMatchScore(rawScore, idx, vadMatchedSet, asrConfirmedSet) {
+        // VAD energy proves sound was made, not that the right word was sung.
+        // A word matched only by VAD (not yet ASR-confirmed) earns NO lyric credit;
+        // its "engagement" value is accounted separately by the phrase-engine flow score.
         if (rawScore > 0 && vadMatchedSet && vadMatchedSet.has && vadMatchedSet.has(idx) &&
             !(asrConfirmedSet && asrConfirmedSet.has && asrConfirmedSet.has(idx))) {
-            return Math.min(rawScore, 0.25);
+            return 0;
         }
         return rawScore;
     }
@@ -469,23 +472,29 @@
         var missedWords = [];
         var missedWordIndices = [];
 
+        var totalWords = 0;
         for (var i = 0; i < lineWords.length; i++) {
-            var weight = (wordTimings[i] && wordTimings[i].weight) || 1.0;
+            var wt = wordTimings[i];
+            var weight = (wt && wt.weight != null) ? wt.weight : 1.0;
+            // weight 0 = "free" ad-lib/filler: excluded from the total and never
+            // marked missed — it can neither help nor hurt the score.
+            if (weight === 0) continue;
+            totalWords++;
             weightedTotal += weight;
 
             var rawScore = rawMatchScore(matchedSet, i);
-            if (rawScore > 0) matchedWords++;
-
             var effectiveScore = effectiveMatchScore(rawScore, i, vadMatchedSet, asrConfirmedSet);
-            if (effectiveScore > 0) weightedMatched += weight * effectiveScore;
-            else {
+            if (effectiveScore > 0) {
+                matchedWords++;
+                weightedMatched += weight * effectiveScore;
+            } else {
                 missedWordIndices.push(i);
                 missedWords.push(lineWords[i]);
             }
         }
 
         return {
-            totalWords: lineWords.length,
+            totalWords: totalWords,
             matchedWords: matchedWords,
             weightedTotal: weightedTotal,
             weightedMatched: weightedMatched,
@@ -516,6 +525,15 @@
         return matches;
     }
 
+    function findMatchInWindow(spokenWords, startIdx, windowSize, target, targetPhonetic) {
+        var end = Math.min(startIdx + windowSize, spokenWords.length);
+        for (var si = startIdx; si < end; si++) {
+            var r = wordsMatchScore(spokenWords[si], target, targetPhonetic);
+            if (r.score > 0) return { spokenIdx: si, score: r.score, method: r.method };
+        }
+        return null;
+    }
+
     function mergeConfirmedMatches(matchedSet, vadMatchedSet, asrConfirmedSet, scoreMap) {
         scoreMap.forEach(function(score, idx) {
             var existing = matchedSet.get(idx);
@@ -544,6 +562,7 @@
         effectiveMatchScore: effectiveMatchScore,
         computeLineScore: computeLineScore,
         collectSequentialWordMatches: collectSequentialWordMatches,
+        findMatchInWindow: findMatchInWindow,
         mergeConfirmedMatches: mergeConfirmedMatches,
         resetSpokenMatchCache: resetSpokenMatchCache
     };

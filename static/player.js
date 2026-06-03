@@ -400,6 +400,7 @@ estimateSyllables = scoringHelpers.estimateSyllables;
 interpolateWordTimings = scoringHelpers.interpolateWordTimings;
 var computeLineScore = scoringHelpers.computeLineScore;
 var mergeConfirmedMatches = scoringHelpers.mergeConfirmedMatches;
+var findMatchInWindow = scoringHelpers.findMatchInWindow;
 
 class GameMode {
     constructor() {
@@ -513,6 +514,7 @@ class GameMode {
         this.active = true;
         this._suspended = false;
         this._resetSessionCounters();
+        this._vadState = (typeof createVadState === 'function') ? createVadState() : null;
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
         this._initTelemetry();   // always init so download button works whenever D is pressed
@@ -563,6 +565,7 @@ class GameMode {
         document.getElementById('score-pct').textContent = '0%';
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
+        this._renderV2Panel();
     }
 
     stop() {
@@ -583,6 +586,7 @@ class GameMode {
         document.getElementById('score-display').style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
+        var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
     }
 
     /**
@@ -955,7 +959,9 @@ class GameMode {
             } catch (err) {
                 self._whisperRealtimeLastError = err && err.message ? err.message : 'commit send failed';
             }
-        }, 1500);
+        // 700ms (was 1500): commit the realtime audio buffer more often so a line's
+        // last words are transcribed and returned before the line is finalized.
+        }, 700);
     }
 
     _stopRealtimeWhisperCommitTimer() {
@@ -1245,14 +1251,10 @@ class GameMode {
         const wav = encodeWav(float32, 16000);
         const dispatchedLineIdx = this.activeLineIdx;
         try {
-            var headers = { 'Content-Type': 'audio/wav' };
-            if (dispatchedLineIdx >= 0 && lyrics[dispatchedLineIdx]) {
-                headers['X-Lyric-Hint'] = lyrics[dispatchedLineIdx].text;
-            }
             const resp = await fetch('/transcribe', {
                 method: 'POST',
                 body: wav,
-                headers: headers,
+                headers: { 'Content-Type': 'audio/wav' },
             });
 
             if (resp.status === 503) {
@@ -1332,23 +1334,21 @@ class GameMode {
             if (prev.matchedSet.has(li)) { cursor++; continue; }
             var target = prev.lineWords[li];
             var targetPhonetic = prev.wordTimings && prev.wordTimings[li] ? prev.wordTimings[li].phonetic : undefined;
-            for (var si = cursor; si < Math.min(cursor + driftWindow, spoken.length); si++) {
-                if (wordsMatch(spoken[si], target, targetPhonetic)) {
-                    prev.matchedSet.set(li, 1.0);
-                    if (prev.wordSourceMap) prev.wordSourceMap.set(li, track === 'track2' ? 'whisper' : 'browser_sr');
-                    if (prev.vadMatchedSet && prev.vadMatchedSet.has(li) && prev.asrConfirmedSet && !prev.asrConfirmedSet.has(li)) {
-                        prev.asrConfirmedSet.add(li);
-                    }
-                    cursor = si + 1;
-                    anyMatched = true;
-                    // Light the span green on the previous line
-                    var allLines = lyricsScroll.querySelectorAll('.lyric-line');
-                    var lineEl = allLines[prev.lineIdx];
-                    if (lineEl) {
-                        var span = lineEl.querySelectorAll('.word-span')[li];
-                        if (span) { span.classList.remove('missed'); span.classList.add('matched'); }
-                    }
-                    break;
+            var m = findMatchInWindow(spoken, cursor, driftWindow, target, targetPhonetic);
+            if (m) {
+                prev.matchedSet.set(li, m.score);
+                if (prev.wordSourceMap) prev.wordSourceMap.set(li, track === 'track2' ? 'whisper' : 'browser_sr');
+                if (prev.vadMatchedSet && prev.vadMatchedSet.has(li) && prev.asrConfirmedSet && !prev.asrConfirmedSet.has(li)) {
+                    prev.asrConfirmedSet.add(li);
+                }
+                cursor = m.spokenIdx + 1;
+                anyMatched = true;
+                // Light the span on the previous line — green for strong, amber for weak
+                var allLines = lyricsScroll.querySelectorAll('.lyric-line');
+                var lineEl = allLines[prev.lineIdx];
+                if (lineEl) {
+                    var span = lineEl.querySelectorAll('.word-span')[li];
+                    if (span) { span.classList.remove('missed'); span.classList.add(m.score >= 0.75 ? 'matched' : 'matched-partial'); }
                 }
             }
         }
@@ -1459,7 +1459,11 @@ class GameMode {
                 lineStartTranscriptPos: this.lineStartTranscriptPos,
                 wordTimings:            this.wordTimings,
                 params:                 this.currentParams,
-                overlapEnd:             performance.now() + (overlapDuration * 1000),
+                // Keep the previous line creditable for the FULL window until it is
+                // finalized (overlap + scoreDelay), not just the overlap. Closes the
+                // dead gap where a line's late-arriving last words were dropped because
+                // _matchPrevLine had already stopped crediting but scoring hadn't run.
+                overlapEnd:             performance.now() + ((overlapDuration + scoreDelay) * 1000),
                 whisperBuffer:          this.whisperBuffer,
                 lineHadAsrEvent:        this.lineHadAsrEvent,
             };
@@ -1657,20 +1661,27 @@ class GameMode {
     updateHotWord() {
         // Refresh isSpeaking from AnalyserNode — real-time, not tied to Whisper chunk rate
         var vadRms = this._readVadRms();
-        var _vadMultiplier = (this.wordTimings && this.wordTimings.vadTempoClass === 'slow') ? 1.3 : 1.0;
-        this.isSpeaking = vadRms > (this._energyThreshold * _vadMultiplier);
+        if (window.KARAOKEE_V2 && this._vadState && typeof updateVad === 'function') {
+            // Stage 2: adaptive noise floor + hysteresis + debounce. Continuously
+            // recalibrates (frozen while speaking); no frozen _energyThreshold,
+            // and single-frame spikes/dips can't flip the gate.
+            this.isSpeaking = updateVad(this._vadState, vadRms).isSpeaking;
+        } else {
+            var _vadMultiplier = (this.wordTimings && this.wordTimings.vadTempoClass === 'slow') ? 1.3 : 1.0;
+            this.isSpeaking = vadRms > (this._energyThreshold * _vadMultiplier);
 
-        // Baseline calibration during first 2s of playback
-        if (!this._vadBaselineReady) {
-            if (audio.currentTime > 0 && audio.currentTime < 2.0) {
-                this._vadBaselineSamples.push(vadRms);
-            } else if (audio.currentTime >= 2.0) {
-                if (this._vadBaselineSamples.length > 0) {
-                    var bSum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
-                    this._vadBaseline = bSum / this._vadBaselineSamples.length;
-                    this._energyThreshold = Math.min(this._vadBaseline + 0.025, 0.06);
+            // Baseline calibration during first 2s of playback
+            if (!this._vadBaselineReady) {
+                if (audio.currentTime > 0 && audio.currentTime < 2.0) {
+                    this._vadBaselineSamples.push(vadRms);
+                } else if (audio.currentTime >= 2.0) {
+                    if (this._vadBaselineSamples.length > 0) {
+                        var bSum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
+                        this._vadBaseline = bSum / this._vadBaselineSamples.length;
+                        this._energyThreshold = Math.min(this._vadBaseline + 0.025, 0.06);
+                    }
+                    this._vadBaselineReady = true;
                 }
-                this._vadBaselineReady = true;
             }
         }
 
@@ -1796,9 +1807,13 @@ class GameMode {
         var wordTimings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
             ? this.allWordTimings[lineIdx] : [];
         var scoreSummary = computeLineScore(lineWords, wordTimings, matchedSet, vadMatchedSet, asrConfirmedSet);
+        // A line with nothing scoreable (all "free" ad-libs/fillers) neither counts
+        // toward the score nor breaks the streak.
+        if (scoreSummary.weightedTotal === 0) return;
         var weightedTotal = scoreSummary.weightedTotal;
         var weightedMatched = scoreSummary.weightedMatched;
         var matched = scoreSummary.matchedWords;
+        var scoredTotal = scoreSummary.totalWords;
 
         // Mark unmatched spans as red
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
@@ -1811,7 +1826,7 @@ class GameMode {
             // Flash per-line score
             const flash = document.createElement('div');
             flash.className = 'line-score-flash';
-            flash.textContent = `+${matched}/${total}`;
+            flash.textContent = `+${matched}/${scoredTotal}`;
             flash.style.top = lineEl.offsetTop + 'px';
             document.getElementById('lyrics-container').appendChild(flash);
             setTimeout(() => flash.remove(), 1300);
@@ -1819,7 +1834,7 @@ class GameMode {
 
         this.weightedTotal   += weightedTotal;
         this.weightedMatched += weightedMatched;
-        this.totalWords      += total;
+        this.totalWords      += scoredTotal;
         this.matchedWords    += matched;
         this.linesScored++;
 
@@ -1835,9 +1850,34 @@ class GameMode {
     }
 
     _updateRunningScore() {
+        this._renderV2Panel();
         if (this.weightedTotal === 0) return;
         const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
         document.getElementById('score-pct').textContent = pct + '%';
+    }
+
+    /**
+     * Stage 3 dual-display: render the experimental phrase-engine score (lyrics /
+     * timing / stability / composite) beside the headline score, gated by the
+     * karaokee_v2 flag (press V). Pure read of the live phrase session; never
+     * mutates state and never affects the headline #score-pct.
+     */
+    _renderV2Panel() {
+        var el = document.getElementById('v2-panel');
+        if (!el) return;
+        if (!window.KARAOKEE_V2 || !this.active || !this._phraseSession || !window.KaraokeePhraseEngine
+            || typeof KaraokeePhraseEngine.getLiveScore !== 'function') {
+            el.style.display = 'none';
+            return;
+        }
+        try {
+            var s = KaraokeePhraseEngine.getLiveScore(this._phraseSession);
+            el.style.display = 'inline-block';
+            el.textContent = 'V2 ' + Math.round(s.composite * 100) + '%  (lyrics ' + Math.round(s.lyrics * 100)
+                + ' · conviction ' + Math.round(s.conviction * 100) + ')';
+        } catch (e) {
+            el.style.display = 'none';
+        }
     }
 
     /**
@@ -2483,14 +2523,24 @@ document.getElementById('offsetPlus').addEventListener('click', function() {
     _updateOffsetDisplay();
 });
 
+// Experimental Scoring V2 (adaptive VAD + phrase-engine dual-display panel).
+// Off by default; the current scorer stays the headline. Press V to A/B it.
+window.KARAOKEE_V2 = (localStorage.getItem('karaokee_v2') === '1');
+
 // Debug HUD — press D to toggle (works any time, not just in Game Mode)
 document.addEventListener('keydown', (e) => {
-    if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'd' || e.key === 'D') {
         window._kDebug = !window._kDebug;
         const hud = document.getElementById('debug-hud');
         if (hud) hud.style.display = window._kDebug ? 'block' : 'none';
         if (window._kDebug) gameMode._renderDebugHud();
         console.log('[DEBUG HUD]', window._kDebug ? 'ON — start Game Mode and rap to see events' : 'OFF');
+    } else if (e.key === 'v' || e.key === 'V') {
+        window.KARAOKEE_V2 = !window.KARAOKEE_V2;
+        localStorage.setItem('karaokee_v2', window.KARAOKEE_V2 ? '1' : '0');
+        if (gameMode) gameMode._renderV2Panel();
+        console.log('[SCORING V2]', window.KARAOKEE_V2 ? 'ON — adaptive VAD + phrase-engine panel' : 'OFF');
     }
 });
 

@@ -23,6 +23,12 @@
     var MAX_EVIDENCE_PER_PHRASE = 24;
     var MAX_TOKENS_PER_PHRASE = 64;
     var MAX_FLOW_EVENTS_PER_PHRASE = 64;
+    // Recognizer lag (browser SR / realtime Whisper) means a phrase's words can be
+    // transcribed ~1-2s after the phrase ended. Widen evidence acceptance past
+    // settlement by this grace so late anchor hits still count — mirrors the line
+    // scorer's boundary fix. Without it the phrase engine (and V2 score) undercounts
+    // vs the headline on songs with lagged recognition.
+    var LATE_EVIDENCE_GRACE_MS = 1000;
 
     function cloneProfile(profile) {
         return {
@@ -228,7 +234,7 @@
         var profile = session.plan.difficulty;
         var t = tokenTime(evidence, token);
         var tolerance = profile.timingToleranceMs / 1000;
-        var settlement = profile.settlementMs / 1000;
+        var settlement = (profile.settlementMs + LATE_EVIDENCE_GRACE_MS) / 1000;
         return t >= phrase.startSec - tolerance && t <= phrase.endSec + settlement;
     }
 
@@ -282,7 +288,7 @@
         var profile = session.plan.difficulty;
         return (session.plan.phrases || []).filter(function(phrase) {
             return now >= phrase.startSec - (profile.timingToleranceMs / 1000) &&
-                now <= phrase.endSec + (profile.settlementMs / 1000);
+                now <= phrase.endSec + ((profile.settlementMs + LATE_EVIDENCE_GRACE_MS) / 1000);
         }).map(function(phrase) {
             return session.states[phrase.phraseId];
         });
@@ -420,6 +426,51 @@
         return session;
     }
 
+    function clamp01(value) {
+        if (!isFinite(value)) return 0;
+        if (value < 0) return 0;
+        if (value > 1) return 1;
+        return value;
+    }
+
+    function getLiveScore(session) {
+        var lyrics = 1;
+        var conviction = 1;
+        if (session && session.states) {
+            var sumHit = 0;
+            var sumReq = 0;
+            var confirmedCount = 0;
+            var engagedCount = 0;
+            Object.keys(session.states).forEach(function(phraseId) {
+                var state = session.states[phraseId];
+                var phrase = state.phrase || {};
+                var required = phrase.anchorsRequired || 0;
+                if (required > 0) {
+                    var hit = Object.keys(state.anchorHits).length;
+                    if (hit > required) hit = required;
+                    sumHit += hit;
+                    sumReq += required;
+                }
+                // Conviction: of the phrases you ENGAGED (hit >=1 anchor), how many did
+                // you fully clear? Source-independent — a Whisper-rescued clear counts
+                // exactly like a browser clear. Timing is intentionally NOT scored:
+                // clearing is in-window by definition and "late" evidence is recognizer
+                // lag, not the singer — a fair timing axis needs real word onsets
+                // (forced alignment), a later stage.
+                if (state.lyricStatus === 'confirmed') { confirmedCount++; engagedCount++; }
+                else if (state.lyricStatus === 'partial') { engagedCount++; }
+            });
+            lyrics = sumReq > 0 ? clamp01(sumHit / sumReq) : 1;
+            conviction = engagedCount > 0 ? confirmedCount / engagedCount : 1;
+        }
+        var composite = 0.75 * lyrics + 0.25 * conviction;
+        return {
+            lyrics: lyrics,
+            conviction: conviction,
+            composite: composite
+        };
+    }
+
     function getPhraseTrace(session) {
         if (!session || !session.plan) return [];
         return (session.plan.phrases || []).map(function(phrase) {
@@ -454,6 +505,7 @@
         createPhraseSession: createPhraseSession,
         addEvidence: addEvidence,
         settlePhrases: settlePhrases,
-        getPhraseTrace: getPhraseTrace
+        getPhraseTrace: getPhraseTrace,
+        getLiveScore: getLiveScore
     };
 });
