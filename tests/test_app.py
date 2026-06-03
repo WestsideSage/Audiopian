@@ -1,4 +1,5 @@
 import json
+import os
 import pytest
 from unittest.mock import patch, MagicMock
 from app import app
@@ -548,3 +549,34 @@ def test_transcribe_returns_409_for_realtime_provider(client):
     finally:
         _app_module._whisper_active_provider = original_provider
         _app_module._whisper_state = original_state
+
+
+def test_telemetry_rejects_invalid_json(client):
+    resp = client.post("/telemetry", data=b"not json", content_type="application/json")
+    assert resp.status_code == 400
+
+
+def test_telemetry_writes_file(client):
+    # Far-future date so the artifact is obviously test data; cleaned up below.
+    payload = {
+        "meta": {"startedAt": "2099-01-02T03:04:05.000Z", "endedAt": "2099-01-02T03:09:00.000Z"},
+        "summary": {"scores": {"honestLyricPct": 50}},
+    }
+    resp = client.post("/telemetry", json=payload)
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["ok"] is True
+    from app import _HERE
+    full = os.path.join(_HERE, data["path"])
+    try:
+        assert os.path.exists(full)
+        assert "2099-01-02" in data["path"]
+        with open(full, encoding="utf-8") as f:
+            saved = json.load(f)
+        assert saved["meta"]["startedAt"] == "2099-01-02T03:04:05.000Z"
+    finally:
+        if os.path.exists(full):
+            os.remove(full)
+        d = os.path.dirname(full)
+        if os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
