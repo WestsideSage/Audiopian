@@ -1644,6 +1644,8 @@ class GameMode {
         const lineEl = lines[this.activeLineIdx];
         if (!lineEl) return;
 
+        if (window.KARAOKEE_V2) { this._paintAnchorSpansLive(lineEl); return; }
+
         const spans = lineEl.querySelectorAll('.word-span');
         spans.forEach((span, wi) => {
             span.classList.remove('matched', 'matched-partial', 'missed');
@@ -1658,6 +1660,18 @@ class GameMode {
                 // Word is unmatched — clear any stale asr-confirmed class
                 span.classList.remove('asr-confirmed');
             }
+        });
+    }
+
+    // V2: green a key-word span the moment the engine credits its anchor (anchorHits).
+    // Reds are applied at settle (see _commitNewlySettled). Non-key spans untouched.
+    _paintAnchorSpansLive(lineEl) {
+        var states = this._phraseSession && this._phraseSession.states;
+        if (!states) return;
+        lineEl.querySelectorAll('.word-span.key-word').forEach(function (span) {
+            var st = states[span.dataset.phraseId];
+            var hit = st && st.anchorHits && st.anchorHits[span.dataset.anchorIdx];
+            if (hit) { span.classList.add('matched'); span.classList.remove('missed'); }
         });
     }
 
@@ -2702,6 +2716,27 @@ function renderLyricsGameMode() {
         });
 
         lyricsScroll.appendChild(el);
+    });
+    _tagAnchorSpans();
+}
+
+// Tag the spans that are phrase-engine anchors (the scored "key words") with their
+// phrase + anchor identity, so V2 coloring can mirror the engine. Harmless under V1.
+function _tagAnchorSpans() {
+    if (!window.KaraokeeLyricPaint || !gameMode || !gameMode._phrasePlan) return;
+    var map = KaraokeeLyricPaint.buildAnchorSpanIndex(gameMode._phrasePlan);
+    var lines = lyricsScroll.querySelectorAll('.lyric-line');
+    Object.keys(map).forEach(function (li) {
+        var lineEl = lines[li];
+        if (!lineEl) return;
+        var spans = lineEl.querySelectorAll('.word-span');
+        map[li].forEach(function (entry) {
+            var span = spans[entry.wordIndex];
+            if (!span) return;
+            span.classList.add('key-word');
+            span.dataset.phraseId = entry.phraseId;
+            span.dataset.anchorIdx = entry.anchorIdx;
+        });
     });
 }
 
