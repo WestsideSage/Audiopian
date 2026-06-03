@@ -1366,7 +1366,7 @@ class GameMode {
                 // Light the span on the previous line — green for strong, amber for weak
                 var allLines = lyricsScroll.querySelectorAll('.lyric-line');
                 var lineEl = allLines[prev.lineIdx];
-                if (lineEl) {
+                if (lineEl && !window.KARAOKEE_V2) {
                     var span = lineEl.querySelectorAll('.word-span')[li];
                     if (span) { span.classList.remove('missed'); span.classList.add(m.score >= 0.75 ? 'matched' : 'matched-partial'); }
                 }
@@ -1853,9 +1853,11 @@ class GameMode {
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
         const lineEl = lines[lineIdx];
         if (lineEl) {
-            lineEl.querySelectorAll('.word-span').forEach((span, wi) => {
-                if (scoreSummary.missedWordIndices.indexOf(wi) >= 0) span.classList.add('missed');
-            });
+            if (!window.KARAOKEE_V2) {
+                lineEl.querySelectorAll('.word-span').forEach((span, wi) => {
+                    if (scoreSummary.missedWordIndices.indexOf(wi) >= 0) span.classList.add('missed');
+                });
+            }
 
             // Flash per-line score
             const flash = document.createElement('div');
@@ -1964,6 +1966,19 @@ class GameMode {
                 });
             }
             if (evt && routeEvents && window.KARAOKEE_V2) this._onArcadeEvent(evt);
+
+            // V2 coloring: finalize this phrase's key words — green the hits, red the
+            // un-hit anchors only if the phrase didn't clear (a cleared line shows no red).
+            if (window.KARAOKEE_V2) {
+                var _conf = pst.lyricStatus === 'confirmed';
+                var _sel = '.word-span.key-word[data-phrase-id="' + ph.phraseId + '"]';
+                document.querySelectorAll(_sel).forEach(function (span) {
+                    var _hit = pst.anchorHits && pst.anchorHits[span.dataset.anchorIdx];
+                    span.classList.remove('matched', 'matched-partial', 'missed');
+                    if (_hit) span.classList.add('matched');
+                    else if (!_conf) span.classList.add('missed');
+                });
+            }
         }
     }
 
@@ -2082,7 +2097,7 @@ class GameMode {
                     // Light the span — this word just arrived late
                     const allLines = lyricsScroll.querySelectorAll('.lyric-line');
                     const lineEl   = allLines[lineIdx];
-                    if (lineEl) {
+                    if (lineEl && !window.KARAOKEE_V2) {
                         const span = lineEl.querySelectorAll('.word-span')[li];
                         if (span) {
                             span.classList.remove('missed');
