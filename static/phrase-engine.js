@@ -23,6 +23,12 @@
     var MAX_EVIDENCE_PER_PHRASE = 24;
     var MAX_TOKENS_PER_PHRASE = 64;
     var MAX_FLOW_EVENTS_PER_PHRASE = 64;
+    // Recognizer lag (browser SR / realtime Whisper) means a phrase's words can be
+    // transcribed ~1-2s after the phrase ended. Widen evidence acceptance past
+    // settlement by this grace so late anchor hits still count — mirrors the line
+    // scorer's boundary fix. Without it the phrase engine (and V2 score) undercounts
+    // vs the headline on songs with lagged recognition.
+    var LATE_EVIDENCE_GRACE_MS = 1000;
 
     function cloneProfile(profile) {
         return {
@@ -228,7 +234,7 @@
         var profile = session.plan.difficulty;
         var t = tokenTime(evidence, token);
         var tolerance = profile.timingToleranceMs / 1000;
-        var settlement = profile.settlementMs / 1000;
+        var settlement = (profile.settlementMs + LATE_EVIDENCE_GRACE_MS) / 1000;
         return t >= phrase.startSec - tolerance && t <= phrase.endSec + settlement;
     }
 
@@ -282,7 +288,7 @@
         var profile = session.plan.difficulty;
         return (session.plan.phrases || []).filter(function(phrase) {
             return now >= phrase.startSec - (profile.timingToleranceMs / 1000) &&
-                now <= phrase.endSec + (profile.settlementMs / 1000);
+                now <= phrase.endSec + ((profile.settlementMs + LATE_EVIDENCE_GRACE_MS) / 1000);
         }).map(function(phrase) {
             return session.states[phrase.phraseId];
         });

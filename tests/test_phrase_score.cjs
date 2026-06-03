@@ -198,4 +198,23 @@ function buildCleanSession(difficulty) {
         expertScore.composite + ' vs easy ' + easyScore.composite);
 })();
 
+// --- 5. Late evidence (recognizer lag) within the grace still credits anchors -
+// A whisper completion for a phrase's word arrives ~1.6s after the phrase ended
+// (realtime-Whisper lag) — past the old settlement window but within the lag grace.
+// It must still credit the anchor, or V2 undercounts vs the lag-tolerant line scorer.
+(function lateEvidenceGrace() {
+    var plan = phraseEngine.buildPhrasePlan(FIXTURE, { difficulty: 'medium', audioDuration: 6 });
+    var session = phraseEngine.createPhraseSession(plan);
+    // p0 ends at 3; medium settlement 1.4 -> old window end 4.4. Evidence at t=5.0 is
+    // ~1.6s past it (simulating realtime lag) but within the recognizer-lag grace.
+    phraseEngine.addEvidence(session, {
+        id: 'lag-1', source: 'whisper', text: 'final',
+        words: [{ word: 'final', start: 5.0, end: 5.3 }],
+        receivedAtSec: 5.0, audioTimeSec: 5.0
+    });
+    phraseEngine.settlePhrases(session, 9.0);
+    var p0 = phraseEngine.getPhraseTrace(session).find(function(t) { return t.phraseId === 'p0'; });
+    assert.ok(p0.anchorsHit >= 1, 'late-but-within-grace whisper evidence credits the anchor, got ' + p0.anchorsHit);
+})();
+
 console.log('Phrase score tests passed.');
