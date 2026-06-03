@@ -1,8 +1,11 @@
 import io
 import os
 import glob
+import json
+import re
 import mimetypes
 import threading
+from datetime import datetime, timezone
 import requests
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from downloader import extract_metadata, download_audio, AUDIO_PATH, TEMP_DIR, search_youtube
@@ -355,6 +358,43 @@ def audio():
     mime = mimetypes.guess_type(path)[0] or "audio/webm"
     return send_file(path, mimetype=mime)
 
+
+_TELEMETRY_MAX_BYTES = 8 * 1024 * 1024  # 8 MB safety cap
+
+
+@app.route("/telemetry", methods=["POST"])
+def save_telemetry():
+    # Persist one session's telemetry JSON to output_telemetry/<YYYY-MM-DD>/.
+    raw = request.get_data(cache=False)
+    if len(raw) > _TELEMETRY_MAX_BYTES:
+        return jsonify({"error": "Payload too large"}), 413
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return jsonify({"error": "Invalid JSON"}), 400
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Expected a JSON object"}), 400
+
+    meta = payload.get("meta") or {}
+    started = str(meta.get("startedAt") or "")
+    # Date folder: from the payload's startedAt if it's a clean ISO date, else server UTC date.
+    date_folder = started[:10]
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_folder):
+        date_folder = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Filename timestamp: from endedAt/startedAt, colon/dot -> dash, sanitized; else server time.
+    ended = str(meta.get("endedAt") or started or "")
+    ts = re.sub(r"[:.]", "-", ended)[:19]
+    ts = re.sub(r"[^0-9A-Za-z\-T]", "", ts)
+    if not ts:
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
+
+    out_dir = os.path.join(_HERE, "output_telemetry", date_folder)
+    os.makedirs(out_dir, exist_ok=True)
+    fname = "karaokee-telemetry-" + ts + ".json"
+    path = os.path.join(out_dir, fname)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    return jsonify({"ok": True, "path": os.path.relpath(path, _HERE)})
 
 
 @app.route("/retry-lyrics", methods=["POST"])
