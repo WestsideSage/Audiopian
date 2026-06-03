@@ -599,6 +599,7 @@ class GameMode {
         var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
         this._hideArcadeHud();
+        this._finalizeTelemetry('stopped');
     }
 
     /**
@@ -2590,18 +2591,21 @@ class GameMode {
         document.getElementById('lrc-offset-control').style.display = 'none';
         this._hideArcadeHud();
 
+        // Force-settle trailing phrases, then persist telemetry BEFORE the hi-score write
+        // below (so arcade.highScore.previous reflects the prior best).
+        if (this._phraseSession && window.KaraokeePhraseEngine) {
+            try {
+                var _endNow = (audio && isFinite(audio.duration)) ? audio.duration + 5 : 1e9;
+                KaraokeePhraseEngine.settlePhrases(this._phraseSession, _endNow);
+            } catch (e) {}
+            this._commitNewlySettled(false);
+        }
+        this._finalizeTelemetry('song_ended');
+
         var useArcade = window.KARAOKEE_V2 && this._arcadeState && window.KaraokeeArcade
             && window.KaraokeePhraseEngine && this._phraseSession;
 
         if (useArcade) {
-            // Force-settle any final phrases whose settled boundary lands past the
-            // (now-stuck) audio end time, so their points land before we read the summary.
-            try {
-                var endNow = (audio && isFinite(audio.duration)) ? audio.duration + 5 : 1e9;
-                KaraokeePhraseEngine.settlePhrases(this._phraseSession, endNow);
-            } catch (e) {}
-            this._commitNewlySettled(false);
-
             var summary = KaraokeeArcade.getArcadeSummary(this._arcadeState);
             var live = KaraokeePhraseEngine.getLiveScore(this._phraseSession);
             var pct = Math.round((live.lyrics || 0) * 100);
@@ -2866,7 +2870,7 @@ audio.addEventListener('ended', function() {
                 );
             }, 800);
         }
-        if (window._kDebug) gameMode._downloadTelemetry();
+        // Telemetry auto-saves via showEndModal -> _finalizeTelemetry (POST /telemetry).
         setTimeout(function() { gameMode.showEndModal(); }, 1500);
     }
 });
