@@ -157,6 +157,21 @@
             font-weight: 600;
         }
 
+        .diff-pill {
+            font-size: 0.72rem; color: #e6d6ff; background: #3a2a5a;
+            border: 1px solid #5a3a8a; border-radius: 10px; padding: 2px 9px;
+            font-weight: 700; letter-spacing: .5px; margin-left: 10px;
+        }
+        .diff-select { display: inline-flex; border: 1px solid #2a2a4a; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+        .diff-select button {
+            width: auto; padding: 6px 10px; font-size: 0.8rem; background: #1a1a2e;
+            color: #aaa; border: none; border-right: 1px solid #2a2a4a; cursor: pointer;
+        }
+        .diff-select button:last-child { border-right: none; }
+        .diff-select button.active { background: #7c4dff; color: #fff; }
+        .diff-select.locked { opacity: .55; }
+        .diff-select.locked button { cursor: not-allowed; }
+
         /* Per-line score flash */
         .line-score-flash {
             position: absolute;
@@ -315,6 +330,7 @@
         <div class="song-title" id="song-title">Loading...</div>
         <div class="score-display" id="score-display" style="display:none">Score: <span id="score-pct">0%</span></div>
         <div id="v2-panel" style="display:none; margin-left:14px; font-size:0.82rem; color:#7ad;" title="Experimental phrase-engine score (press V to toggle)"></div>
+        <div class="diff-pill" id="diff-pill" style="display:none">MEDIUM</div>
     </div>
 
     <div id="lyrics-container">
@@ -324,6 +340,12 @@
 
     <div class="controls">
         <button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">🎮 Game</button>
+        <div class="diff-select" id="diffSelect" title="Difficulty (locks when a run starts)">
+            <button data-diff="easy">Easy</button>
+            <button data-diff="medium" class="active">Medium</button>
+            <button data-diff="hard">Hard</button>
+            <button data-diff="expert">Expert</button>
+        </div>
         <button class="ctrl-btn" id="skipBackBtn" onclick="skipBack()">⏮</button>
         <button class="ctrl-btn" id="playBtn" onclick="togglePlay()">▶</button>
         <button class="ctrl-btn" id="skipFwdBtn" onclick="skipFwd()">⏭</button>
