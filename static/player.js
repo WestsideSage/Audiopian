@@ -2889,6 +2889,58 @@ function _markSelectedCard(d) {
     }
 }
 
+// Show, per difficulty, a sample song line with its required "notes" (anchor words)
+// highlighted — the top `anchorsRequired` anchors by weight are bright targets, other
+// anchors dim, the rest faint. Illustrates the count; the engine accepts ANY of them.
+function renderDifficultyPreview(d) {
+    var box = document.getElementById('diffPreview');
+    var lineEl = document.getElementById('dpLine');
+    var capEl = document.getElementById('dpCaption');
+    if (!box || !lineEl || !capEl) return;
+    if (!lyrics || lyrics.length === 0 || !window.KaraokeePhraseEngine) { box.style.display = 'none'; return; }
+
+    var plan;
+    try {
+        plan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
+            difficulty: d,
+            audioDuration: (audio && isFinite(audio.duration)) ? audio.duration : null
+        });
+    } catch (e) { box.style.display = 'none'; return; }
+
+    var phrases = (plan && plan.phrases) || [];
+    if (!phrases.length) { box.style.display = 'none'; return; }
+    // Representative phrase: first with >=4 words and >=2 anchors, else the longest.
+    var phrase = null;
+    for (var i = 0; i < phrases.length; i++) {
+        if (phrases[i].words.length >= 4 && phrases[i].anchors.length >= 2) { phrase = phrases[i]; break; }
+    }
+    if (!phrase) {
+        phrase = phrases[0];
+        for (var j = 1; j < phrases.length; j++) {
+            if (phrases[j].words.length > phrase.words.length) phrase = phrases[j];
+        }
+    }
+
+    var anchorIdx = {};
+    phrase.anchors.forEach(function (a) { anchorIdx[a.wordIdx] = true; });
+    var byWeight = phrase.anchors.slice().sort(function (a, b) { return b.weight - a.weight; });
+    var targetIdx = {};
+    for (var t = 0; t < phrase.anchorsRequired && t < byWeight.length; t++) targetIdx[byWeight[t].wordIdx] = true;
+
+    lineEl.innerHTML = '';
+    phrase.words.forEach(function (w, wi) {
+        var span = document.createElement('span');
+        span.className = 'dp-word' + (targetIdx[wi] ? ' dp-target' : (anchorIdx[wi] ? ' dp-anchor' : ''));
+        span.textContent = w + ' ';
+        lineEl.appendChild(span);
+    });
+
+    var tolSec = ((plan.difficulty && plan.difficulty.timingToleranceMs) || 1000) / 1000;
+    capEl.textContent = d.toUpperCase() + ' — hit any ' + phrase.anchorsRequired + ' of '
+        + phrase.anchors.length + ' key words per line · ' + tolSec + 's timing window';
+    box.style.display = 'block';
+}
+
 // Show the gate (used on load, Play Again, and the Game button from passive mode).
 function openDifficultyGate() {
     var overlay = document.getElementById('prepOverlay');
@@ -2897,6 +2949,7 @@ function openDifficultyGate() {
     if (sd) document.getElementById('prepSongTitle').textContent = sd.artist + ' \u2014 ' + sd.title;
     _markSelectedCard(localStorage.getItem('arcadeDifficulty') || 'medium');
     try { audio.pause(); playBtn.textContent = '\u25B6'; } catch (e) {}
+    renderDifficultyPreview(localStorage.getItem('arcadeDifficulty') || 'medium');
     overlayDismissed = false;
     overlay.style.display = 'flex';
 }
@@ -2934,6 +2987,15 @@ function skipPrep() { justListen(); }
         if (!btn) return;
         startRunWithDifficulty(btn.getAttribute('data-diff'));
     });
+    function previewFrom(e) {
+        var btn = e.target.closest ? e.target.closest('button[data-diff]') : null;
+        if (btn) renderDifficultyPreview(btn.getAttribute('data-diff'));
+    }
+    cards.addEventListener('mouseover', previewFrom);
+    cards.addEventListener('focusin', previewFrom);
+    cards.addEventListener('mouseleave', function () {
+        renderDifficultyPreview(localStorage.getItem('arcadeDifficulty') || 'medium');
+    });
 })();
 
 function initPrepOverlay() {
@@ -2942,6 +3004,7 @@ function initPrepOverlay() {
     if (lyrics.length === 0) { justListen(); return; }   // no lyrics -> can't score; just play
     _markSelectedCard(localStorage.getItem('arcadeDifficulty') || 'medium');
     _paintDiffPill(localStorage.getItem('arcadeDifficulty') || 'medium');
+    renderDifficultyPreview(localStorage.getItem('arcadeDifficulty') || 'medium');
     // Overlay stays open showing the gate; user picks a difficulty or "Just listen".
 }
 
