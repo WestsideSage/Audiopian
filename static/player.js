@@ -2290,81 +2290,170 @@ class GameMode {
      * Serialise the telemetry log to JSON and trigger a browser download.
      * Falls back to console.warn if the blob URL fails.
      */
+    _buildTelemetryPayload(endReason) {
+        if (!this._telemetry) return null;
+        var meta = this._telemetry.meta;
+        if (!meta.songDurationMs && audio && isFinite(audio.duration)) {
+            meta.songDurationMs = Math.round(audio.duration * 1000);
+        }
+        if (meta.whisperAvailable === null) meta.whisperAvailable = !!(this._whisperStream);
+        meta.whisperStatusAtStart  = this._whisperServerStatus ? Object.assign({}, this._whisperServerStatus) : null;
+        meta.whisperStatusFinal    = {
+            state: this._whisperServerStatus ? this._whisperServerStatus.state : 'unknown',
+            reason: this._whisperServerStatus ? this._whisperServerStatus.reason : null,
+            provider: this._whisperServerStatus ? this._whisperServerStatus.provider : null,
+            model: this._whisperServerStatus ? this._whisperServerStatus.model : null
+        };
+        meta.whisperTrackStatus    = this._whisperTrackStatus ? Object.assign({}, this._whisperTrackStatus) : null;
+        meta.whisperProvider       = this._whisperServerStatus ? this._whisperServerStatus.provider : null;
+        meta.whisperModel          = this._whisperServerStatus ? this._whisperServerStatus.model : null;
+        meta.whisperChunkCounters  = {
+            dispatched:          this._chunksDispatched          || 0,
+            succeeded:           this._chunksSucceeded           || 0,
+            failed503:           this._chunksFailed503           || 0,
+            failed500:           this._chunksFailed500           || 0,
+            failedNetwork:       this._chunksFailedNetwork       || 0,
+            droppedWhileLoading: this._chunksDroppedWhileLoading || 0,
+            droppedNotReady:     this._chunksDroppedNotReady     || 0,
+        };
+        meta.whisperResponses          = this._whisperResponses          || 0;
+        meta.whisperResponsesWithWords = this._whisperResponsesWithWords  || 0;
+        meta.whisperWordsTotal         = this._whisperWordsTotal          || 0;
+        meta.whisperRealtimeDeltas     = this._whisperRealtimeDeltas      || 0;
+        meta.whisperRealtimeCompletions = this._whisperRealtimeCompletions || 0;
+        meta.whisperRealtimeEvents     = this._whisperRealtimeEvents      || 0;
+        meta.whisperRealtimeFailures   = this._whisperRealtimeFailures    || 0;
+        meta.whisperRealtimeCommitsSent = this._whisperRealtimeCommitsSent || 0;
+        meta.whisperRealtimeLastEvent  = this._whisperRealtimeLastEvent   || '';
+        meta.whisperRealtimeLastError  = this._whisperRealtimeLastError   || '';
+        meta.finalWordSourceCounts     = this._countWordSources(this.wordSourceMap);
+
+        // v2 meta additions
+        meta.schemaVersion = 2;
+        meta.gameVersion   = '2.0';
+        meta.karaokeeV2    = !!window.KARAOKEE_V2;
+        meta.endedAt       = new Date().toISOString();
+        meta.endReason     = endReason || 'manual';
+        meta.completed     = !!(audio && isFinite(audio.duration) && audio.currentTime >= audio.duration - 0.5);
+
+        var intentEl = document.getElementById('benchmarkIntent');
+        var fairnessEl = document.getElementById('benchmarkFairness');
+        var notesEl = document.getElementById('benchmarkNotes');
+        var benchmark = {
+            intent: intentEl ? intentEl.value : '',
+            fairness: fairnessEl ? fairnessEl.value : '',
+            notes: notesEl ? notesEl.value : ''
+        };
+
+        var traces = [];
+        if (this._phraseSession && window.KaraokeePhraseEngine) {
+            traces = KaraokeePhraseEngine.getPhraseTrace(this._phraseSession);
+        }
+
+        // Final scores
+        var v1Pct = this.weightedTotal > 0 ? Math.round((this.weightedMatched / this.weightedTotal) * 100) : 0;
+        var live = (this._phraseSession && window.KaraokeePhraseEngine)
+            ? KaraokeePhraseEngine.getLiveScore(this._phraseSession) : { lyrics: 0, composite: 0 };
+        var honestLyricPct = Math.round((live.lyrics || 0) * 100);
+        var composite = Math.round((live.composite || 0) * 100);
+        var grade = window.KaraokeeArcade ? KaraokeeArcade.gradeFor(honestLyricPct) : null;
+        var arcadeSummary = (this._arcadeState && window.KaraokeeArcade)
+            ? KaraokeeArcade.getArcadeSummary(this._arcadeState) : null;
+        var difficulty = this._phraseDifficulty || 'medium';
+
+        // High score context (read BEFORE showEndModal writes the new best — see finalize ordering)
+        var hiKey = 'hiscore_' + _songKey() + '_' + difficulty;
+        var prevHi = parseInt(localStorage.getItem(hiKey) || '0', 10) || 0;
+        var runPoints = arcadeSummary ? arcadeSummary.points : 0;
+
+        var arcadeEvents = this._arcadeEvents || [];
+        var counts = {
+            asr:         this._telemetry.asr.length,
+            matches:     this._telemetry.matches.length,
+            promotions:  this._telemetry.promotions.length,
+            transitions: this._telemetry.transitions.length,
+            arcadeEvents: arcadeEvents.length
+        };
+
+        var summary = window.KaraokeeTelemetry ? KaraokeeTelemetry.summarizeRun({
+            difficulty: difficulty,
+            karaokeeV2: !!window.KARAOKEE_V2,
+            scores: { v1Pct: v1Pct, honestLyricPct: honestLyricPct, composite: composite },
+            arcadeSummary: arcadeSummary,
+            grade: grade,
+            phraseTraces: traces,
+            arcadeEvents: arcadeEvents,
+            transitions: this._telemetry.transitions,
+            finalWordSourceCounts: meta.finalWordSourceCounts,
+            benchmarkIntent: benchmark.intent,
+            counts: counts
+        }) : null;
+
+        var payload = {
+            meta: meta,
+            summary: summary,
+            arcade: {
+                tuning: (window.KaraokeeArcade && KaraokeeArcade.ARCADE_TUNING)
+                    ? (KaraokeeArcade.ARCADE_TUNING[difficulty] || null) : null,
+                summary: arcadeSummary,
+                events: arcadeEvents,
+                highScore: { key: hiKey, previous: prevHi, isNewBest: runPoints > prevHi }
+            },
+            phraseEngine: {
+                version: 2,
+                mode: window.KARAOKEE_V2 ? 'headline' : 'shadow',
+                difficulty: difficulty,
+                benchmark: benchmark,
+                plan: this._telemetry.phraseEngine ? this._telemetry.phraseEngine.plan : null
+            },
+            transitions: this._telemetry.transitions
+        };
+
+        // Heavy data only under debug (press D).
+        if (window._kDebug) {
+            payload.phraseEngine.traces = traces;
+            payload.asr = this._telemetry.asr;
+            payload.matches = this._telemetry.matches;
+            payload.promotions = this._telemetry.promotions;
+        }
+        return payload;
+    }
+
     _downloadTelemetry() {
-        if (!this._telemetry) return;
+        var payload = this._buildTelemetryPayload('manual');
+        if (!payload) return;
         try {
-            // Fill in songDurationMs now if audio is ready and it was null at startGame
-            if (!this._telemetry.meta.songDurationMs && audio && isFinite(audio.duration)) {
-                this._telemetry.meta.songDurationMs = Math.round(audio.duration * 1000);
-            }
-            // Fill in whisperAvailable now that async setup has completed
-            if (this._telemetry.meta.whisperAvailable === null) {
-                this._telemetry.meta.whisperAvailable = !!(this._whisperStream);
-            }
-            // Richer Whisper observability fields (supplement, not replace, whisperAvailable)
-            this._telemetry.meta.whisperStatusAtStart  = this._whisperServerStatus ? Object.assign({}, this._whisperServerStatus) : null;
-            this._telemetry.meta.whisperStatusFinal    = {
-                state: this._whisperServerStatus ? this._whisperServerStatus.state : 'unknown',
-                reason: this._whisperServerStatus ? this._whisperServerStatus.reason : null,
-                provider: this._whisperServerStatus ? this._whisperServerStatus.provider : null,
-                model: this._whisperServerStatus ? this._whisperServerStatus.model : null
-            };
-            this._telemetry.meta.whisperTrackStatus    = this._whisperTrackStatus ? Object.assign({}, this._whisperTrackStatus) : null;
-            this._telemetry.meta.whisperProvider       = this._whisperServerStatus ? this._whisperServerStatus.provider : null;
-            this._telemetry.meta.whisperModel          = this._whisperServerStatus ? this._whisperServerStatus.model : null;
-            this._telemetry.meta.whisperChunkCounters  = {
-                dispatched:          this._chunksDispatched          || 0,
-                succeeded:           this._chunksSucceeded           || 0,
-                failed503:           this._chunksFailed503           || 0,
-                failed500:           this._chunksFailed500           || 0,
-                failedNetwork:       this._chunksFailedNetwork       || 0,
-                droppedWhileLoading: this._chunksDroppedWhileLoading || 0,
-                droppedNotReady:     this._chunksDroppedNotReady     || 0,
-            };
-            this._telemetry.meta.whisperResponses          = this._whisperResponses          || 0;
-            this._telemetry.meta.whisperResponsesWithWords = this._whisperResponsesWithWords  || 0;
-            this._telemetry.meta.whisperWordsTotal         = this._whisperWordsTotal          || 0;
-            this._telemetry.meta.whisperRealtimeDeltas     = this._whisperRealtimeDeltas      || 0;
-            this._telemetry.meta.whisperRealtimeCompletions = this._whisperRealtimeCompletions || 0;
-            this._telemetry.meta.whisperRealtimeEvents     = this._whisperRealtimeEvents      || 0;
-            this._telemetry.meta.whisperRealtimeFailures   = this._whisperRealtimeFailures    || 0;
-            this._telemetry.meta.whisperRealtimeCommitsSent = this._whisperRealtimeCommitsSent || 0;
-            this._telemetry.meta.whisperRealtimeLastEvent  = this._whisperRealtimeLastEvent   || '';
-            this._telemetry.meta.whisperRealtimeLastError  = this._whisperRealtimeLastError   || '';
-            this._telemetry.meta.finalWordSourceCounts     = this._countWordSources(this.wordSourceMap);
-            var intentEl = document.getElementById('benchmarkIntent');
-            var fairnessEl = document.getElementById('benchmarkFairness');
-            var notesEl = document.getElementById('benchmarkNotes');
-            if (this._telemetry.phraseEngine) {
-                this._telemetry.phraseEngine.benchmark = {
-                    intent: intentEl ? intentEl.value : '',
-                    fairness: fairnessEl ? fairnessEl.value : '',
-                    notes: notesEl ? notesEl.value : ''
-                };
-                if (this._phraseSession && window.KaraokeePhraseEngine) {
-                    this._telemetry.phraseEngine.traces = KaraokeePhraseEngine.getPhraseTrace(this._phraseSession);
-                }
-            }
-            var json = JSON.stringify(this._telemetry, null, 2);
+            var json = JSON.stringify(payload, null, 2);
             var ts   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
             var name = 'karaokee-telemetry-' + ts + '.json';
             var blob = new Blob([json], { type: 'application/json' });
             var url  = URL.createObjectURL(blob);
             var a    = document.createElement('a');
-            a.href     = url;
-            a.download = name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+            a.href = url; a.download = name;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            console.log('[Telemetry] Downloaded:', name,
-                '|', this._telemetry.asr.length, 'asr,',
-                this._telemetry.matches.length, 'matches,',
-                this._telemetry.transitions.length, 'transitions');
+            console.log('[Telemetry] Downloaded:', name, '| arcadeEvents', payload.arcade.events.length,
+                '| transitions', payload.transitions.length);
         } catch (e) {
             console.warn('[Telemetry] Download failed — raw JSON below:', e);
-            console.warn(JSON.stringify(this._telemetry, null, 2));
+            console.warn(JSON.stringify(payload, null, 2));
         }
+    }
+
+    _finalizeTelemetry(endReason) {
+        if (this._telemetryFinalized || !this._telemetry) return;
+        this._telemetryFinalized = true;
+        try {
+            var payload = this._buildTelemetryPayload(endReason);
+            if (!payload) return;
+            fetch('/telemetry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(function (r) { return r.json(); })
+              .then(function (d) { console.log('[Telemetry] Saved:', d && d.path); })
+              .catch(function (e) { console.warn('[Telemetry] Save failed:', e); });
+        } catch (e) { console.warn('[Telemetry] finalize error:', e); }
     }
 
     /**
