@@ -530,12 +530,6 @@ class GameMode {
                 this._telemetry.phraseEngine.plan = this._phrasePlan;
             }
         }
-        var _dsLock = document.getElementById('diffSelect');
-        if (_dsLock) {
-            _dsLock.classList.add('locked');
-            var _dsBtns = _dsLock.querySelectorAll('button');
-            for (var _i = 0; _i < _dsBtns.length; _i++) _dsBtns[_i].setAttribute('aria-disabled', 'true');
-        }
         var _dpShow = document.getElementById('diff-pill');
         if (_dpShow) { _dpShow.textContent = (this._phraseDifficulty || 'medium').toUpperCase(); _dpShow.style.display = 'inline-block'; }
         for (var li = 0; li < this.allWordTimings.length; li++) {
@@ -596,12 +590,6 @@ class GameMode {
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
         var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
-        var _dsUnlock = document.getElementById('diffSelect');
-        if (_dsUnlock) {
-            _dsUnlock.classList.remove('locked');
-            var _ubtns = _dsUnlock.querySelectorAll('button');
-            for (var _u = 0; _u < _ubtns.length; _u++) _ubtns[_u].removeAttribute('aria-disabled');
-        }
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
     }
 
@@ -2601,31 +2589,7 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Difficulty selector — persists to localStorage, locks while a run is active.
-(function initDifficultySelect() {
-    var sel = document.getElementById('diffSelect');
-    if (!sel) return;
-    function paint(d) {
-        var btns = sel.querySelectorAll('button');
-        for (var i = 0; i < btns.length; i++) {
-            var on = btns[i].getAttribute('data-diff') === d;
-            btns[i].classList.toggle('active', on);
-            btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
-        }
-        var pill = document.getElementById('diff-pill');
-        if (pill) pill.textContent = (d || 'medium').toUpperCase();
-    }
-    paint(localStorage.getItem('arcadeDifficulty') || 'medium');
-    sel.addEventListener('click', function (e) {
-        var btn = e.target.closest ? e.target.closest('button[data-diff]') : null;
-        if (!btn) return;
-        if (gameMode && gameMode.active) return;      // locked mid-run
-        var d = btn.getAttribute('data-diff');
-        localStorage.setItem('arcadeDifficulty', d);
-        if (gameMode) gameMode._phraseDifficulty = d;
-        paint(d);
-    });
-})();
+// (Difficulty selection moved to the load-time difficulty gate — see initDifficultyGate below.)
 
 // Format seconds as m:ss
 function fmt(s) {
@@ -2672,22 +2636,74 @@ audio.addEventListener('ended', function() {
     }
 });
 
-// --- Loading overlay ---
+// --- Difficulty gate / loading overlay ---
 
-function initPrepOverlay() {
-    var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
-    if (sd) {
-        document.getElementById('prepSongTitle').textContent =
-            sd.artist + ' \u2014 ' + sd.title;
-    }
-    skipPrep();
+function _paintDiffPill(d) {
+    var pill = document.getElementById('diff-pill');
+    if (pill) pill.textContent = (d || 'medium').toUpperCase();
 }
 
-function skipPrep() {
+function _markSelectedCard(d) {
+    var cards = document.querySelectorAll('#diffGateCards .diff-card');
+    for (var i = 0; i < cards.length; i++) {
+        cards[i].classList.toggle('selected', cards[i].getAttribute('data-diff') === d);
+    }
+}
+
+// Show the gate (used on load, Play Again, and the Game button from passive mode).
+function openDifficultyGate() {
+    var overlay = document.getElementById('prepOverlay');
+    if (!overlay) return;
+    var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
+    if (sd) document.getElementById('prepSongTitle').textContent = sd.artist + ' \u2014 ' + sd.title;
+    _markSelectedCard(localStorage.getItem('arcadeDifficulty') || 'medium');
+    try { audio.pause(); playBtn.textContent = '\u25B6'; } catch (e) {}
+    overlayDismissed = false;
+    overlay.style.display = 'flex';
+}
+
+// Begin a scored run on the chosen difficulty.
+function startRunWithDifficulty(d) {
+    localStorage.setItem('arcadeDifficulty', d);
+    if (gameMode) gameMode._phraseDifficulty = d;
+    _paintDiffPill(d);
+    overlayDismissed = true;
+    document.getElementById('prepOverlay').style.display = 'none';
+    if (gameMode.active) gameMode.stop();
+    audio.currentTime = 0;
+    audio.play().then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+    gameMode.start();
+}
+
+// Escape hatch \u2014 passive karaoke, no scoring.
+function justListen() {
     clearInterval(prepTimer);
     overlayDismissed = true;
     document.getElementById('prepOverlay').style.display = 'none';
-    audio.play().then(function() { playBtn.textContent = '\u23F8'; }).catch(function() {});
+    audio.play().then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+}
+
+// Back-compat shim (existing callers): behaves like "just listen".
+function skipPrep() { justListen(); }
+
+// Wire the gate cards once.
+(function initDifficultyGate() {
+    var cards = document.getElementById('diffGateCards');
+    if (!cards) return;
+    cards.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('button[data-diff]') : null;
+        if (!btn) return;
+        startRunWithDifficulty(btn.getAttribute('data-diff'));
+    });
+})();
+
+function initPrepOverlay() {
+    var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
+    if (sd) document.getElementById('prepSongTitle').textContent = sd.artist + ' \u2014 ' + sd.title;
+    if (lyrics.length === 0) { justListen(); return; }   // no lyrics -> can't score; just play
+    _markSelectedCard(localStorage.getItem('arcadeDifficulty') || 'medium');
+    _paintDiffPill(localStorage.getItem('arcadeDifficulty') || 'medium');
+    // Overlay stays open showing the gate; user picks a difficulty or "Just listen".
 }
 
 initPrepOverlay();
@@ -2700,15 +2716,12 @@ function toggleGameMode() {
     if (gameMode.active) {
         gameMode.stop();
     } else {
-        gameMode.start();
+        openDifficultyGate();   // pick difficulty, then the run starts from the top
     }
 }
 
 function replayGame() {
     document.getElementById('gameModal').style.display = 'none';
-    gameMode.stop();  // reset active flag so start() doesn't no-op
-    gameMode._resetSessionCounters();
-    audio.currentTime = 0;
-    audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
-    gameMode.start();
+    if (gameMode.active) gameMode.stop();
+    openDifficultyGate();
 }
