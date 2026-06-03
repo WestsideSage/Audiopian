@@ -78,8 +78,8 @@ Field derivation (pinned in tests):
 - `events[]` — one entry per `commitPhrase`, recorded live in `_commitNewlySettled` (the commit-once path), with `settledAtSec` = `audio.currentTime` at commit. Empty if V2 was off for the run (no arcade state) — captured as `[]`.
 - `highScore` — the key, the previous stored value, and whether this run set a new best (computed in `showEndModal`).
 
-### 3.4 Debug-gated raw arrays
-`asr[]`, `matches[]`, `promotions[]` — included **only when `window._kDebug`** is true. Otherwise omitted from the payload (and `counts` reports 0). `transitions[]` is **always** included (per-line, small, high analytical value for sync).
+### 3.4 Debug-gated heavy data
+`asr[]`, `matches[]`, `promotions[]`, and `phraseEngine.traces` — included **only when `window._kDebug`** is true (traces carry bounded-but-bulky per-phrase evidence). Otherwise omitted from the payload (`counts` reports 0 for the arrays). The `summary` block's trace-derived fields (`phraseOutcomes`, `recognizer.clearsBySource`) are computed **client-side at build time** from the in-memory traces, so lean files keep the derived view without the raw traces. `transitions[]` is **always** included (per-line, small, high analytical value for sync).
 
 ---
 
