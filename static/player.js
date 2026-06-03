@@ -1366,7 +1366,7 @@ class GameMode {
                 // Light the span on the previous line — green for strong, amber for weak
                 var allLines = lyricsScroll.querySelectorAll('.lyric-line');
                 var lineEl = allLines[prev.lineIdx];
-                if (lineEl) {
+                if (lineEl && !window.KARAOKEE_V2) {
                     var span = lineEl.querySelectorAll('.word-span')[li];
                     if (span) { span.classList.remove('missed'); span.classList.add(m.score >= 0.75 ? 'matched' : 'matched-partial'); }
                 }
@@ -1644,6 +1644,8 @@ class GameMode {
         const lineEl = lines[this.activeLineIdx];
         if (!lineEl) return;
 
+        if (window.KARAOKEE_V2) { this._paintAnchorSpansLive(lineEl); return; }
+
         const spans = lineEl.querySelectorAll('.word-span');
         spans.forEach((span, wi) => {
             span.classList.remove('matched', 'matched-partial', 'missed');
@@ -1658,6 +1660,18 @@ class GameMode {
                 // Word is unmatched — clear any stale asr-confirmed class
                 span.classList.remove('asr-confirmed');
             }
+        });
+    }
+
+    // V2: green a key-word span the moment the engine credits its anchor (anchorHits).
+    // Reds are applied at settle (see _commitNewlySettled). Non-key spans untouched.
+    _paintAnchorSpansLive(lineEl) {
+        var states = this._phraseSession && this._phraseSession.states;
+        if (!states) return;
+        lineEl.querySelectorAll('.word-span.key-word').forEach(function (span) {
+            var st = states[span.dataset.phraseId];
+            var hit = st && st.anchorHits && st.anchorHits[span.dataset.anchorIdx];
+            if (hit) { span.classList.add('matched'); span.classList.remove('missed'); }
         });
     }
 
@@ -1839,9 +1853,11 @@ class GameMode {
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
         const lineEl = lines[lineIdx];
         if (lineEl) {
-            lineEl.querySelectorAll('.word-span').forEach((span, wi) => {
-                if (scoreSummary.missedWordIndices.indexOf(wi) >= 0) span.classList.add('missed');
-            });
+            if (!window.KARAOKEE_V2) {
+                lineEl.querySelectorAll('.word-span').forEach((span, wi) => {
+                    if (scoreSummary.missedWordIndices.indexOf(wi) >= 0) span.classList.add('missed');
+                });
+            }
 
             // Flash per-line score
             const flash = document.createElement('div');
@@ -1950,6 +1966,19 @@ class GameMode {
                 });
             }
             if (evt && routeEvents && window.KARAOKEE_V2) this._onArcadeEvent(evt);
+
+            // V2 coloring: finalize this phrase's key words — green the hits, red the
+            // un-hit anchors only if the phrase didn't clear (a cleared line shows no red).
+            if (window.KARAOKEE_V2) {
+                var _conf = pst.lyricStatus === 'confirmed';
+                var _sel = '.word-span.key-word[data-phrase-id="' + ph.phraseId + '"]';
+                document.querySelectorAll(_sel).forEach(function (span) {
+                    var _hit = pst.anchorHits && pst.anchorHits[span.dataset.anchorIdx];
+                    span.classList.remove('matched', 'matched-partial', 'missed');
+                    if (_hit) span.classList.add('matched');
+                    else if (!_conf) span.classList.add('missed');
+                });
+            }
         }
     }
 
@@ -2068,7 +2097,7 @@ class GameMode {
                     // Light the span — this word just arrived late
                     const allLines = lyricsScroll.querySelectorAll('.lyric-line');
                     const lineEl   = allLines[lineIdx];
-                    if (lineEl) {
+                    if (lineEl && !window.KARAOKEE_V2) {
                         const span = lineEl.querySelectorAll('.word-span')[li];
                         if (span) {
                             span.classList.remove('missed');
@@ -2702,6 +2731,27 @@ function renderLyricsGameMode() {
         });
 
         lyricsScroll.appendChild(el);
+    });
+    _tagAnchorSpans();
+}
+
+// Tag the spans that are phrase-engine anchors (the scored "key words") with their
+// phrase + anchor identity, so V2 coloring can mirror the engine. Harmless under V1.
+function _tagAnchorSpans() {
+    if (!window.KaraokeeLyricPaint || !gameMode || !gameMode._phrasePlan) return;
+    var map = KaraokeeLyricPaint.buildAnchorSpanIndex(gameMode._phrasePlan);
+    var lines = lyricsScroll.querySelectorAll('.lyric-line');
+    Object.keys(map).forEach(function (li) {
+        var lineEl = lines[li];
+        if (!lineEl) return;
+        var spans = lineEl.querySelectorAll('.word-span');
+        map[li].forEach(function (entry) {
+            var span = spans[entry.wordIndex];
+            if (!span) return;
+            span.classList.add('key-word');
+            span.dataset.phraseId = entry.phraseId;
+            span.dataset.anchorIdx = entry.anchorIdx;
+        });
     });
 }
 
