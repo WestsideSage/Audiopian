@@ -525,16 +525,14 @@ class GameMode {
                 audioDuration: audio && isFinite(audio.duration) ? audio.duration : null
             });
             this._phraseSession = KaraokeePhraseEngine.createPhraseSession(this._phrasePlan);
+            this._arcadeState = (window.KaraokeeArcade)
+                ? KaraokeeArcade.createArcadeState(this._phraseDifficulty)
+                : null;
+            this._committedPhrases = {};
             if (this._telemetry && this._telemetry.phraseEngine) {
                 this._telemetry.phraseEngine.difficulty = this._phraseDifficulty;
                 this._telemetry.phraseEngine.plan = this._phrasePlan;
             }
-        }
-        var _dsLock = document.getElementById('diffSelect');
-        if (_dsLock) {
-            _dsLock.classList.add('locked');
-            var _dsBtns = _dsLock.querySelectorAll('button');
-            for (var _i = 0; _i < _dsBtns.length; _i++) _dsBtns[_i].setAttribute('aria-disabled', 'true');
         }
         var _dpShow = document.getElementById('diff-pill');
         if (_dpShow) { _dpShow.textContent = (this._phraseDifficulty || 'medium').toUpperCase(); _dpShow.style.display = 'inline-block'; }
@@ -575,6 +573,7 @@ class GameMode {
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
         this._renderV2Panel();
+        if (window.KARAOKEE_V2 && this._arcadeState) this._renderArcadeHud(null);
     }
 
     stop() {
@@ -596,13 +595,8 @@ class GameMode {
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
         var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
-        var _dsUnlock = document.getElementById('diffSelect');
-        if (_dsUnlock) {
-            _dsUnlock.classList.remove('locked');
-            var _ubtns = _dsUnlock.querySelectorAll('button');
-            for (var _u = 0; _u < _ubtns.length; _u++) _ubtns[_u].removeAttribute('aria-disabled');
-        }
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
+        this._hideArcadeHud();
     }
 
     /**
@@ -657,6 +651,11 @@ class GameMode {
         this.matchedWords = 0;
         this.weightedTotal = 0;
         this.weightedMatched = 0;
+        if (window.KaraokeeArcade && this._phraseDifficulty) {
+            this._arcadeState = KaraokeeArcade.createArcadeState(this._phraseDifficulty);
+        }
+        this._committedPhrases = {};
+        document.body.classList.remove('arcade-onfire');
         this.linesScored = 0;
         this.perfectLines = 0;
         this.currentStreak = 0;
@@ -1898,11 +1897,80 @@ class GameMode {
         if (!this.active || !this._phraseSession || !window.KaraokeePhraseEngine) return;
         var now = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
         try { KaraokeePhraseEngine.settlePhrases(this._phraseSession, now); } catch (e) {}
+        this._commitNewlySettled(true);
+
         if (window.KARAOKEE_V2) {
             var pct = this._liveHonestPct();
             var el = document.getElementById('score-pct');
             if (el && pct != null) el.textContent = pct + '%';
         }
+    }
+
+    // Commit each phrase exactly once, when it first reaches status 'settled'.
+    // Reads the UNCAPPED anchor-hit count at that instant (spec section 4.2): later
+    // grace-window evidence still lifts the honest %, but never the live multiplier.
+    // routeEvents drives the HUD; the end-screen flush passes false.
+    _commitNewlySettled(routeEvents) {
+        if (!this._arcadeState || !window.KaraokeeArcade || !this._phrasePlan || !this._phraseSession) return;
+        var phrases = this._phrasePlan.phrases || [];
+        for (var pi = 0; pi < phrases.length; pi++) {
+            var ph = phrases[pi];
+            var pst = this._phraseSession.states[ph.phraseId];
+            if (!pst || pst.status !== 'settled') continue;
+            if (this._committedPhrases[ph.phraseId]) continue;
+            this._committedPhrases[ph.phraseId] = true;
+            var evt = KaraokeeArcade.commitPhrase(this._arcadeState, {
+                phraseId: ph.phraseId,
+                anchorsRequired: ph.anchorsRequired,
+                anchorsTotal: (ph.anchors || []).length,
+                anchorsHit: Object.keys(pst.anchorHits).length,
+                rescuedByWhisper: pst.rescuedByWhisper
+            });
+            if (evt && routeEvents && window.KARAOKEE_V2) this._onArcadeEvent(evt);
+        }
+    }
+
+    _onArcadeEvent(evt) {
+        this._renderArcadeHud(evt);
+        if (window._kDebug) console.log('[ARCADE]', evt.outcome, '+' + evt.pointsAwarded,
+            'pts=' + evt.points, 'x' + evt.multiplier, evt.onFire ? 'FIRE' : '');
+    }
+
+    _renderArcadeHud(evt) {
+        var hud = document.getElementById('arcadeHud');
+        if (!hud || !this._arcadeState || !window.KaraokeeArcade) return;
+        if (!window.KARAOKEE_V2) { hud.style.display = 'none'; return; }
+        hud.style.display = 'flex';
+
+        var st = this._arcadeState;
+        var ptsEl = document.getElementById('ahPoints');
+        if (ptsEl) {
+            ptsEl.textContent = String(st.points);
+            if (evt && evt.pointsAwarded > 0) {
+                ptsEl.classList.add('bump');
+                setTimeout(function () { ptsEl.classList.remove('bump'); }, 130);
+            }
+        }
+        var multEl = document.getElementById('ahMult');
+        if (multEl) multEl.textContent = st.multiplier + '×';
+        var fill = document.getElementById('ahRampFill');
+        if (fill) fill.style.width = Math.round(KaraokeeArcade.rampProgress(st) * 100) + '%';
+
+        var streak = document.getElementById('ahStreak');
+        var streakVal = document.getElementById('ahStreakVal');
+        if (streak && streakVal) {
+            streakVal.textContent = String(st.streak);
+            streak.style.visibility = st.streak >= 2 ? 'visible' : 'hidden';
+        }
+        var fire = document.getElementById('ahFire');
+        if (fire) fire.style.display = st.onFire ? 'block' : 'none';
+        document.body.classList.toggle('arcade-onfire', !!st.onFire);
+    }
+
+    _hideArcadeHud() {
+        var hud = document.getElementById('arcadeHud');
+        if (hud) hud.style.display = 'none';
+        document.body.classList.remove('arcade-onfire');
     }
 
     _updateRunningScore() {
@@ -2405,15 +2473,59 @@ class GameMode {
     }
 
     showEndModal() {
-        if (!this.active || this.totalWords === 0) return;
-        const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
-        document.getElementById('modalScore').textContent = pct + '%';
-        document.getElementById('modalWords').textContent = `${this.matchedWords}/${this.totalWords}`;
-        document.getElementById('modalLines').textContent = `${this.perfectLines}/${this.linesScored}`;
-        document.getElementById('modalStreak').textContent = this.bestStreak;
+        var legacy = document.getElementById('legacyEnd');
+        var hero = document.getElementById('gradeHero');
         var feedback = document.getElementById('benchmarkFeedback');
-        if (feedback) feedback.style.display = window._kDebug ? 'block' : 'none';
         document.getElementById('lrc-offset-control').style.display = 'none';
+        this._hideArcadeHud();
+
+        var useArcade = window.KARAOKEE_V2 && this._arcadeState && window.KaraokeeArcade
+            && window.KaraokeePhraseEngine && this._phraseSession;
+
+        if (useArcade) {
+            // Force-settle any final phrases whose settled boundary lands past the
+            // (now-stuck) audio end time, so their points land before we read the summary.
+            try {
+                var endNow = (audio && isFinite(audio.duration)) ? audio.duration + 5 : 1e9;
+                KaraokeePhraseEngine.settlePhrases(this._phraseSession, endNow);
+            } catch (e) {}
+            this._commitNewlySettled(false);
+
+            var summary = KaraokeeArcade.getArcadeSummary(this._arcadeState);
+            var live = KaraokeePhraseEngine.getLiveScore(this._phraseSession);
+            var pct = Math.round((live.lyrics || 0) * 100);
+            var grade = KaraokeeArcade.gradeFor(pct);
+            var diff = (this._phraseDifficulty || 'medium');
+
+            var key = 'hiscore_' + _songKey() + '_' + diff;
+            var prev = parseInt(localStorage.getItem(key) || '0', 10) || 0;
+            var isBest = summary.points > prev;
+            if (isBest) localStorage.setItem(key, String(summary.points));
+
+            document.getElementById('gradeLetter').textContent = grade;
+            document.getElementById('gradePoints').textContent = String(summary.points);
+            document.getElementById('gradeAcc').textContent = pct + '%';
+            document.getElementById('gradeCombo').textContent = summary.maxMultiplier + '×';
+            document.getElementById('gradeStreak').textContent = String(summary.longestStreak);
+            document.getElementById('gradePerfects').textContent = String(summary.perfects);
+            document.getElementById('gradeDiff').textContent = diff.toUpperCase();
+            document.getElementById('gradeHiscore').textContent = String(Math.max(prev, summary.points));
+            document.getElementById('nbRibbon').style.display = isBest ? 'block' : 'none';
+
+            if (hero) hero.style.display = 'block';
+            if (legacy) legacy.style.display = 'none';
+        } else {
+            if (!this.active || this.totalWords === 0) return;
+            var lpct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
+            document.getElementById('modalScore').textContent = lpct + '%';
+            document.getElementById('modalWords').textContent = this.matchedWords + '/' + this.totalWords;
+            document.getElementById('modalLines').textContent = this.perfectLines + '/' + this.linesScored;
+            document.getElementById('modalStreak').textContent = this.bestStreak;
+            if (hero) hero.style.display = 'none';
+            if (legacy) legacy.style.display = 'block';
+        }
+
+        if (feedback) feedback.style.display = window._kDebug ? 'block' : 'none';
         document.getElementById('gameModal').style.display = 'flex';
     }
 }
@@ -2601,31 +2713,7 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Difficulty selector — persists to localStorage, locks while a run is active.
-(function initDifficultySelect() {
-    var sel = document.getElementById('diffSelect');
-    if (!sel) return;
-    function paint(d) {
-        var btns = sel.querySelectorAll('button');
-        for (var i = 0; i < btns.length; i++) {
-            var on = btns[i].getAttribute('data-diff') === d;
-            btns[i].classList.toggle('active', on);
-            btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
-        }
-        var pill = document.getElementById('diff-pill');
-        if (pill) pill.textContent = (d || 'medium').toUpperCase();
-    }
-    paint(localStorage.getItem('arcadeDifficulty') || 'medium');
-    sel.addEventListener('click', function (e) {
-        var btn = e.target.closest ? e.target.closest('button[data-diff]') : null;
-        if (!btn) return;
-        if (gameMode && gameMode.active) return;      // locked mid-run
-        var d = btn.getAttribute('data-diff');
-        localStorage.setItem('arcadeDifficulty', d);
-        if (gameMode) gameMode._phraseDifficulty = d;
-        paint(d);
-    });
-})();
+// (Difficulty selection moved to the load-time difficulty gate — see initDifficultyGate below.)
 
 // Format seconds as m:ss
 function fmt(s) {
@@ -2672,22 +2760,74 @@ audio.addEventListener('ended', function() {
     }
 });
 
-// --- Loading overlay ---
+// --- Difficulty gate / loading overlay ---
 
-function initPrepOverlay() {
-    var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
-    if (sd) {
-        document.getElementById('prepSongTitle').textContent =
-            sd.artist + ' \u2014 ' + sd.title;
-    }
-    skipPrep();
+function _paintDiffPill(d) {
+    var pill = document.getElementById('diff-pill');
+    if (pill) pill.textContent = (d || 'medium').toUpperCase();
 }
 
-function skipPrep() {
+function _markSelectedCard(d) {
+    var cards = document.querySelectorAll('#diffGateCards .diff-card');
+    for (var i = 0; i < cards.length; i++) {
+        cards[i].classList.toggle('selected', cards[i].getAttribute('data-diff') === d);
+    }
+}
+
+// Show the gate (used on load, Play Again, and the Game button from passive mode).
+function openDifficultyGate() {
+    var overlay = document.getElementById('prepOverlay');
+    if (!overlay) return;
+    var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
+    if (sd) document.getElementById('prepSongTitle').textContent = sd.artist + ' \u2014 ' + sd.title;
+    _markSelectedCard(localStorage.getItem('arcadeDifficulty') || 'medium');
+    try { audio.pause(); playBtn.textContent = '\u25B6'; } catch (e) {}
+    overlayDismissed = false;
+    overlay.style.display = 'flex';
+}
+
+// Begin a scored run on the chosen difficulty.
+function startRunWithDifficulty(d) {
+    localStorage.setItem('arcadeDifficulty', d);
+    if (gameMode) gameMode._phraseDifficulty = d;
+    _paintDiffPill(d);
+    overlayDismissed = true;
+    document.getElementById('prepOverlay').style.display = 'none';
+    if (gameMode.active) gameMode.stop();
+    audio.currentTime = 0;
+    audio.play().then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+    gameMode.start();
+}
+
+// Escape hatch \u2014 passive karaoke, no scoring.
+function justListen() {
     clearInterval(prepTimer);
     overlayDismissed = true;
     document.getElementById('prepOverlay').style.display = 'none';
-    audio.play().then(function() { playBtn.textContent = '\u23F8'; }).catch(function() {});
+    audio.play().then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+}
+
+// Back-compat shim (existing callers): behaves like "just listen".
+function skipPrep() { justListen(); }
+
+// Wire the gate cards once.
+(function initDifficultyGate() {
+    var cards = document.getElementById('diffGateCards');
+    if (!cards) return;
+    cards.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('button[data-diff]') : null;
+        if (!btn) return;
+        startRunWithDifficulty(btn.getAttribute('data-diff'));
+    });
+})();
+
+function initPrepOverlay() {
+    var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
+    if (sd) document.getElementById('prepSongTitle').textContent = sd.artist + ' \u2014 ' + sd.title;
+    if (lyrics.length === 0) { justListen(); return; }   // no lyrics -> can't score; just play
+    _markSelectedCard(localStorage.getItem('arcadeDifficulty') || 'medium');
+    _paintDiffPill(localStorage.getItem('arcadeDifficulty') || 'medium');
+    // Overlay stays open showing the gate; user picks a difficulty or "Just listen".
 }
 
 initPrepOverlay();
@@ -2700,15 +2840,12 @@ function toggleGameMode() {
     if (gameMode.active) {
         gameMode.stop();
     } else {
-        gameMode.start();
+        openDifficultyGate();   // pick difficulty, then the run starts from the top
     }
 }
 
 function replayGame() {
     document.getElementById('gameModal').style.display = 'none';
-    gameMode.stop();  // reset active flag so start() doesn't no-op
-    gameMode._resetSessionCounters();
-    audio.currentTime = 0;
-    audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
-    gameMode.start();
+    if (gameMode.active) gameMode.stop();
+    openDifficultyGate();
 }
