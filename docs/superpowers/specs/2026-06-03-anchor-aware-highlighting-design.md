@@ -80,3 +80,11 @@ Pure and `require`-able, so the mapping is golden-tested independently of the DO
 
 ## 8. Open Items
 - If repainting cost matters, scope the green pass to the active ± 1 lines (it already is, via `_updateWordSpans` on the active line); the red pass is per-phrase at settle. No full-song repaint loop.
+
+## 9. Revision (2026-06-03): target cue + whole-line green on pass
+
+Play-test feedback found the original "key words only, everything else dim" too bare and unclear about *which* word to sing. Revised (supersedes §2's "non-key dim, key-word green/red" and §7's "no pre-highlighting"):
+- **Un-resolved key words show a target cue** — a lavender underline (`.word-span.key-word:not(.matched):not(.missed)`), so the singer sees what to hit.
+- **Passing a line greens the whole line** — when a phrase clears (`lyricStatus === 'confirmed'`), every word of that phrase goes green (non-key included), not just the anchors.
+- **A missed line reds its key words only** (non-key stays neutral).
+- Mechanism: the helper became `buildLinePhraseMap` (tags *every* word with its `phraseId`, plus anchors), so the paint passes can green the whole phrase; `_paintAnchorSpansLive` greens the whole phrase on confirm (else greens hit anchors), and `_commitNewlySettled` greens the whole phrase on pass / reds key words on miss. All four V1 color-op gates from §3 still hold.
