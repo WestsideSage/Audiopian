@@ -573,6 +573,7 @@ class GameMode {
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
         this._renderV2Panel();
+        if (window.KARAOKEE_V2 && this._arcadeState) this._renderArcadeHud(null);
     }
 
     stop() {
@@ -595,6 +596,7 @@ class GameMode {
         document.getElementById('lrc-offset-control').style.display = 'none';
         var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
+        this._hideArcadeHud();
     }
 
     /**
@@ -1925,10 +1927,47 @@ class GameMode {
         }
     }
 
-    // Placeholder until Phase D wires the HUD; logs so Phase C is verifiable.
     _onArcadeEvent(evt) {
+        this._renderArcadeHud(evt);
         if (window._kDebug) console.log('[ARCADE]', evt.outcome, '+' + evt.pointsAwarded,
             'pts=' + evt.points, 'x' + evt.multiplier, evt.onFire ? 'FIRE' : '');
+    }
+
+    _renderArcadeHud(evt) {
+        var hud = document.getElementById('arcadeHud');
+        if (!hud || !this._arcadeState || !window.KaraokeeArcade) return;
+        if (!window.KARAOKEE_V2) { hud.style.display = 'none'; return; }
+        hud.style.display = 'flex';
+
+        var st = this._arcadeState;
+        var ptsEl = document.getElementById('ahPoints');
+        if (ptsEl) {
+            ptsEl.textContent = String(st.points);
+            if (evt && evt.pointsAwarded > 0) {
+                ptsEl.classList.add('bump');
+                setTimeout(function () { ptsEl.classList.remove('bump'); }, 130);
+            }
+        }
+        var multEl = document.getElementById('ahMult');
+        if (multEl) multEl.textContent = st.multiplier + '×';
+        var fill = document.getElementById('ahRampFill');
+        if (fill) fill.style.width = Math.round(KaraokeeArcade.rampProgress(st) * 100) + '%';
+
+        var streak = document.getElementById('ahStreak');
+        var streakVal = document.getElementById('ahStreakVal');
+        if (streak && streakVal) {
+            streakVal.textContent = String(st.streak);
+            streak.style.visibility = st.streak >= 2 ? 'visible' : 'hidden';
+        }
+        var fire = document.getElementById('ahFire');
+        if (fire) fire.style.display = st.onFire ? 'block' : 'none';
+        document.body.classList.toggle('arcade-onfire', !!st.onFire);
+    }
+
+    _hideArcadeHud() {
+        var hud = document.getElementById('arcadeHud');
+        if (hud) hud.style.display = 'none';
+        document.body.classList.remove('arcade-onfire');
     }
 
     _updateRunningScore() {
