@@ -2357,7 +2357,7 @@ class GameMode {
             ? KaraokeePhraseEngine.getLiveScore(this._phraseSession) : { lyrics: 0, composite: 0 };
         var honestLyricPct = Math.round((live.lyrics || 0) * 100);
         var composite = Math.round((live.composite || 0) * 100);
-        var grade = window.KaraokeeArcade ? KaraokeeArcade.gradeFor(honestLyricPct) : null;
+        var grade = window.KaraokeeArcade ? KaraokeeArcade.gradeFor(honestLyricPct, this._phraseDifficulty || 'medium') : null;
         var arcadeSummary = (this._arcadeState && window.KaraokeeArcade)
             ? KaraokeeArcade.getArcadeSummary(this._arcadeState) : null;
         var difficulty = this._phraseDifficulty || 'medium';
@@ -2609,7 +2609,7 @@ class GameMode {
             var summary = KaraokeeArcade.getArcadeSummary(this._arcadeState);
             var live = KaraokeePhraseEngine.getLiveScore(this._phraseSession);
             var pct = Math.round((live.lyrics || 0) * 100);
-            var grade = KaraokeeArcade.gradeFor(pct);
+            var grade = KaraokeeArcade.gradeFor(pct, this._phraseDifficulty || 'medium');
             var diff = (this._phraseDifficulty || 'medium');
 
             var key = 'hiscore_' + _songKey() + '_' + diff;
