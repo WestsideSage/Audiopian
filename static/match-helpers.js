@@ -301,7 +301,10 @@ var ADLIB_WORDS = new Set([
     'yuh', 'yah', 'aye',
 ]);
 
-var WORD_WEIGHTS = { core: 1.0, function: 0.5, adlib: 0.25 };
+// adlib = 0 ("free"): non-lexical ad-libs/fillers ("uh", "hm", "oh", "yeah", and
+// anything in parentheses) are essentially never returned by speech recognizers, so
+// they're structurally unwinnable — they must neither help nor hurt the score.
+var WORD_WEIGHTS = { core: 1.0, function: 0.5, adlib: 0 };
 
 /**
  * Classify a word for scoring weight.

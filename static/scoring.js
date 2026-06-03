@@ -472,8 +472,14 @@
         var missedWords = [];
         var missedWordIndices = [];
 
+        var totalWords = 0;
         for (var i = 0; i < lineWords.length; i++) {
-            var weight = (wordTimings[i] && wordTimings[i].weight) || 1.0;
+            var wt = wordTimings[i];
+            var weight = (wt && wt.weight != null) ? wt.weight : 1.0;
+            // weight 0 = "free" ad-lib/filler: excluded from the total and never
+            // marked missed — it can neither help nor hurt the score.
+            if (weight === 0) continue;
+            totalWords++;
             weightedTotal += weight;
 
             var rawScore = rawMatchScore(matchedSet, i);
@@ -488,7 +494,7 @@
         }
 
         return {
-            totalWords: lineWords.length,
+            totalWords: totalWords,
             matchedWords: matchedWords,
             weightedTotal: weightedTotal,
             weightedMatched: weightedMatched,

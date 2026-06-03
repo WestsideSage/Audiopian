@@ -1807,9 +1807,13 @@ class GameMode {
         var wordTimings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
             ? this.allWordTimings[lineIdx] : [];
         var scoreSummary = computeLineScore(lineWords, wordTimings, matchedSet, vadMatchedSet, asrConfirmedSet);
+        // A line with nothing scoreable (all "free" ad-libs/fillers) neither counts
+        // toward the score nor breaks the streak.
+        if (scoreSummary.weightedTotal === 0) return;
         var weightedTotal = scoreSummary.weightedTotal;
         var weightedMatched = scoreSummary.weightedMatched;
         var matched = scoreSummary.matchedWords;
+        var scoredTotal = scoreSummary.totalWords;
 
         // Mark unmatched spans as red
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
@@ -1822,7 +1826,7 @@ class GameMode {
             // Flash per-line score
             const flash = document.createElement('div');
             flash.className = 'line-score-flash';
-            flash.textContent = `+${matched}/${total}`;
+            flash.textContent = `+${matched}/${scoredTotal}`;
             flash.style.top = lineEl.offsetTop + 'px';
             document.getElementById('lyrics-container').appendChild(flash);
             setTimeout(() => flash.remove(), 1300);
@@ -1830,7 +1834,7 @@ class GameMode {
 
         this.weightedTotal   += weightedTotal;
         this.weightedMatched += weightedMatched;
-        this.totalWords      += total;
+        this.totalWords      += scoredTotal;
         this.matchedWords    += matched;
         this.linesScored++;
 
