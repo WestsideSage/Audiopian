@@ -525,6 +525,10 @@ class GameMode {
                 audioDuration: audio && isFinite(audio.duration) ? audio.duration : null
             });
             this._phraseSession = KaraokeePhraseEngine.createPhraseSession(this._phrasePlan);
+            this._arcadeState = (window.KaraokeeArcade)
+                ? KaraokeeArcade.createArcadeState(this._phraseDifficulty)
+                : null;
+            this._committedPhrases = {};
             if (this._telemetry && this._telemetry.phraseEngine) {
                 this._telemetry.phraseEngine.difficulty = this._phraseDifficulty;
                 this._telemetry.phraseEngine.plan = this._phrasePlan;
@@ -645,6 +649,11 @@ class GameMode {
         this.matchedWords = 0;
         this.weightedTotal = 0;
         this.weightedMatched = 0;
+        if (window.KaraokeeArcade && this._phraseDifficulty) {
+            this._arcadeState = KaraokeeArcade.createArcadeState(this._phraseDifficulty);
+        }
+        this._committedPhrases = {};
+        document.body.classList.remove('arcade-onfire');
         this.linesScored = 0;
         this.perfectLines = 0;
         this.currentStreak = 0;
@@ -1886,11 +1895,40 @@ class GameMode {
         if (!this.active || !this._phraseSession || !window.KaraokeePhraseEngine) return;
         var now = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
         try { KaraokeePhraseEngine.settlePhrases(this._phraseSession, now); } catch (e) {}
+
+        // Commit each phrase exactly once, when it first reaches status 'settled'.
+        // Reads the UNCAPPED anchor-hit count at that instant (spec section 4.2): later
+        // grace-window evidence still lifts the honest %, but never the live multiplier.
+        if (this._arcadeState && window.KaraokeeArcade && this._phrasePlan) {
+            var phrases = this._phrasePlan.phrases || [];
+            for (var pi = 0; pi < phrases.length; pi++) {
+                var ph = phrases[pi];
+                var pst = this._phraseSession.states[ph.phraseId];
+                if (!pst || pst.status !== 'settled') continue;
+                if (this._committedPhrases[ph.phraseId]) continue;
+                this._committedPhrases[ph.phraseId] = true;
+                var evt = KaraokeeArcade.commitPhrase(this._arcadeState, {
+                    phraseId: ph.phraseId,
+                    anchorsRequired: ph.anchorsRequired,
+                    anchorsTotal: (ph.anchors || []).length,
+                    anchorsHit: Object.keys(pst.anchorHits).length,
+                    rescuedByWhisper: pst.rescuedByWhisper
+                });
+                if (evt && window.KARAOKEE_V2) this._onArcadeEvent(evt);
+            }
+        }
+
         if (window.KARAOKEE_V2) {
             var pct = this._liveHonestPct();
             var el = document.getElementById('score-pct');
             if (el && pct != null) el.textContent = pct + '%';
         }
+    }
+
+    // Placeholder until Phase D wires the HUD; logs so Phase C is verifiable.
+    _onArcadeEvent(evt) {
+        if (window._kDebug) console.log('[ARCADE]', evt.outcome, '+' + evt.pointsAwarded,
+            'pts=' + evt.points, 'x' + evt.multiplier, evt.onFire ? 'FIRE' : '');
     }
 
     _updateRunningScore() {
