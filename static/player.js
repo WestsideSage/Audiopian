@@ -514,6 +514,7 @@ class GameMode {
         this.active = true;
         this._suspended = false;
         this._resetSessionCounters();
+        this._vadState = (typeof createVadState === 'function') ? createVadState() : null;
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
         this._initTelemetry();   // always init so download button works whenever D is pressed
@@ -564,6 +565,7 @@ class GameMode {
         document.getElementById('score-pct').textContent = '0%';
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
+        this._renderV2Panel();
     }
 
     stop() {
@@ -584,6 +586,7 @@ class GameMode {
         document.getElementById('score-display').style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
+        var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
     }
 
     /**
@@ -1658,20 +1661,27 @@ class GameMode {
     updateHotWord() {
         // Refresh isSpeaking from AnalyserNode — real-time, not tied to Whisper chunk rate
         var vadRms = this._readVadRms();
-        var _vadMultiplier = (this.wordTimings && this.wordTimings.vadTempoClass === 'slow') ? 1.3 : 1.0;
-        this.isSpeaking = vadRms > (this._energyThreshold * _vadMultiplier);
+        if (window.KARAOKEE_V2 && this._vadState && typeof updateVad === 'function') {
+            // Stage 2: adaptive noise floor + hysteresis + debounce. Continuously
+            // recalibrates (frozen while speaking); no frozen _energyThreshold,
+            // and single-frame spikes/dips can't flip the gate.
+            this.isSpeaking = updateVad(this._vadState, vadRms).isSpeaking;
+        } else {
+            var _vadMultiplier = (this.wordTimings && this.wordTimings.vadTempoClass === 'slow') ? 1.3 : 1.0;
+            this.isSpeaking = vadRms > (this._energyThreshold * _vadMultiplier);
 
-        // Baseline calibration during first 2s of playback
-        if (!this._vadBaselineReady) {
-            if (audio.currentTime > 0 && audio.currentTime < 2.0) {
-                this._vadBaselineSamples.push(vadRms);
-            } else if (audio.currentTime >= 2.0) {
-                if (this._vadBaselineSamples.length > 0) {
-                    var bSum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
-                    this._vadBaseline = bSum / this._vadBaselineSamples.length;
-                    this._energyThreshold = Math.min(this._vadBaseline + 0.025, 0.06);
+            // Baseline calibration during first 2s of playback
+            if (!this._vadBaselineReady) {
+                if (audio.currentTime > 0 && audio.currentTime < 2.0) {
+                    this._vadBaselineSamples.push(vadRms);
+                } else if (audio.currentTime >= 2.0) {
+                    if (this._vadBaselineSamples.length > 0) {
+                        var bSum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
+                        this._vadBaseline = bSum / this._vadBaselineSamples.length;
+                        this._energyThreshold = Math.min(this._vadBaseline + 0.025, 0.06);
+                    }
+                    this._vadBaselineReady = true;
                 }
-                this._vadBaselineReady = true;
             }
         }
 
@@ -1836,9 +1846,34 @@ class GameMode {
     }
 
     _updateRunningScore() {
+        this._renderV2Panel();
         if (this.weightedTotal === 0) return;
         const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
         document.getElementById('score-pct').textContent = pct + '%';
+    }
+
+    /**
+     * Stage 3 dual-display: render the experimental phrase-engine score (lyrics /
+     * timing / stability / composite) beside the headline score, gated by the
+     * karaokee_v2 flag (press V). Pure read of the live phrase session; never
+     * mutates state and never affects the headline #score-pct.
+     */
+    _renderV2Panel() {
+        var el = document.getElementById('v2-panel');
+        if (!el) return;
+        if (!window.KARAOKEE_V2 || !this.active || !this._phraseSession || !window.KaraokeePhraseEngine
+            || typeof KaraokeePhraseEngine.getLiveScore !== 'function') {
+            el.style.display = 'none';
+            return;
+        }
+        try {
+            var s = KaraokeePhraseEngine.getLiveScore(this._phraseSession);
+            el.style.display = 'inline-block';
+            el.textContent = 'V2 ' + Math.round(s.composite * 100) + '%  (L ' + Math.round(s.lyrics * 100)
+                + ' · T ' + Math.round(s.timing * 100) + ' · S ' + Math.round(s.stability * 100) + ')';
+        } catch (e) {
+            el.style.display = 'none';
+        }
     }
 
     /**
@@ -2484,14 +2519,24 @@ document.getElementById('offsetPlus').addEventListener('click', function() {
     _updateOffsetDisplay();
 });
 
+// Experimental Scoring V2 (adaptive VAD + phrase-engine dual-display panel).
+// Off by default; the current scorer stays the headline. Press V to A/B it.
+window.KARAOKEE_V2 = (localStorage.getItem('karaokee_v2') === '1');
+
 // Debug HUD — press D to toggle (works any time, not just in Game Mode)
 document.addEventListener('keydown', (e) => {
-    if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'd' || e.key === 'D') {
         window._kDebug = !window._kDebug;
         const hud = document.getElementById('debug-hud');
         if (hud) hud.style.display = window._kDebug ? 'block' : 'none';
         if (window._kDebug) gameMode._renderDebugHud();
         console.log('[DEBUG HUD]', window._kDebug ? 'ON — start Game Mode and rap to see events' : 'OFF');
+    } else if (e.key === 'v' || e.key === 'V') {
+        window.KARAOKEE_V2 = !window.KARAOKEE_V2;
+        localStorage.setItem('karaokee_v2', window.KARAOKEE_V2 ? '1' : '0');
+        if (gameMode) gameMode._renderV2Panel();
+        console.log('[SCORING V2]', window.KARAOKEE_V2 ? 'ON — adaptive VAD + phrase-engine panel' : 'OFF');
     }
 });
 
