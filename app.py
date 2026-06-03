@@ -381,6 +381,9 @@ def whisper_status():
         provider=provider,
         device=_whisper_active_device,
         compute_type=_whisper_active_compute,
+        # Active gpt-realtime-whisper latency setting (or null = OpenAI default), so
+        # an A/B of OPENAI_TRANSCRIBE_DELAY is verifiable at a glance.
+        delay=(OPENAI_TRANSCRIBE_DELAY or None) if provider == 'openai_realtime' else None,
     )
 
 
