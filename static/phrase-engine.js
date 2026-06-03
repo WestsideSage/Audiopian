@@ -429,14 +429,12 @@
 
     function getLiveScore(session) {
         var lyrics = 1;
-        var timing = 1;
-        var stability = 1;
+        var conviction = 1;
         if (session && session.states) {
             var sumHit = 0;
             var sumReq = 0;
-            var clearedCount = 0;
-            var cleanCount = 0;
-            var rescuedCount = 0;
+            var confirmedCount = 0;
+            var engagedCount = 0;
             Object.keys(session.states).forEach(function(phraseId) {
                 var state = session.states[phraseId];
                 var phrase = state.phrase || {};
@@ -447,21 +445,22 @@
                     sumHit += hit;
                     sumReq += required;
                 }
-                if (state.cleared) {
-                    clearedCount++;
-                    if (state.flowStatus === 'clean') cleanCount++;
-                    if (state.rescuedByWhisper) rescuedCount++;
-                }
+                // Conviction: of the phrases you ENGAGED (hit >=1 anchor), how many did
+                // you fully clear? Source-independent — a Whisper-rescued clear counts
+                // exactly like a browser clear. Timing is intentionally NOT scored:
+                // clearing is in-window by definition and "late" evidence is recognizer
+                // lag, not the singer — a fair timing axis needs real word onsets
+                // (forced alignment), a later stage.
+                if (state.lyricStatus === 'confirmed') { confirmedCount++; engagedCount++; }
+                else if (state.lyricStatus === 'partial') { engagedCount++; }
             });
             lyrics = sumReq > 0 ? clamp01(sumHit / sumReq) : 1;
-            timing = clearedCount > 0 ? cleanCount / clearedCount : 1;
-            stability = clearedCount > 0 ? 1 - (rescuedCount / clearedCount) : 1;
+            conviction = engagedCount > 0 ? confirmedCount / engagedCount : 1;
         }
-        var composite = 0.6 * lyrics + 0.25 * timing + 0.15 * stability;
+        var composite = 0.75 * lyrics + 0.25 * conviction;
         return {
             lyrics: lyrics,
-            timing: timing,
-            stability: stability,
+            conviction: conviction,
             composite: composite
         };
     }

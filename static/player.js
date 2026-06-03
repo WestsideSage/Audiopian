@@ -1869,8 +1869,8 @@ class GameMode {
         try {
             var s = KaraokeePhraseEngine.getLiveScore(this._phraseSession);
             el.style.display = 'inline-block';
-            el.textContent = 'V2 ' + Math.round(s.composite * 100) + '%  (L ' + Math.round(s.lyrics * 100)
-                + ' · T ' + Math.round(s.timing * 100) + ' · S ' + Math.round(s.stability * 100) + ')';
+            el.textContent = 'V2 ' + Math.round(s.composite * 100) + '%  (lyrics ' + Math.round(s.lyrics * 100)
+                + ' · conviction ' + Math.round(s.conviction * 100) + ')';
         } catch (e) {
             el.style.display = 'none';
         }
