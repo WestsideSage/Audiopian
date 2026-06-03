@@ -66,7 +66,7 @@ No build step; files are served directly by Flask.
 `sync-helpers.js` and `match-helpers.js` are pure (no DOM/AudioContext) so they can be `require()`d by the `.cjs` test files in `tests/`. When adding functionality to these modules, preserve Node.js compatibility.
 
 ### Telemetry
-Session telemetry JSON files are written to `output_telemetry/<date>/`. These are for offline analysis of scoring accuracy and timing drift — not part of the production serving path.
+Each completed run auto-saves a JSON to `output_telemetry/<date>/` via `POST /telemetry` (Flask writes it; the client builds it in `player.js` `_buildTelemetryPayload`, called on song-end and on stop). Schema v2 (`meta.schemaVersion: 2`) adds a `summary` block (final scores, arcade outcome, recognizer attribution, sync drift, and a cheese/honesty correlation) and an `arcade` block (per-phrase commit events + high score). Lean by default; the heavy raw arrays (`asr`/`matches`/`promotions`/`phraseEngine.traces`) are included only when debug is on (press `D`). The `summary` digest is derived by the pure `static/telemetry-helpers.js` (`summarizeRun`, golden-tested in `tests/test_telemetry_helpers.cjs`). For offline analysis of scoring honesty/economy and timing drift — not part of the production serving path.
 
 ## Key constraints
 
