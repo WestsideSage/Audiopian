@@ -1897,33 +1897,36 @@ class GameMode {
         if (!this.active || !this._phraseSession || !window.KaraokeePhraseEngine) return;
         var now = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
         try { KaraokeePhraseEngine.settlePhrases(this._phraseSession, now); } catch (e) {}
-
-        // Commit each phrase exactly once, when it first reaches status 'settled'.
-        // Reads the UNCAPPED anchor-hit count at that instant (spec section 4.2): later
-        // grace-window evidence still lifts the honest %, but never the live multiplier.
-        if (this._arcadeState && window.KaraokeeArcade && this._phrasePlan) {
-            var phrases = this._phrasePlan.phrases || [];
-            for (var pi = 0; pi < phrases.length; pi++) {
-                var ph = phrases[pi];
-                var pst = this._phraseSession.states[ph.phraseId];
-                if (!pst || pst.status !== 'settled') continue;
-                if (this._committedPhrases[ph.phraseId]) continue;
-                this._committedPhrases[ph.phraseId] = true;
-                var evt = KaraokeeArcade.commitPhrase(this._arcadeState, {
-                    phraseId: ph.phraseId,
-                    anchorsRequired: ph.anchorsRequired,
-                    anchorsTotal: (ph.anchors || []).length,
-                    anchorsHit: Object.keys(pst.anchorHits).length,
-                    rescuedByWhisper: pst.rescuedByWhisper
-                });
-                if (evt && window.KARAOKEE_V2) this._onArcadeEvent(evt);
-            }
-        }
+        this._commitNewlySettled(true);
 
         if (window.KARAOKEE_V2) {
             var pct = this._liveHonestPct();
             var el = document.getElementById('score-pct');
             if (el && pct != null) el.textContent = pct + '%';
+        }
+    }
+
+    // Commit each phrase exactly once, when it first reaches status 'settled'.
+    // Reads the UNCAPPED anchor-hit count at that instant (spec section 4.2): later
+    // grace-window evidence still lifts the honest %, but never the live multiplier.
+    // routeEvents drives the HUD; the end-screen flush passes false.
+    _commitNewlySettled(routeEvents) {
+        if (!this._arcadeState || !window.KaraokeeArcade || !this._phrasePlan || !this._phraseSession) return;
+        var phrases = this._phrasePlan.phrases || [];
+        for (var pi = 0; pi < phrases.length; pi++) {
+            var ph = phrases[pi];
+            var pst = this._phraseSession.states[ph.phraseId];
+            if (!pst || pst.status !== 'settled') continue;
+            if (this._committedPhrases[ph.phraseId]) continue;
+            this._committedPhrases[ph.phraseId] = true;
+            var evt = KaraokeeArcade.commitPhrase(this._arcadeState, {
+                phraseId: ph.phraseId,
+                anchorsRequired: ph.anchorsRequired,
+                anchorsTotal: (ph.anchors || []).length,
+                anchorsHit: Object.keys(pst.anchorHits).length,
+                rescuedByWhisper: pst.rescuedByWhisper
+            });
+            if (evt && routeEvents && window.KARAOKEE_V2) this._onArcadeEvent(evt);
         }
     }
 
@@ -2470,15 +2473,59 @@ class GameMode {
     }
 
     showEndModal() {
-        if (!this.active || this.totalWords === 0) return;
-        const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
-        document.getElementById('modalScore').textContent = pct + '%';
-        document.getElementById('modalWords').textContent = `${this.matchedWords}/${this.totalWords}`;
-        document.getElementById('modalLines').textContent = `${this.perfectLines}/${this.linesScored}`;
-        document.getElementById('modalStreak').textContent = this.bestStreak;
+        var legacy = document.getElementById('legacyEnd');
+        var hero = document.getElementById('gradeHero');
         var feedback = document.getElementById('benchmarkFeedback');
-        if (feedback) feedback.style.display = window._kDebug ? 'block' : 'none';
         document.getElementById('lrc-offset-control').style.display = 'none';
+        this._hideArcadeHud();
+
+        var useArcade = window.KARAOKEE_V2 && this._arcadeState && window.KaraokeeArcade
+            && window.KaraokeePhraseEngine && this._phraseSession;
+
+        if (useArcade) {
+            // Force-settle any final phrases whose settled boundary lands past the
+            // (now-stuck) audio end time, so their points land before we read the summary.
+            try {
+                var endNow = (audio && isFinite(audio.duration)) ? audio.duration + 5 : 1e9;
+                KaraokeePhraseEngine.settlePhrases(this._phraseSession, endNow);
+            } catch (e) {}
+            this._commitNewlySettled(false);
+
+            var summary = KaraokeeArcade.getArcadeSummary(this._arcadeState);
+            var live = KaraokeePhraseEngine.getLiveScore(this._phraseSession);
+            var pct = Math.round((live.lyrics || 0) * 100);
+            var grade = KaraokeeArcade.gradeFor(pct);
+            var diff = (this._phraseDifficulty || 'medium');
+
+            var key = 'hiscore_' + _songKey() + '_' + diff;
+            var prev = parseInt(localStorage.getItem(key) || '0', 10) || 0;
+            var isBest = summary.points > prev;
+            if (isBest) localStorage.setItem(key, String(summary.points));
+
+            document.getElementById('gradeLetter').textContent = grade;
+            document.getElementById('gradePoints').textContent = String(summary.points);
+            document.getElementById('gradeAcc').textContent = pct + '%';
+            document.getElementById('gradeCombo').textContent = summary.maxMultiplier + '×';
+            document.getElementById('gradeStreak').textContent = String(summary.longestStreak);
+            document.getElementById('gradePerfects').textContent = String(summary.perfects);
+            document.getElementById('gradeDiff').textContent = diff.toUpperCase();
+            document.getElementById('gradeHiscore').textContent = String(Math.max(prev, summary.points));
+            document.getElementById('nbRibbon').style.display = isBest ? 'block' : 'none';
+
+            if (hero) hero.style.display = 'block';
+            if (legacy) legacy.style.display = 'none';
+        } else {
+            if (!this.active || this.totalWords === 0) return;
+            var lpct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
+            document.getElementById('modalScore').textContent = lpct + '%';
+            document.getElementById('modalWords').textContent = this.matchedWords + '/' + this.totalWords;
+            document.getElementById('modalLines').textContent = this.perfectLines + '/' + this.linesScored;
+            document.getElementById('modalStreak').textContent = this.bestStreak;
+            if (hero) hero.style.display = 'none';
+            if (legacy) legacy.style.display = 'block';
+        }
+
+        if (feedback) feedback.style.display = window._kDebug ? 'block' : 'none';
         document.getElementById('gameModal').style.display = 'flex';
     }
 }

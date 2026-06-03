@@ -264,6 +264,24 @@
             margin-bottom: 28px;
         }
 
+        /* ── Grade-hero end screen ───────────────────────────────── */
+        .grade-hero { position: relative; margin-bottom: 22px; }
+        .grade-letter {
+            font-size: 5rem; font-weight: 900; line-height: 1;
+            background: linear-gradient(135deg,#e040fb,#7c4dff,#00e676);
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent; color: transparent;
+        }
+        .grade-points { font-size: 1.6rem; font-weight: 800; color: #00e676; margin-top: 4px; }
+        .grade-stats { color: #aaa; font-size: 0.9rem; line-height: 1.9; margin-top: 14px; }
+        .grade-stats span { color: #e6d6ff; font-weight: 700; }
+        .nb-ribbon {
+            position: absolute; top: -10px; right: -10px; transform: rotate(8deg);
+            background: linear-gradient(90deg,#ff5252,#ff9800); color: #fff;
+            font-weight: 900; font-size: 0.7rem; letter-spacing: 1.5px;
+            padding: 4px 10px; border-radius: 8px; box-shadow: 0 0 14px #ff572eaa;
+        }
+
         .game-modal-actions {
             display: flex;
             gap: 12px;
@@ -436,12 +454,27 @@
 
     <div class="game-modal" id="gameModal" style="display:none">
         <div class="game-modal-box">
-            <div class="game-modal-title">🎤 Final Score</div>
-            <div class="game-modal-score" id="modalScore">0%</div>
-            <div class="game-modal-stats">
-                <div>Words correct: <span id="modalWords">0/0</span></div>
-                <div>Lines perfect: <span id="modalLines">0/0</span></div>
-                <div>Best streak: <span id="modalStreak">0</span> lines</div>
+            <div class="grade-hero" id="gradeHero" style="display:none">
+                <div class="nb-ribbon" id="nbRibbon" style="display:none">NEW BEST</div>
+                <div class="grade-letter" id="gradeLetter">A</div>
+                <div class="grade-points"><span id="gradePoints">0</span> pts</div>
+                <div class="grade-stats">
+                    <div>Accuracy <span id="gradeAcc">0%</span></div>
+                    <div>Max combo <span id="gradeCombo">1&#215;</span></div>
+                    <div>Longest streak <span id="gradeStreak">0</span></div>
+                    <div>Perfects <span id="gradePerfects">0</span></div>
+                    <div>Difficulty <span id="gradeDiff">MEDIUM</span></div>
+                    <div>High score <span id="gradeHiscore">0</span></div>
+                </div>
+            </div>
+            <div id="legacyEnd">
+                <div class="game-modal-title">🎤 Final Score</div>
+                <div class="game-modal-score" id="modalScore">0%</div>
+                <div class="game-modal-stats">
+                    <div>Words correct: <span id="modalWords">0/0</span></div>
+                    <div>Lines perfect: <span id="modalLines">0/0</span></div>
+                    <div>Best streak: <span id="modalStreak">0</span> lines</div>
+                </div>
             </div>
             <div class="benchmark-feedback" id="benchmarkFeedback" style="display:none">
                 <label>Run intent
