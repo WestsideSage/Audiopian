@@ -81,16 +81,28 @@ function totalFor(diff) {
 assert.ok(totalFor('expert') > totalFor('easy'), 'expert out-pays easy for identical play');
 assert.ok(totalFor('hard') > totalFor('medium'), 'hard out-pays medium');
 
-// --- 8. Grade thresholds (off honest %) ---
-assert.strictEqual(arcade.gradeFor(95), 'S');
-assert.strictEqual(arcade.gradeFor(94), 'A');
-assert.strictEqual(arcade.gradeFor(85), 'A');
-assert.strictEqual(arcade.gradeFor(84), 'B');
-assert.strictEqual(arcade.gradeFor(72), 'B');
-assert.strictEqual(arcade.gradeFor(71), 'C');
-assert.strictEqual(arcade.gradeFor(58), 'C');
-assert.strictEqual(arcade.gradeFor(57), 'D');
-assert.strictEqual(arcade.gradeFor(0), 'D');
+// --- 8. Grade thresholds — difficulty-aware ('medium' is the default) ---
+assert.strictEqual(arcade.gradeFor(90), 'S');            // medium S=87
+assert.strictEqual(arcade.gradeFor(86), 'A');            // <87, >=73
+assert.strictEqual(arcade.gradeFor(60), 'B');            // >=59
+assert.strictEqual(arcade.gradeFor(45), 'C');            // >=45
+assert.strictEqual(arcade.gradeFor(44), 'D');            // <45
+// Easy aces low coverage; Expert is strict.
+assert.strictEqual(arcade.gradeFor(93, 'easy'), 'S');    // easy S=80
+assert.strictEqual(arcade.gradeFor(80, 'easy'), 'S');
+assert.strictEqual(arcade.gradeFor(79, 'easy'), 'A');    // easy A=64
+assert.strictEqual(arcade.gradeFor(32, 'easy'), 'C');    // easy C=32
+assert.strictEqual(arcade.gradeFor(31, 'easy'), 'D');
+assert.strictEqual(arcade.gradeFor(93, 'expert'), 'A');  // expert S=96 -> 93 is A (>=88)
+assert.strictEqual(arcade.gradeFor(96, 'expert'), 'S');
+assert.strictEqual(arcade.gradeFor(95, 'expert'), 'A');
+// Monotonic: for a fixed pct, grade rank never improves as difficulty rises.
+var gradeRank = { S: 5, A: 4, B: 3, C: 2, D: 1 };
+['easy', 'medium', 'hard', 'expert'].reduce(function (prev, d) {
+    var r = gradeRank[arcade.gradeFor(85, d)];
+    assert.ok(r <= prev, 'grade for 85% is monotonic non-increasing across difficulty');
+    return r;
+}, 5);
 
 // --- 9. Commit-once: same phraseId twice is ignored ---
 var c = arcade.createArcadeState('medium');
