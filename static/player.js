@@ -600,7 +600,7 @@ class GameMode {
         if (_dsUnlock) {
             _dsUnlock.classList.remove('locked');
             var _ubtns = _dsUnlock.querySelectorAll('button');
-            for (var _u = 0; _u < _ubtns.length; _u++) _ubtns[_u].setAttribute('aria-disabled', 'false');
+            for (var _u = 0; _u < _ubtns.length; _u++) _ubtns[_u].removeAttribute('aria-disabled');
         }
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
     }
