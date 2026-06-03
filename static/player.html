@@ -133,6 +133,14 @@
             color: #ff5252;
         }
 
+        /* Key (scored) word target cue — shown until the line is passed/missed. */
+        .word-span.key-word:not(.matched):not(.matched-partial):not(.missed) {
+            color: #c5b3ff;
+            text-decoration: underline;
+            text-decoration-color: #7c4dff88;
+            text-underline-offset: 3px;
+        }
+
         @keyframes confirmPulse {
             0%   { text-shadow: 0 0 0px #fff; }
             50%  { text-shadow: 0 0 8px #fff, 0 0 14px #00e676; }

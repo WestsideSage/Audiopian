@@ -30,37 +30,41 @@ var lyrics = [
     { time: 8, text: 'love conquers everything' }
 ];
 var plan = phraseEngine.buildPhrasePlan(lyrics, { difficulty: 'hard', audioDuration: 20 });
-var map = paint.buildAnchorSpanIndex(plan);
+var map = paint.buildLinePhraseMap(plan);
 
-// Line 0 chunked into >= 2 phrases
-var line0 = plan.phrases.filter(function (p) { return p.lineIdx === 0; });
-assert.ok(line0.length >= 2, 'long line chunks into multiple phrases');
-var p0 = line0[0], p1 = line0[1];
-var offset1 = p0.words.length;
-var entries0 = map[0] || [];
+// --- Line 0: chunked into >= 2 phrases; phrase ranges tile the line ---
+var l0 = map[0] || [];
+assert.ok(l0.length >= 2, 'long line chunks into >= 2 phrases');
+assert.strictEqual(l0[0].startIndex, 0, 'first chunk starts at index 0');
+assert.strictEqual(l0[1].startIndex, l0[0].wordCount, 'second chunk starts after the first');
+var totalWc = l0.reduce(function (s, p) { return s + p.wordCount; }, 0);
+assert.strictEqual(totalWc, scoring.normalizeWords(lyrics[0].text).length, 'phrase word counts cover every word in the line');
 
-// First chunk: span index == anchor.wordIdx (offset 0)
-p0.anchors.forEach(function (a) {
-    var e = entries0.find(function (x) { return x.phraseId === p0.phraseId && x.anchorIdx === a.anchorIdx; });
-    assert.ok(e, 'entry exists for first-chunk anchor');
-    assert.strictEqual(e.wordIndex, a.wordIdx, 'first chunk uses offset 0');
+// Anchors carry absolute (line) word indices, with the chunk offset applied.
+var planL0 = plan.phrases.filter(function (p) { return p.lineIdx === 0; });
+planL0[0].anchors.forEach(function (a) {
+    var e = l0[0].anchors.find(function (x) { return x.anchorIdx === a.anchorIdx; });
+    assert.ok(e && e.wordIndex === a.wordIdx, 'first-chunk anchor: wordIndex == wordIdx (offset 0)');
 });
-// Second chunk: span index == first-chunk word count + anchor.wordIdx
-p1.anchors.forEach(function (a) {
-    var e = entries0.find(function (x) { return x.phraseId === p1.phraseId && x.anchorIdx === a.anchorIdx; });
-    assert.ok(e, 'entry exists for second-chunk anchor');
-    assert.strictEqual(e.wordIndex, offset1 + a.wordIdx, 'second chunk applies the chunk offset');
+planL0[1].anchors.forEach(function (a) {
+    var e = l0[1].anchors.find(function (x) { return x.anchorIdx === a.anchorIdx; });
+    assert.ok(e && e.wordIndex === l0[0].wordCount + a.wordIdx, 'second-chunk anchor: chunk offset applied');
 });
-// All indices in bounds of the rendered word count
-var nWords0 = scoring.normalizeWords(lyrics[0].text).length;
-entries0.forEach(function (e) { assert.ok(e.wordIndex >= 0 && e.wordIndex < nWords0, 'wordIndex in bounds'); });
+// Every anchor wordIndex falls inside its phrase's range.
+l0.forEach(function (p) {
+    p.anchors.forEach(function (a) {
+        assert.ok(a.wordIndex >= p.startIndex && a.wordIndex < p.startIndex + p.wordCount, 'anchor index within phrase range');
+    });
+});
 
-// Short line: single phrase, anchors map directly
-var line1 = plan.phrases.filter(function (p) { return p.lineIdx === 1; });
-assert.strictEqual(line1.length, 1, 'short line not chunked');
-(map[1] || []).forEach(function (e) {
-    var a = line1[0].anchors.find(function (x) { return x.anchorIdx === e.anchorIdx; });
-    assert.ok(a && e.wordIndex === a.wordIdx, 'short line maps directly');
+// --- Short line: single phrase covering all words; anchors map directly ---
+var l1 = map[1] || [];
+assert.strictEqual(l1.length, 1, 'short line is a single phrase');
+assert.strictEqual(l1[0].startIndex, 0);
+assert.strictEqual(l1[0].wordCount, scoring.normalizeWords(lyrics[1].text).length, 'phrase covers the whole short line');
+l1[0].anchors.forEach(function (e) {
+    var a = plan.phrases.filter(function (p) { return p.lineIdx === 1; })[0].anchors.find(function (x) { return x.anchorIdx === e.anchorIdx; });
+    assert.ok(a && e.wordIndex === a.wordIdx, 'short-line anchor maps directly');
 });
 
 console.log('test_lyric_paint_helpers.cjs: all assertions passed');
