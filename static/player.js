@@ -529,6 +529,8 @@ class GameMode {
                 ? KaraokeeArcade.createArcadeState(this._phraseDifficulty)
                 : null;
             this._committedPhrases = {};
+            this._arcadeEvents = [];
+            this._telemetryFinalized = false;
             if (this._telemetry && this._telemetry.phraseEngine) {
                 this._telemetry.phraseEngine.difficulty = this._phraseDifficulty;
                 this._telemetry.phraseEngine.plan = this._phrasePlan;
@@ -655,6 +657,8 @@ class GameMode {
             this._arcadeState = KaraokeeArcade.createArcadeState(this._phraseDifficulty);
         }
         this._committedPhrases = {};
+        this._arcadeEvents = [];
+        this._telemetryFinalized = false;
         document.body.classList.remove('arcade-onfire');
         this.linesScored = 0;
         this.perfectLines = 0;
@@ -1912,6 +1916,7 @@ class GameMode {
     // routeEvents drives the HUD; the end-screen flush passes false.
     _commitNewlySettled(routeEvents) {
         if (!this._arcadeState || !window.KaraokeeArcade || !this._phrasePlan || !this._phraseSession) return;
+        var now = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
         var phrases = this._phrasePlan.phrases || [];
         for (var pi = 0; pi < phrases.length; pi++) {
             var ph = phrases[pi];
@@ -1926,6 +1931,23 @@ class GameMode {
                 anchorsHit: Object.keys(pst.anchorHits).length,
                 rescuedByWhisper: pst.rescuedByWhisper
             });
+            if (evt) {
+                if (!this._arcadeEvents) this._arcadeEvents = [];
+                this._arcadeEvents.push({
+                    phraseId: ph.phraseId,
+                    lineIdx: ph.lineIdx,
+                    settledAtSec: parseFloat((now != null ? now : 0).toFixed(2)),
+                    outcome: evt.outcome,
+                    perfect: evt.perfect,
+                    anchorsRequired: ph.anchorsRequired,
+                    anchorsTotal: (ph.anchors || []).length,
+                    anchorsHit: Object.keys(pst.anchorHits).length,
+                    pointsAwarded: evt.pointsAwarded,
+                    multiplierAfter: evt.multiplier,
+                    streakAfter: evt.streak,
+                    onFire: evt.onFire
+                });
+            }
             if (evt && routeEvents && window.KARAOKEE_V2) this._onArcadeEvent(evt);
         }
     }
