@@ -518,6 +518,7 @@ class GameMode {
         this.allWordTimings = interpolateWordTimings(lyrics);
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
         this._initTelemetry();   // always init so download button works whenever D is pressed
+        this._phraseDifficulty = localStorage.getItem('arcadeDifficulty') || 'medium';
         if (window.KaraokeePhraseEngine) {
             this._phrasePlan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
                 difficulty: this._phraseDifficulty,
@@ -529,6 +530,14 @@ class GameMode {
                 this._telemetry.phraseEngine.plan = this._phrasePlan;
             }
         }
+        var _dsLock = document.getElementById('diffSelect');
+        if (_dsLock) {
+            _dsLock.classList.add('locked');
+            var _dsBtns = _dsLock.querySelectorAll('button');
+            for (var _i = 0; _i < _dsBtns.length; _i++) _dsBtns[_i].setAttribute('aria-disabled', 'true');
+        }
+        var _dpShow = document.getElementById('diff-pill');
+        if (_dpShow) { _dpShow.textContent = (this._phraseDifficulty || 'medium').toUpperCase(); _dpShow.style.display = 'inline-block'; }
         for (var li = 0; li < this.allWordTimings.length; li++) {
             var lt = this.allWordTimings[li];
             var relClass = classifyLineTempoRelative(lt.wps || 0, this.songTempoProfile);
@@ -587,6 +596,13 @@ class GameMode {
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
         var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
+        var _dsUnlock = document.getElementById('diffSelect');
+        if (_dsUnlock) {
+            _dsUnlock.classList.remove('locked');
+            var _ubtns = _dsUnlock.querySelectorAll('button');
+            for (var _u = 0; _u < _ubtns.length; _u++) _ubtns[_u].setAttribute('aria-disabled', 'false');
+        }
+        var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
     }
 
     /**
@@ -2543,6 +2559,32 @@ document.addEventListener('keydown', (e) => {
         console.log('[SCORING V2]', window.KARAOKEE_V2 ? 'ON — adaptive VAD + phrase-engine panel' : 'OFF');
     }
 });
+
+// Difficulty selector — persists to localStorage, locks while a run is active.
+(function initDifficultySelect() {
+    var sel = document.getElementById('diffSelect');
+    if (!sel) return;
+    function paint(d) {
+        var btns = sel.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+            var on = btns[i].getAttribute('data-diff') === d;
+            btns[i].classList.toggle('active', on);
+            btns[i].setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        var pill = document.getElementById('diff-pill');
+        if (pill) pill.textContent = (d || 'medium').toUpperCase();
+    }
+    paint(localStorage.getItem('arcadeDifficulty') || 'medium');
+    sel.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('button[data-diff]') : null;
+        if (!btn) return;
+        if (gameMode && gameMode.active) return;      // locked mid-run
+        var d = btn.getAttribute('data-diff');
+        localStorage.setItem('arcadeDifficulty', d);
+        if (gameMode) gameMode._phraseDifficulty = d;
+        paint(d);
+    });
+})();
 
 // Format seconds as m:ss
 function fmt(s) {
