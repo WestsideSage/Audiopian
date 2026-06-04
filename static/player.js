@@ -183,12 +183,22 @@ class GameMode {
                 difficulty: this._phraseDifficulty,
                 audioDuration: audio && isFinite(audio.duration) ? audio.duration : null
             });
-            this._phraseSession = KaraokeePhraseEngine.createPhraseSession(this._phrasePlan);
-            this._arcadeState = (window.KaraokeeArcade)
-                ? KaraokeeArcade.createArcadeState(this._phraseDifficulty)
-                : null;
-            this._committedPhrases = {};
-            this._arcadeEvents = [];
+            // The scoring session owns the per-run state machine (match -> reconcile ->
+            // score -> commit). It builds its own phraseSession/arcadeState from the plan;
+            // we alias the controller's _phraseSession/_arcadeState/_committedPhrases/
+            // _arcadeEvents to the session's copies so the kept renderers/loggers/telemetry
+            // (which read this.*) see the same objects the session mutates in place.
+            this._session = KaraokeeScoringSession.createSession({
+                lyrics: lyrics,
+                allWordTimings: this.allWordTimings,
+                phrasePlan: this._phrasePlan,
+                difficulty: this._phraseDifficulty,
+                flags: { KARAOKEE_V2: !!window.KARAOKEE_V2 }
+            });
+            this._phraseSession   = this._session.phraseSession;
+            this._arcadeState     = this._session.arcadeState;
+            this._committedPhrases = this._session.committedPhrases;
+            this._arcadeEvents    = this._session.arcadeEvents;
             this._telemetryFinalized = false;
             if (this._telemetry && this._telemetry.phraseEngine) {
                 this._telemetry.phraseEngine.difficulty = this._phraseDifficulty;
@@ -205,6 +215,7 @@ class GameMode {
         }
         // Restore per-song LRC offset from localStorage
         this.lrcOffset = parseFloat(localStorage.getItem('lrcOffset_' + _songKey()) || '0');
+        if (this._session) this._session.lrcOffset = this.lrcOffset;
         _updateOffsetDisplay();
 
         renderLyricsGameMode();
@@ -258,6 +269,10 @@ class GameMode {
         var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
         this._hideArcadeHud();
+        // Flush the session (final collect + score active line + settle/commit) before
+        // telemetry so getScores/arcadeEvents reflect the last line. Manual stop uses the
+        // current media time (not duration+5) so only already-closed phrases settle.
+        if (this._session) this._renderEvents(KaraokeeScoringSession.endRun(this._session, this._now()));
         this._finalizeTelemetry('stopped');
     }
 
@@ -267,10 +282,12 @@ class GameMode {
     suspend() {
         if (!this.active || this._suspended) return;
         this._suspended = true;
+        if (this._session) this._session._suspended = true;
         if (this.recognition) {
             try { this.recognition.stop(); } catch(e) {}
         }
         this.isSpeaking = false;
+        if (this._session) KaraokeeScoringSession.setEnergy(this._session, false);
     }
 
     /**
@@ -279,6 +296,7 @@ class GameMode {
     resume() {
         if (!this.active || !this._suspended) return;
         this._suspended = false;
+        if (this._session) this._session._suspended = false;
         if (this.recognition) {
             try { this.recognition.start(); } catch(e) {}
         }
@@ -373,9 +391,16 @@ class GameMode {
      */
     onSeek() {
         if (!this.active) return;
-        // Discard current line's match state — it will be re-established
-        // when updateLyrics fires and calls setActiveLine for the new position.
-        this._resetLineState((audio && isFinite(audio.currentTime)) ? audio.currentTime : 0, true);
+        // Seek handling is intentionally minimal in the seam refactor. The session owns
+        // the scoring state and exposes no "discard current line without scoring" primitive
+        // (setActiveLine snapshots + scores the outgoing line, which on a backward in-line
+        // seek would double-count). When the seek crosses a line boundary, the next
+        // updateLyrics poll calls setActiveLine for the new position, which resets the
+        // session's line state (matchedSet, fence, prevLine) and re-fences the transcript.
+        // A same-line backward seek therefore keeps the already-matched spans until the
+        // line advances — acceptable for an edge interaction; a dedicated session reset
+        // API (e.g. resetActiveLine) is the proper fix and is deferred. We only repaint
+        // here for immediate visual feedback.
         this._updateWordSpans();
     }
 
@@ -396,7 +421,6 @@ class GameMode {
 
         this.recognition.onresult = function(e) {
             self._lastResultTime = Date.now();
-            self.lineHadAsrEvent = true;
             var interim = '';
             var finalText = '';
             for (var i = e.resultIndex; i < e.results.length; i++) {
@@ -406,69 +430,22 @@ class GameMode {
                     interim += e.results[i][0].transcript + ' ';
                 }
             }
-            if (finalText) {
-                self.transcript += finalText;
-                self.transcriptWords = self.transcriptWords.concat(normalizeWords(finalText));
-            }
-            self.latestInterim = interim;
-            self._addPhraseEvidence({
-                source: finalText ? 'browser_final' : 'browser_interim',
-                text: finalText || interim,
-                words: [],
-                receivedAtSec: performance.now() / 1000,
-                audioTimeSec: audio && isFinite(audio.currentTime) ? audio.currentTime : null
-            });
-
-            // HOT-WORD PRIORITY: check predicted word first for instant green
-            var hotMatched = self._matchHotWord(self.transcript + interim);
-            if (hotMatched) self._updateWordSpans();
-
-            // Match against previous line during overlap zone (Track 1)
-            self._matchPrevLine(self.transcript + interim, 'track1');
-
-            // Match primary transcript
-            var unionMap = new Map();
-            self._collectMatches(self.transcript + interim, unionMap);
-
-            // Union with alternative transcripts from latest result
-            var latest = e.results[e.results.length - 1];
-            for (var a = 1; a < latest.length; a++) {
-                self._collectMatches(self.transcript + latest[a].transcript, unionMap);
+            // Feed the session (feed-only — rendering happens on the next tick). A single
+            // SR event can carry BOTH a final and an interim: ingest the final first (if
+            // any), then always set the interim (mirrors the old append at 423-427).
+            if (self._session) {
+                if (finalText) KaraokeeScoringSession.ingestFinal(self._session, finalText, 'browser_sr');
+                KaraokeeScoringSession.ingestInterim(self._session, interim);
             }
 
-            var beforeConfirmed = new Set(self.asrConfirmedSet);
-            mergeConfirmedMatches(self.matchedSet, self.vadMatchedSet, self.asrConfirmedSet, unionMap);
-            unionMap.forEach(function(score, i) {
-                if (!beforeConfirmed.has(i) && self.asrConfirmedSet.has(i)) {
-                    self._logPromotion('browser_sr', i, score);
-                }
-                self._setWordSource(i, 'browser_sr');
-            });
-            self._updateWordSpans();
-
-            // Diagnostic: log what the recognition heard and what matched
+            // Diagnostic: log what the recognition heard (ASR telemetry feeds the payload).
             if (window._kDebug) {
-                const spokenFull = self.transcriptWords.concat(normalizeWords(interim));
-                const scanFrom   = self.lineStartTranscriptPos;
                 self._debugLog('RESULT', {
                     lineIdx:   self.activeLineIdx,
                     finalText: finalText || null,
                     interim:   interim   || null,
                 });
                 self._logAsr(finalText ? 'final' : 'interim', finalText || interim, [], 'browser_sr');
-                self._debugLog('MATCH', {
-                    lineIdx:     self.activeLineIdx,
-                    targets:     self.lineWords.slice(),
-                    spokenWindow: spokenFull.slice(scanFrom, scanFrom + 20),
-                    matchedIdxs: [...unionMap.keys()],
-                    hotIdx:      self.hotWordIndex,
-                    hotWindow:   self.hotWordIndex >= 0 && self.wordTimings[self.hotWordIndex]
-                                    ? [self.wordTimings[self.hotWordIndex].windowStart.toFixed(2),
-                                       self.wordTimings[self.hotWordIndex].windowEnd.toFixed(2)]
-                                    : null,
-                    audioTime:   audio.currentTime.toFixed(2),
-                    fencePos:    self.lineStartTranscriptPos,
-                });
             }
         };
 
@@ -717,37 +694,23 @@ class GameMode {
 
     _handleWhisperTranscript(transcript, words, dispatchedLineIdx) {
         if (!transcript || !this.active) return;
+        // Feed Track-2 (whisper) finals to the session as 'whisper' evidence. The session
+        // accumulates the whisperBuffer, runs collectMatchesWhisper on the next tick, and
+        // feeds phrase evidence (incl. late-evidence reconcile) with the tick clock.
+        // Route gate preserved: a chunk dispatched for the CURRENT active line is ingested;
+        // a stale-line chunk is left to the engine's late-evidence reconcile (the old
+        // prevLine track-2 _matchPrevLine path has no session equivalent — see report).
         var routeToActive = (dispatchedLineIdx === null || dispatchedLineIdx === undefined || dispatchedLineIdx === this.activeLineIdx);
-        if (routeToActive) {
-            this._appendWhisperTranscript(transcript);
-            this.lineHadAsrEvent = true;
-            this._collectMatchesWhisper(this.whisperBuffer);
-        }
-        var routeToPrev = this.prevLine && (
-            dispatchedLineIdx === null
-            || dispatchedLineIdx === undefined
-            || this.prevLine.lineIdx === dispatchedLineIdx
-        );
-        if (routeToPrev) {
-            this.prevLine.whisperBuffer = this._trimTranscriptWindow(this.prevLine.whisperBuffer, transcript);
-            this.prevLine.lineHadAsrEvent = true;
-            this._matchPrevLine(this.prevLine.whisperBuffer, 'track2');
+        if (routeToActive && this._session) {
+            KaraokeeScoringSession.ingestFinal(this._session, transcript, 'whisper');
         }
         this._logAsr('final', transcript, words || [], 'whisper');
-        this._addPhraseEvidence({
-            source: 'whisper',
-            text: transcript || '',
-            words: words || [],
-            receivedAtSec: performance.now() / 1000,
-            audioTimeSec: audio && isFinite(audio.currentTime) ? audio.currentTime : null
-        });
         this._whisperResponses++;
         if (words && words.length > 0) {
             this._whisperResponsesWithWords++;
             this._whisperWordsTotal += words.length;
             this._lastWhisperWords = words;
         }
-        this._updateWordSpans();
     }
 
     _setWordSource(wordIndex, source) {
@@ -1096,7 +1059,25 @@ class GameMode {
         }
     }
 
+    // Media-time clock injected into the session (seconds). The session reads no real
+    // clock; every advance call passes _now() so behavior is identical to the old
+    // audio.currentTime reads but testable.
+    _now() {
+        return (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
+    }
+
+    // Trigger point: the 100ms updateLyrics loop calls this on every line change.
+    // Delegates the whole line-transition state machine to the session and renders the
+    // returned events (the old body now lives in scoring-session.js setActiveLine).
     setActiveLine(lineIdx) {
+        if (!this._session) return;
+        this._renderEvents(KaraokeeScoringSession.setActiveLine(this._session, lineIdx, this._now()));
+    }
+
+    // DEAD (kept until Phase 5): the original inline line-transition logic, moved into
+    // scoring-session.js. Unreferenced — retained so node --check stays clean and the
+    // pre-refactor logic remains diff-visible for one phase.
+    _setActiveLineLegacyDEAD(lineIdx) {
         // Capture outgoing state for diagnostics BEFORE anything changes
         var _dbgFromIdx  = this.activeLineIdx;
         var _dbgFromText = (_dbgFromIdx >= 0 && lyrics[_dbgFromIdx]) ? lyrics[_dbgFromIdx].text : '—';
@@ -1481,6 +1462,10 @@ class GameMode {
      * The hot word is the word whose predicted time window contains
      * the current audio time — matching this word gets priority.
      */
+    // Controller-side VAD: read the real AnalyserNode (the session has no audio),
+    // compute isSpeaking, and feed it to the session via setEnergy. The hot-word index,
+    // VAD-optimistic provisional scoring, and hot-word match are now done by the session
+    // inside tick() (updateHotWordAndMatch); this method only owns the mic energy read.
     updateHotWord() {
         // Refresh isSpeaking from AnalyserNode — real-time, not tied to Whisper chunk rate
         var vadRms = this._readVadRms();
@@ -1508,48 +1493,9 @@ class GameMode {
             }
         }
 
-        if (!this.active || this.wordTimings.length === 0) {
-            this.hotWordIndex = -1;
-            return;
-        }
-        var t = audio.currentTime - this.lrcOffset;
-        var newHot = -1;
-        for (var i = 0; i < this.wordTimings.length; i++) {
-            if (this.matchedSet.has(i)) continue; // skip already-green words
-            var wt = this.wordTimings[i];
-            // VAD mode: use estimatedTime - 0.05s instead of windowStart (-0.5s)
-            // so words don't score green 500ms before they're actually said.
-            // ASR mode keeps the wide negative offset to give transcription time to catch up.
-            var winOpen = (this.wordTimings.useVad) ? (wt.estimatedTime - 0.05) : wt.windowStart;
-            if (t >= winOpen && t <= wt.windowEnd) {
-                newHot = i;
-                break;  // first unmatched window wins
-            }
-        }
-        this.hotWordIndex = newHot;
-
-        // VAD optimistic scoring: if this line uses VAD mode and mic is active,
-        // mark the hot word as hit immediately without waiting for ASR.
-        if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad && !this._suspended) {
-            if (!this.matchedSet.has(newHot)) {
-                this.matchedSet.set(newHot, 0.25);       // provisional — shows amber; upgradeable by ASR
-                this.vadMatchedSet.set(newHot, 0.25);
-                this._setWordSource(newHot, 'vad');
-                this._updateWordSpans();
-                this._logMatch(
-                    this.wordTimings[newHot] ? this.wordTimings[newHot].word : '',
-                    this.lineWords[newHot] || '',
-                    'vad-provisional', -1, false, 0.25, true, newHot
-                );
-                this._addPhraseEvidence({
-                    source: 'vad',
-                    text: '',
-                    words: [],
-                    receivedAtSec: performance.now() / 1000,
-                    audioTimeSec: audio && isFinite(audio.currentTime) ? audio.currentTime : null
-                });
-            }
-        }
+        // Feed the energy gate to the session (drives the 06dfde5 in-window VAD flow that
+        // gates interim reconciliation, and the provisional VAD match in updateHotWordAndMatch).
+        if (this._session) KaraokeeScoringSession.setEnergy(this._session, this.isSpeaking);
     }
 
     _addPhraseEvidence(evidence) {
@@ -2211,7 +2157,11 @@ class GameMode {
         }
 
         // Final scores
-        var v1Pct = this.weightedTotal > 0 ? Math.round((this.weightedMatched / this.weightedTotal) * 100) : 0;
+        // V1 % from the session's authoritative tallies (the controller's weightedTotal/
+        // weightedMatched are only a render-time mirror; read getScores directly here).
+        var _ss = this._session ? KaraokeeScoringSession.getScores(this._session)
+                                : { weightedTotal: this.weightedTotal, weightedMatched: this.weightedMatched };
+        var v1Pct = _ss.weightedTotal > 0 ? Math.round((_ss.weightedMatched / _ss.weightedTotal) * 100) : 0;
         var live = (this._phraseSession && window.KaraokeePhraseEngine)
             ? KaraokeePhraseEngine.getLiveScore(this._phraseSession) : { lyrics: 0, composite: 0 };
         var honestLyricPct = Math.round((live.lyrics || 0) * 100);
@@ -2226,7 +2176,10 @@ class GameMode {
         var prevHi = parseInt(localStorage.getItem(hiKey) || '0', 10) || 0;
         var runPoints = arcadeSummary ? arcadeSummary.points : 0;
 
-        var arcadeEvents = this._arcadeEvents || [];
+        // Arcade records come from the session (this._arcadeEvents is aliased to it in
+        // start(), but read the session directly so telemetry is correct even if the alias
+        // was reset).
+        var arcadeEvents = (this._session && this._session.arcadeEvents) || this._arcadeEvents || [];
         var counts = {
             asr:         this._telemetry.asr.length,
             matches:     this._telemetry.matches.length,
@@ -2448,20 +2401,24 @@ class GameMode {
         var hero = document.getElementById('gradeHero');
         var feedback = document.getElementById('benchmarkFeedback');
         document.getElementById('lrc-offset-control').style.display = 'none';
-        this._hideArcadeHud();
 
-        // Force-settle trailing phrases, then persist telemetry BEFORE the hi-score write
-        // below (so arcade.highScore.previous reflects the prior best).
-        if (this._phraseSession && window.KaraokeePhraseEngine) {
-            try {
-                var _endNow = (audio && isFinite(audio.duration)) ? audio.duration + 5 : 1e9;
-                KaraokeePhraseEngine.settlePhrases(this._phraseSession, _endNow);
-            } catch (e) {}
-            // Final catch-up of the trailing lines from the converged interim before
-            // the end-screen tally (mirrors the per-tick reconcile in _tickArcade).
-            if (window.KARAOKEE_V2) this._reconcileInterim(_endNow);
-            this._commitNewlySettled(false);
+        // Flush the session at song end, then persist telemetry BEFORE the hi-score write
+        // below (so arcade.highScore.previous reflects the prior best). Pass duration+5
+        // (NOT _now()) so phrases whose windows only close after the audio ends still
+        // settle, matching the old settlePhrases(_endNow). The 100ms poll's tick() is
+        // frozen at currentTime≈duration, so it never reaches _endNow — we must run a
+        // final tick(_endNow) HERE to (a) finalize any trailing prevLine overlay
+        // (overlapEnd ∈ (duration, duration+5]) and (b) reconcile the converged interim
+        // for the continuously-sung last line (the 06dfde5/5028f1f catch-up). endRun then
+        // scores the active line; its commit-once guard prevents double-commit.
+        if (this._session) {
+            var _endNow = (audio && isFinite(audio.duration)) ? audio.duration + 5 : 1e9;
+            this._renderEvents(KaraokeeScoringSession.tick(this._session, _endNow));
+            this._renderEvents(KaraokeeScoringSession.endRun(this._session, _endNow));
         }
+        // Hide the arcade HUD AFTER the flush: tick()'s commit routes arcade events
+        // (routeEvents=true) which would otherwise re-show the HUD over the end screen.
+        this._hideArcadeHud();
         this._finalizeTelemetry('song_ended');
 
         var useArcade = window.KARAOKEE_V2 && this._arcadeState && window.KaraokeeArcade
@@ -2604,7 +2561,14 @@ function updateLyrics() {
     }
 
     // Update hot word tracking every poll even if line hasn't changed
-    if (gameMode.active) { gameMode.updateHotWord(); gameMode._tickArcade(); }
+    // 100ms drive: updateHotWord() reads mic energy and feeds setEnergy; tick() advances
+    // the session (hot-word match, VAD provisional, settle -> reconcile -> commit ->
+    // honest %) and returns render-intent events. Same order as the old
+    // updateHotWord(); _tickArcade(); pair.
+    if (gameMode.active) {
+        gameMode.updateHotWord();
+        if (gameMode._session) gameMode._renderEvents(KaraokeeScoringSession.tick(gameMode._session, gameMode._now()));
+    }
 
     if (idx === currentLineIndex) return;
     currentLineIndex = idx;
@@ -2684,6 +2648,7 @@ function _updateOffsetDisplay() {
 document.getElementById('offsetMinus').addEventListener('click', function() {
     if (!gameMode) return;
     gameMode.lrcOffset = Math.max(-10, gameMode.lrcOffset - 0.5);
+    if (gameMode._session) gameMode._session.lrcOffset = gameMode.lrcOffset;
     localStorage.setItem('lrcOffset_' + _songKey(), gameMode.lrcOffset);
     _updateOffsetDisplay();
 });
@@ -2691,6 +2656,7 @@ document.getElementById('offsetMinus').addEventListener('click', function() {
 document.getElementById('offsetPlus').addEventListener('click', function() {
     if (!gameMode) return;
     gameMode.lrcOffset = Math.min(10, gameMode.lrcOffset + 0.5);
+    if (gameMode._session) gameMode._session.lrcOffset = gameMode.lrcOffset;
     localStorage.setItem('lrcOffset_' + _songKey(), gameMode.lrcOffset);
     _updateOffsetDisplay();
 });
@@ -2738,27 +2704,16 @@ audio.addEventListener('canplay', () => {
 
 audio.addEventListener('ended', function() {
     if (gameMode.active) {
-        // Finalize any active prevLine overlay
-        if (gameMode.prevLine) {
-            setTimeout(function() { gameMode._finalizePrevLine(); }, 500);
-        }
-        // Score the final line
-        if (gameMode.activeLineIdx >= 0 && gameMode.lineWords.length > 0) {
-            var _lastLineIdx   = gameMode.activeLineIdx;
-            var _lastLineWords = gameMode.lineWords.slice();
-            var _lastLineStart = gameMode.lineStartWordCount;
-            var _lastMatched   = new Map(gameMode.matchedSet);
-            var _lastHadAsr    = gameMode.lineHadAsrEvent;
-            var _lastVadMatched = new Map(gameMode.vadMatchedSet);
-            var _lastAsrConfirmed = new Set(gameMode.asrConfirmedSet);
-            setTimeout(function() {
-                gameMode._lateScoreLine(
-                    _lastLineIdx, _lastLineWords, _lastMatched, _lastLineStart, _lastHadAsr,
-                    _lastVadMatched, _lastAsrConfirmed
-                );
-            }, 800);
-        }
-        // Telemetry auto-saves via showEndModal -> _finalizeTelemetry (POST /telemetry).
+        // The trailing prevLine and final-line scoring are now owned by the session:
+        // tick()'s finalizePrevLineIfDue finalizes the overlay (its overlapEnd is in media
+        // seconds, already passed at song end), and showEndModal -> endRun does the final
+        // collect + scoreLine + settle/commit. The old 500ms _finalizePrevLine and 800ms
+        // _lateScoreLine setTimeouts are REMOVED — running them would double-score (a
+        // duplicate .line-score-flash + double tally) on top of endRun.
+        //
+        // Keep the 1500ms delay before showEndModal so late-arriving SR/whisper finals
+        // land (each ingestFinal queues a dirty collect) and are captured by endRun's
+        // final collect pass over transcript+latestInterim.
         setTimeout(function() { gameMode.showEndModal(); }, 1500);
     }
 });
