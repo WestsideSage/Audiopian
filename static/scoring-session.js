@@ -666,8 +666,70 @@
         scoreLine(s, lineIdx, lineWords, matchedSet, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet, events);
     }
 
+    // --- Task 2.3: commitNewlySettled (moved from player.js _commitNewlySettled 1653-1703) ---
+    // Commit each phrase exactly once, when it first reaches status 'settled'. Reads
+    // the UNCAPPED anchor-hit count at that instant (spec 4.2): later grace-window
+    // evidence still lifts the honest %, but never the live multiplier. routeEvents
+    // drives the HUD; the end-screen flush passes false.
+    // Transform #1 (this.->s.). Transform #2 (audio.currentTime -> now). The
+    // s.committedPhrases commit-once guard and arcade.commitPhrase are preserved
+    // verbatim. Transform #3: the _arcadeEvents.push record is still pushed to
+    // s.arcadeEvents (for endRun/telemetry) AND emitted as an arcadeRecord event;
+    // _onArcadeEvent(evt) -> arcade event (same evt && routeEvents && V2 gate); the V2
+    // paint block -> phraseCleared (confirmed) / phraseMissed (else), same V2 gate.
+    function commitNewlySettled(s, now, routeEvents, events) {
+        if (!s.arcadeState || !arcade || !s.phrasePlan || !s.phraseSession) return;
+        var nowSec = isFinite(now) ? now : 0;
+        var phrases = s.phrasePlan.phrases || [];
+        for (var pi = 0; pi < phrases.length; pi++) {
+            var ph = phrases[pi];
+            var pst = s.phraseSession.states[ph.phraseId];
+            if (!pst || pst.status !== 'settled') continue;
+            if (s.committedPhrases[ph.phraseId]) continue;
+            s.committedPhrases[ph.phraseId] = true;
+            var evt = arcade.commitPhrase(s.arcadeState, {
+                phraseId: ph.phraseId,
+                anchorsRequired: ph.anchorsRequired,
+                anchorsTotal: (ph.anchors || []).length,
+                anchorsHit: Object.keys(pst.anchorHits).length,
+                rescuedByWhisper: pst.rescuedByWhisper
+            });
+            if (evt) {
+                if (!s.arcadeEvents) s.arcadeEvents = [];
+                var record = {
+                    phraseId: ph.phraseId,
+                    lineIdx: ph.lineIdx,
+                    settledAtSec: parseFloat((nowSec != null ? nowSec : 0).toFixed(2)),
+                    outcome: evt.outcome,
+                    perfect: evt.perfect,
+                    anchorsRequired: ph.anchorsRequired,
+                    anchorsTotal: (ph.anchors || []).length,
+                    anchorsHit: Object.keys(pst.anchorHits).length,
+                    pointsAwarded: evt.pointsAwarded,
+                    multiplierAfter: evt.multiplier,
+                    streakAfter: evt.streak,
+                    onFire: evt.onFire
+                };
+                s.arcadeEvents.push(record);
+                ev(events, 'arcadeRecord', { record: record });
+            }
+            if (evt && routeEvents && s.flags.KARAOKEE_V2) ev(events, 'arcade', { evt: evt });
+
+            // V2 coloring at settle: a passed line greens the whole phrase; a missed
+            // line reds its key words only (non-key words stay neutral).
+            if (s.flags.KARAOKEE_V2) {
+                if (pst.lyricStatus === 'confirmed') {
+                    ev(events, 'phraseCleared', { phraseId: ph.phraseId });
+                } else {
+                    ev(events, 'phraseMissed', { phraseId: ph.phraseId });
+                }
+            }
+        }
+    }
+
     return { createSession: createSession, setActiveLine: setActiveLine,
              ingestFinal: ingestFinal, ingestInterim: ingestInterim, setEnergy: setEnergy,
              tick: tick, endRun: endRun, getScores: getScores, getHonestPct: getHonestPct,
-             scoreLine: scoreLine, lateScoreLine: lateScoreLine };
+             scoreLine: scoreLine, lateScoreLine: lateScoreLine,
+             commitNewlySettled: commitNewlySettled };
 });

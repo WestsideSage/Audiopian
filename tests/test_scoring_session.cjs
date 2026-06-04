@@ -386,6 +386,77 @@ function matchHotWordForTest(s, text, now) {
         'late pass respects the zero-ASR fence (delegated to scoreLine)');
 })();
 
+// --- Task 2.3: commitNewlySettled emits arcade/arcadeRecord/phrase events ---
+// A cleared+settled phrase commits exactly once: one arcade event, one arcadeRecord
+// (also appended to s.arcadeEvents for endRun/telemetry), and a phraseCleared. A
+// second commit pass at a later `now` does NOT re-commit (commit-once via
+// s.committedPhrases). Drives the clear through the same energy-gated reconcile the
+// reconciliation tests use, then settles p0 past its settlement window.
+(function () {
+    var s = session.createSession(threeLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);
+    session.tick(s, 1.0);                          // flowEvent inside p0 [0,3]
+    session.setActiveLine(s, 1, 3.0);              // p0 ends
+    session.ingestInterim(s, 'first line words');
+    session.tick(s, 4.5);                          // reconciles p0 (cleared) + settlePhrases -> p0 settled
+    var events = [];
+    session.commitNewlySettled(s, 4.5, true, events);
+    var arcadeEv = events.filter(function (e) { return e.type === 'arcade'; });
+    var recEv = events.filter(function (e) { return e.type === 'arcadeRecord'; });
+    var clearedEv = events.filter(function (e) { return e.type === 'phraseCleared'; });
+    assert.strictEqual(arcadeEv.length, 1, 'commit emits exactly one arcade event');
+    assert.strictEqual(recEv.length, 1, 'commit emits exactly one arcadeRecord event');
+    assert.strictEqual(arcadeEv[0].evt.phraseId, 'p0', 'arcade event carries the committed phrase id');
+    assert.strictEqual(arcadeEv[0].evt.outcome, 'clear', 'a confirmed phrase commits as a clear');
+    assert.strictEqual(recEv[0].record.phraseId, 'p0', 'arcadeRecord is for the committed phrase');
+    assert.ok(clearedEv.some(function (e) { return e.phraseId === 'p0'; }),
+        'a confirmed phrase emits phraseCleared at commit');
+    assert.strictEqual(events.filter(function (e) { return e.type === 'phraseMissed'; }).length, 0,
+        'a confirmed phrase does NOT emit phraseMissed');
+    assert.strictEqual(s.committedPhrases['p0'], true, 'commit-once flag is set on s.committedPhrases');
+    assert.strictEqual(s.arcadeEvents.length, 1, 'the per-phrase record is also pushed to s.arcadeEvents');
+    // Commit-once: a later pass must not re-commit p0.
+    var events2 = [];
+    session.commitNewlySettled(s, 6.0, true, events2);
+    assert.strictEqual(events2.filter(function (e) { return e.type === 'arcade' && e.evt.phraseId === 'p0'; }).length, 0,
+        'a second commit pass does NOT re-commit the same phrase (commit-once)');
+    assert.strictEqual(s.arcadeEvents.length, 1, 's.arcadeEvents is not double-appended on re-commit');
+})();
+
+// A settled phrase that was never cleared (no anchors hit) commits as a miss and
+// emits phraseMissed (the V2 else-branch paint), not phraseCleared.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);              // silence: no evidence, no anchor hits
+    phrase.settlePhrases(s.phraseSession, 3.5);    // p0 ends at 2, settled at >=3.4 -> 'missing'
+    var events = [];
+    session.commitNewlySettled(s, 3.5, true, events);
+    assert.ok(events.some(function (e) { return e.type === 'arcade' && e.evt.phraseId === 'p0'; }),
+        'a missed phrase still commits an arcade event');
+    assert.strictEqual(events.filter(function (e) { return e.type === 'arcade'; })[0].evt.outcome, 'miss',
+        'a zero-hit phrase commits as a miss');
+    assert.ok(events.some(function (e) { return e.type === 'phraseMissed' && e.phraseId === 'p0'; }),
+        'a missed phrase emits phraseMissed');
+    assert.strictEqual(events.filter(function (e) { return e.type === 'phraseCleared'; }).length, 0,
+        'a missed phrase does NOT emit phraseCleared');
+})();
+
+// routeEvents=false (the end-screen flush) suppresses the HUD arcade event but still
+// commits (arcadeRecord pushed) and still paints the phrase result.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    phrase.settlePhrases(s.phraseSession, 3.5);
+    var events = [];
+    session.commitNewlySettled(s, 3.5, false /* routeEvents */, events);
+    assert.strictEqual(events.filter(function (e) { return e.type === 'arcade'; }).length, 0,
+        'routeEvents=false suppresses the HUD arcade event');
+    assert.strictEqual(s.arcadeEvents.length, 1, 'routeEvents=false still records the commit for telemetry');
+    assert.ok(events.some(function (e) { return e.type === 'phraseMissed' && e.phraseId === 'p0'; }),
+        'routeEvents=false still paints the phrase result');
+})();
+
 // ===========================================================================
 // FORWARD-DECLARED CHARACTERIZATION TESTS (green progressively through Phase 1)
 // ===========================================================================
