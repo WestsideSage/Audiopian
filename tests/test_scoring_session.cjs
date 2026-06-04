@@ -271,6 +271,84 @@ function matchHotWordForTest(s, text, now) {
 })();
 
 // ===========================================================================
+// PER-TASK CHARACTERIZATION TESTS (Phase 2)
+// ===========================================================================
+
+// --- Task 2.1: scoreLine emits lineScored (no DOM) ---
+// A line with present words, scored after a final + tick populates the matched
+// set, emits exactly one lineScored with the right matched/scoredTotal/perfect and
+// bumps getScores().linesScored. The scoring building block is exercised directly
+// (it has no public trigger until Phase 3 wires setActiveLine/finalizePrevLine).
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    session.tick(s, 1.0);                          // collect -> matchedSet has all 3
+    assert.strictEqual(s.matchedSet.size, 3, 'precondition: all three words matched');
+    var events = [];
+    session.scoreLine(s, 0, s.lineWords, s.matchedSet, s.lineHadAsrEvent,
+                      s.vadMatchedSet, s.asrConfirmedSet, events);
+    var scored = events.filter(function (e) { return e.type === 'lineScored'; });
+    assert.strictEqual(scored.length, 1, 'a scored line emits exactly one lineScored');
+    assert.strictEqual(scored[0].lineIdx, 0, 'lineScored carries the line index');
+    assert.strictEqual(scored[0].matched, 3, 'all three present words counted as matched');
+    assert.strictEqual(scored[0].scoredTotal, 3, 'scoredTotal is the weighted word count');
+    assert.strictEqual(scored[0].perfect, true, 'a fully matched line is perfect');
+    assert.deepStrictEqual(scored[0].missedWordIndices, [], 'no missed indices on a perfect line');
+    assert.strictEqual(session.getScores(s).linesScored, 1, 'linesScored incremented to 1');
+    assert.strictEqual(session.getScores(s).matchedWords, 3, 'matchedWords tally updated');
+    assert.strictEqual(session.getScores(s).perfectLines, 1, 'perfectLines tally updated');
+    assert.strictEqual(session.getScores(s).currentStreak, 1, 'a perfect line extends the streak');
+    // scoreLine also signals a running-score repaint (controller reads getScores).
+    assert.ok(events.some(function (e) { return e.type === 'runningScore'; }),
+        'scoreLine emits a runningScore repaint signal');
+})();
+
+// An all-filler line (every word weight 0 -> weightedTotal === 0) must emit NO
+// lineScored, must not count toward linesScored, and must NOT break the streak.
+(function () {
+    var L = [lyric(0, 'real words here'), lyric(2, '(la la la)')];
+    var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
+                phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium',
+                flags: { KARAOKEE_V2: true } };
+    var s = session.createSession(cfg);
+    // Score a perfect real line first so there is a live streak to (not) break.
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'real words here', 'browser_sr');
+    session.tick(s, 1.0);
+    var ev0 = [];
+    session.scoreLine(s, 0, s.lineWords, s.matchedSet, s.lineHadAsrEvent,
+                      s.vadMatchedSet, s.asrConfirmedSet, ev0);
+    assert.strictEqual(session.getScores(s).currentStreak, 1, 'precondition: streak is 1 after a perfect line');
+    // Now the all-filler line: words inside parens classify as adlib (weight 0).
+    session.setActiveLine(s, 1, 2.0);
+    var allFiller = s.lineWords;                   // ['la','la','la']
+    assert.deepStrictEqual(allFiller, ['la', 'la', 'la'], 'precondition: parenthetical line normalizes to fillers');
+    var ev1 = [];
+    session.scoreLine(s, 1, allFiller, s.matchedSet, true /* had ASR */,
+                      s.vadMatchedSet, s.asrConfirmedSet, ev1);
+    assert.strictEqual(ev1.filter(function (e) { return e.type === 'lineScored'; }).length, 0,
+        'an all-filler (weightedTotal===0) line emits no lineScored');
+    assert.strictEqual(session.getScores(s).linesScored, 1, 'all-filler line does not increment linesScored');
+    assert.strictEqual(session.getScores(s).currentStreak, 1, 'all-filler line does NOT break the streak');
+})();
+
+// Zero-ASR fence: a line with lineHadAsrEvent === false is skipped entirely
+// (no lineScored, no tally change) even when words are present in the matched set.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    session.tick(s, 1.0);
+    var events = [];
+    session.scoreLine(s, 0, s.lineWords, s.matchedSet, false /* no ASR event */,
+                      s.vadMatchedSet, s.asrConfirmedSet, events);
+    assert.strictEqual(events.filter(function (e) { return e.type === 'lineScored'; }).length, 0,
+        'zero-ASR fence: no lineScored when lineHadAsrEvent === false');
+    assert.strictEqual(session.getScores(s).linesScored, 0, 'zero-ASR fence: linesScored untouched');
+})();
+
+// ===========================================================================
 // FORWARD-DECLARED CHARACTERIZATION TESTS (green progressively through Phase 1)
 // ===========================================================================
 

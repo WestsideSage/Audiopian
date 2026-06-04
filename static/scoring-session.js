@@ -560,7 +560,63 @@
         return Math.round((sumHit / sumReq) * 100);
     }
 
+    // --- Task 2.1: scoreLine (moved from player.js _scoreLine 1539-1597) ---
+    // Transform #1 (this.->s.). Transform #3: the DOM block (1563-1580) — the .missed
+    // span marking + .line-score-flash creation — becomes a single `lineScored` event;
+    // _updateRunningScore() (1596) becomes a `runningScore` event (the controller
+    // repaints from getScores). All guards preserved verbatim: the zero-ASR fence
+    // (lineHadAsrEvent === false -> return) and the weightedTotal===0 early-return.
+    // The tally mutations + streak logic are unchanged.
+    function scoreLine(s, lineIdx, lineWords, matchedSet, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet, events) {
+        lineIdx    = (lineIdx    !== undefined) ? lineIdx    : s.activeLineIdx;
+        lineWords  = (lineWords  !== undefined) ? lineWords  : s.lineWords;
+        matchedSet = (matchedSet !== undefined) ? matchedSet : s.matchedSet;
+        vadMatchedSet    = vadMatchedSet    || s.vadMatchedSet;
+        asrConfirmedSet  = asrConfirmedSet  || s.asrConfirmedSet;
+
+        var total = lineWords.length;
+        if (total === 0) return;
+
+        // Zero-ASR line fencing: skip scoring for lines with no ASR activity
+        if (lineHadAsrEvent === false) return;
+
+        var wordTimings = (lineIdx >= 0 && lineIdx < s.allWordTimings.length)
+            ? s.allWordTimings[lineIdx] : [];
+        var scoreSummary = computeLineScore(lineWords, wordTimings, matchedSet, vadMatchedSet, asrConfirmedSet);
+        // A line with nothing scoreable (all "free" ad-libs/fillers) neither counts
+        // toward the score nor breaks the streak.
+        if (scoreSummary.weightedTotal === 0) return;
+        var weightedTotal = scoreSummary.weightedTotal;
+        var weightedMatched = scoreSummary.weightedMatched;
+        var matched = scoreSummary.matchedWords;
+        var scoredTotal = scoreSummary.totalWords;
+
+        // DOM (.missed spans + .line-score-flash) -> render-intent event.
+        ev(events, 'lineScored', {
+            lineIdx: lineIdx, matched: matched, scoredTotal: scoredTotal,
+            missedWordIndices: scoreSummary.missedWordIndices, perfect: scoreSummary.perfect,
+            weightedTotal: weightedTotal, weightedMatched: weightedMatched
+        });
+
+        s.weightedTotal   += weightedTotal;
+        s.weightedMatched += weightedMatched;
+        s.totalWords      += scoredTotal;
+        s.matchedWords    += matched;
+        s.linesScored++;
+
+        if (scoreSummary.perfect) {
+            s.perfectLines++;
+            s.currentStreak++;
+            if (s.currentStreak > s.bestStreak) s.bestStreak = s.currentStreak;
+        } else {
+            s.currentStreak = 0;
+        }
+
+        ev(events, 'runningScore', {});
+    }
+
     return { createSession: createSession, setActiveLine: setActiveLine,
              ingestFinal: ingestFinal, ingestInterim: ingestInterim, setEnergy: setEnergy,
-             tick: tick, endRun: endRun, getScores: getScores, getHonestPct: getHonestPct };
+             tick: tick, endRun: endRun, getScores: getScores, getHonestPct: getHonestPct,
+             scoreLine: scoreLine };
 });
