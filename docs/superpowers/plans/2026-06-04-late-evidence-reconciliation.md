@@ -490,13 +490,11 @@ $env:WHISPER_PROVIDER='openai_realtime'; $env:YTDLP_COOKIES_BROWSER='firefox'; p
 ```
 Then in the browser at `http://127.0.0.1:5000/`:
 1. Load a song, press `V` (enable `karaokee_v2`), pick a difficulty, start playing and let one line scroll past **unsung** so it settles red.
-2. Open DevTools console and inject a late browser_final carrying that line's key word(s), e.g. for a past line whose text you can read on screen:
+2. Open DevTools console and inject a late browser_final carrying that line's key word(s). The controller is the top-level `gameMode` global (declared `const gameMode = new GameMode()` in player.js — accessible by bare name in the console, not as `window.gameMode`):
    ```js
-   // pick the controller instance the page exposes, then:
-   karaoke._addPhraseEvidence({ source: 'browser_final', text: '<that line\'s words>', words: [], receivedAtSec: performance.now()/1000, audioTimeSec: audio.currentTime });
+   gameMode._addPhraseEvidence({ source: 'browser_final', text: '<that line\'s words>', words: [], receivedAtSec: performance.now()/1000, audioTimeSec: audio.currentTime });
    ```
-   (If the instance isn't named `karaoke`, find it via the play handler; the method is on the controller class.)
-3. **Expected:** the previously-red past line flips **green** (its `.word-span`s gain `.matched`), even though it is not the active line, and the honest % headline ticks up. This confirms reconcile → `_paintPhraseCleared` repaints a non-active line.
+3. **Expected:** the previously-red past line flips **green** (its `.word-span`s gain `.matched`), even though it is not the active line, and the honest % headline ticks up within ~100ms (the updateLyrics poll re-reads `getLiveScore`). This confirms reconcile → `_paintPhraseCleared` repaints a non-active line. (No DOM virtualization in this app — all lyric lines persist in `#lyricsScroll`, so the document-wide selector reaches scrolled-away lines.)
 
 Kill the server when done (leftover servers squat port 5000):
 ```powershell

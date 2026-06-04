@@ -194,11 +194,14 @@ var sharedPlan = phraseEngine.buildPhrasePlan([
     { time: 4, text: 'watch me fly' },    // p1: anchors watch, fly
     { time: 8, text: 'geese will fly' }   // p2: anchors geese, fly
 ], { difficulty: 'easy', audioDuration: 12 });
+// nowSec=13 is past every phrase's endSec (4, 8, 12) so ALL THREE are genuine
+// in-window candidates — the look-back must NOT be what spares p0/p2; monotonic
+// attribution + one-credit-per-token must.
 var sharedSession = phraseEngine.createPhraseSession(sharedPlan);
 var sharedConfirmed = phraseEngine.reconcileLateEvidence(sharedSession, {
     id: 'late-3', source: 'browser_final', text: 'watch me fly', words: [],
-    receivedAtSec: 9, audioTimeSec: 9
-}, 9);
+    receivedAtSec: 13, audioTimeSec: 13
+}, 13);
 assert.deepStrictEqual(sharedConfirmed, ['p1'], 'one line\'s batch confirms only that line');
 assert.strictEqual(sharedSession.states['p1'].lyricStatus, 'confirmed', 'the sung line is confirmed');
 assert.strictEqual(sharedSession.states['p0'].lyricStatus, 'missing', 'the shared "fly" does NOT confirm the earlier line');
@@ -211,9 +214,9 @@ assert.strictEqual(Object.keys(sharedSession.states['p2'].anchorHits).length, 0,
 var bareSession = phraseEngine.createPhraseSession(sharedPlan);
 var bareConfirmed = phraseEngine.reconcileLateEvidence(bareSession, {
     id: 'late-4', source: 'browser_final', text: 'fly', words: [],
-    receivedAtSec: 9, audioTimeSec: 9
-}, 9);
-assert.strictEqual(bareConfirmed.length, 1, 'a single shared token credits exactly one phrase, never all of them');
+    receivedAtSec: 13, audioTimeSec: 13
+}, 13);
+assert.strictEqual(bareConfirmed.length, 1, 'a single shared token credits exactly one phrase, never all of them (all three in-window)');
 
 // Dedup: tokens consumed by a first reconcile pass are not re-credited if the
 // same evidence is reconciled again.
