@@ -425,7 +425,6 @@
     // and flag a collect pass for the next tick (which carries the fresh `now`).
     function ingestFinal(s, text, source) {
         if (!text) return;
-        var pe = (s._pendingEvents = s._pendingEvents || []);
         if (source === 'whisper') {
             s.whisperBuffer = trimTranscriptWindow(s.whisperBuffer, text);
             s.lineHadAsrEvent = true;
@@ -444,7 +443,8 @@
             s._pendingFinals = s._pendingFinals || [];
             s._pendingFinals.push({ source: 'browser_final', text: text, words: [] });
         }
-        return pe; // (no-op return; contract treats ingest as feed-only)
+        // Feed-only (contract): no return. The queued collect/evidence run on the next
+        // tick, which carries the media clock the window guard / late-evidence need.
     }
 
     // Feed any queued final-evidence to the phrase engine using the current tick clock.
@@ -493,16 +493,46 @@
         s.latestInterim = text || '';
         s.lineHadAsrEvent = true;
     }
+    // Moved from player.js _reconcileInterim (1475-1488). Transform #1 (this.->s.),
+    // #3 (_paintPhraseCleared -> phraseCleared event). Calls reconcileInterimSnapshot
+    // UNCHANGED (3-arg): the 06dfde5 energy gate is internal to phrase-engine
+    // (hasInWindowFlow over flowEvents). Snapshot assembly preserved verbatim
+    // (transcript + ' ' + latestInterim).
+    function reconcileInterim(s, nowSec, events) {
+        if (!s.phraseSession || !phraseEngine) return;
+        try {
+            var snapText = (s.transcript || '') + ' ' + (s.latestInterim || '');
+            var confirmed = phraseEngine.reconcileInterimSnapshot(s.phraseSession, snapText, nowSec);
+            if (confirmed && confirmed.length) {
+                for (var ci = 0; ci < confirmed.length; ci++) {
+                    ev(events, 'phraseCleared', { phraseId: confirmed[ci] });
+                }
+            }
+        } catch (e) {
+            // swallow (mirrors controller's console.warn-and-continue)
+        }
+    }
+
     function setEnergy(s, isSpeaking) { s.isSpeaking = !!isSpeaking; }
-    // Per-tick orchestration. Order mirrors the production SR handler's internal order
-    // (phrase evidence -> hot-word match -> collectMatches+merge), with the VAD feed
-    // kept adjacent to the hot-word match (both in updateHotWordAndMatch). The Phase-2
-    // settle/commit and Phase-1.4 reconcile + honestPct steps are added in later tasks.
+    // Per-tick orchestration. First the SR-handler-analog work (phrase evidence ->
+    // hot-word match -> collectMatches+merge), then the _tickArcade-analog work
+    // (settle -> reconcile). This mirrors production's `updateHotWord(); _tickArcade();`
+    // call order (player.js:2497). The Phase-2 commit + honestPct steps slot in after
+    // reconcile in later tasks.
     function tick(s, now) {
         var events = [];
+        var nowSec = isFinite(now) ? now : 0;
         drainPendingFinals(s, now, events);     // phrase evidence (uses fresh now)
         updateHotWordAndMatch(s, now, events);  // VAD provisional feed + hot-word match
         runDirtyCollect(s, now, events);        // collectMatches/whisper + merge + promotion
+        // _tickArcade: settle phrases so ended lines are settling/settled, then catch up
+        // ended-and-uncleared lines from the converged interim BEFORE commit.
+        if (s.phraseSession && phraseEngine) {
+            try { phraseEngine.settlePhrases(s.phraseSession, nowSec); } catch (e) {}
+            if (s.flags.KARAOKEE_V2) {
+                reconcileInterim(s, nowSec, events);
+            }
+        }
         return events;
     }
     function endRun(s, now) { return []; }

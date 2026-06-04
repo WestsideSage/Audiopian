@@ -66,6 +66,19 @@ function twoLineCfg() {
              phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium',
              flags: { KARAOKEE_V2: true } };
 }
+
+// Three-line fixture: lines spaced so the first two end (and leave the active
+// window) well before the song end, giving room to drive a batched reconcile of
+// both ended lines while they remain within the 18s reconcile look-back.
+function threeLineCfg() {
+    var L = [lyric(0, 'first line words'), lyric(3, 'second line words'), lyric(6, 'third line words')];
+    return { lyrics: L, allWordTimings: scoring.interpolateWordTimings(L).map(function (wt) {
+                 if (wt) { wt.useVad = true; wt.vadTempoClass = wt.vadTempoClass || 'normal'; }
+                 return wt;
+             }),
+             phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 12 }),
+             difficulty: 'medium', flags: { KARAOKEE_V2: true } };
+}
 // ===========================================================================
 // PER-TASK CHARACTERIZATION TESTS (Phase 1)
 // Ordering rule: a not-yet-implemented characterization test must sit BELOW the
@@ -145,6 +158,111 @@ function matchHotWordForTest(s, text, now) {
     assert.ok(/first line words/.test(s.whisperBuffer), 'whisper final accumulates into whisperBuffer');
     session.tick(s, 1.0);
     assert.strictEqual(s.matchedSet.size, 3, 'whisper path matches all three present words');
+})();
+
+// CHARACTERIZATION (line-boundary deferral): a browser_sr final arriving just before
+// a line change runs its collect pass on the NEXT tick — by which point setActiveLine
+// has reset the line fence to the new line, so the old line's words are NOT credited
+// via this path in Phase 1 (the new-line fence skips them). This pins current
+// behavior. TRIPWIRE FOR PHASE 3: setActiveLine's own outgoing collectMatches pass
+// (player.js:1110-1122) MUST run BEFORE resetLineState, which is what credits these
+// words once Phase 3 lands — at which point the second assertion below flips to
+// matched and should be updated. The transcript still accumulates regardless.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'first line words', 'browser_sr'); // line 0's words, line 0 active
+    session.setActiveLine(s, 1, 2.0);                          // line changes before any tick
+    session.tick(s, 2.1);                                      // deferred collect runs vs LINE 1's fence
+    assert.ok(/first line words/.test(s.transcript), 'transcript accumulates the final regardless');
+    assert.strictEqual(s.matchedSet.size, 0,
+        'Phase 1: a pre-boundary final is not credited to the old line via the deferred collect ' +
+        '(Phase 3 setActiveLine outgoing pass will credit it — update this when 3.1 lands)');
+})();
+
+// --- Task 1.4 (+ folded-in Task 0.3): energy-gated interim reconciliation ---
+// Encodes the 06dfde5 invariant: an ended line whose words appear only in the
+// interim with NO in-window vocal energy must NOT be reconciled/cleared; with
+// energy it must. The energy gate is internal to phrase-engine (hasInWindowFlow
+// over flowEvents); the session reproduces the live isSpeaking-gated vad feed.
+
+// (A) No energy while line 0 is active+ended -> interim words do NOT clear it.
+// Drive a tick INSIDE line 0's window while SILENT (the real cheese case: the words
+// appear in the interim via boundary-bleed from an adjacent line, but the singer
+// produced no in-window energy), so this exercises the energy gate itself rather
+// than merely the absence of any in-window tick.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, false);                  // silent
+    session.tick(s, 0.5);                         // in-window tick, but silent -> NO vad flowEvent
+    session.ingestInterim(s, 'first line words'); // words present but no energy
+    session.setActiveLine(s, 1, 2.0);             // line 0 ends
+    var out = session.tick(s, 2.1);
+    var cleared = out.filter(function (e) { return e.type === 'phraseCleared'; });
+    assert.strictEqual(cleared.length, 0, 'silent interim must NOT reconcile/clear the ended line');
+})();
+
+// (B) With energy, the same words DO clear line 0. For the engine to clear, a
+// flowEvent must exist in p0's window: energize, then drive a tick INTO line 0's
+// window (now=0.5) so the vad feed records the flowEvent, THEN ingest the interim
+// words and end the line. (The plan's verbatim 0.3 snippet had no in-window tick
+// and could not clear even with a correct impl; corrected per execution notes.)
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);                   // singing
+    session.tick(s, 0.5);                         // energized tick in line 0's window -> vad flowEvent
+    session.ingestInterim(s, 'first line words');
+    session.setActiveLine(s, 1, 2.0);             // line 0 ends; latestInterim survives
+    var out = session.tick(s, 2.1);
+    var cleared = out.filter(function (e) { return e.type === 'phraseCleared'; });
+    assert.ok(cleared.length >= 1, 'energized interim SHOULD reconcile/clear the ended line');
+    assert.ok(cleared.some(function (e) { return e.phraseId === 'p0'; }),
+        'the cleared phrase is line 0 (p0)');
+})();
+
+// (C) A converged interim batching BOTH ended lines reconciles each to its own
+// line (two distinct phraseCleared). Both lines must be ended and out of the active
+// window (so the live addEvidence path doesn't directly credit them) yet within the
+// 18s reconcile look-back; each needs an in-window flowEvent (singing) to pass the
+// energy gate. Mirrors test_phrase_engine's batched/interim reconciliation cases.
+(function () {
+    var s = session.createSession(threeLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);
+    session.tick(s, 1.0);                         // flowEvent inside p0 [0,3]
+    session.setActiveLine(s, 1, 3.0);
+    session.tick(s, 4.0);                         // flowEvent inside p1 [3,6]
+    session.setActiveLine(s, 2, 6.0);            // lines 0 & 1 now ended
+    session.ingestInterim(s, 'first line words second line words');
+    var out = session.tick(s, 8.5);              // both ended + out of active window, within look-back
+    var clearedIds = out.filter(function (e) { return e.type === 'phraseCleared'; })
+                        .map(function (e) { return e.phraseId; });
+    assert.ok(clearedIds.indexOf('p0') >= 0, 'batched interim reconciles line 0');
+    assert.ok(clearedIds.indexOf('p1') >= 0, 'batched interim reconciles line 1');
+    assert.notStrictEqual(clearedIds.indexOf('p0'), clearedIds.indexOf('p1'),
+        'line 0 and line 1 are cleared as two distinct phrases');
+})();
+
+// (D) Monotonic: once a line is cleared, a later reconcile pass with the same
+// converged interim does not re-credit / double-clear it.
+(function () {
+    var s = session.createSession(threeLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);
+    session.tick(s, 1.0);
+    session.setActiveLine(s, 1, 3.0);
+    session.tick(s, 4.0);
+    session.setActiveLine(s, 2, 6.0);
+    session.ingestInterim(s, 'first line words second line words');
+    var out1 = session.tick(s, 8.5);
+    assert.ok(out1.some(function (e) { return e.type === 'phraseCleared' && e.phraseId === 'p0'; }),
+        'line 0 clears on the first reconcile pass');
+    // Same interim, later tick: already-consumed words are fenced -> no re-clear.
+    var out2 = session.tick(s, 9.0);
+    var again = out2.filter(function (e) { return e.type === 'phraseCleared'; }).length;
+    assert.strictEqual(again, 0, 'already-cleared lines are not cleared again (monotonic)');
 })();
 
 // ===========================================================================
