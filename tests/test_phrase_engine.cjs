@@ -292,6 +292,9 @@ var snapPlan = phraseEngine.buildPhrasePlan([
     { time: 14, text: 'second line here' }
 ], { difficulty: 'easy', audioDuration: 18 });
 var snapSession = phraseEngine.createPhraseSession(snapPlan);
+// The singer vocalized during the line (energy in [10,14]); recognition just came
+// late via the interim. Interim credit now requires that in-window energy.
+phraseEngine.addEvidence(snapSession, { id: 'vad-snap0', source: 'vad', text: '', words: [], receivedAtSec: 12, audioTimeSec: 12 });
 var snapConfirmed = phraseEngine.reconcileInterimSnapshot(snapSession, 'mountain river stone', 16);
 assert.deepStrictEqual(snapConfirmed, ['p0'], 'converged interim snapshot credits the sung, ended line');
 assert.strictEqual(snapSession.states['p0'].cleared, true, 'interim snapshot clears the line');
@@ -314,6 +317,10 @@ var inflPlan = phraseEngine.buildPhrasePlan([
     { time: 8, text: 'geese will fly' }   // p2
 ], { difficulty: 'easy', audioDuration: 12 });
 var inflSession = phraseEngine.createPhraseSession(inflPlan);
+// Energy for the two SUNG lines only (p1 @6s in [4,8]; p2 @10s in [8,12]); the
+// never-sung p0 [0,4] stays silent, so the gate blocks it even before the floor does.
+phraseEngine.addEvidence(inflSession, { id: 'vad-infl1', source: 'vad', text: '', words: [], receivedAtSec: 6, audioTimeSec: 6 });
+phraseEngine.addEvidence(inflSession, { id: 'vad-infl2', source: 'vad', text: '', words: [], receivedAtSec: 10, audioTimeSec: 10 });
 phraseEngine.reconcileInterimSnapshot(inflSession, 'watch me fly', 9);
 phraseEngine.reconcileInterimSnapshot(inflSession, 'watch me fly geese will fly', 13);
 assert.strictEqual(inflSession.states['p1'].lyricStatus, 'confirmed', 'sung line p1 confirmed from interim');
@@ -332,6 +339,10 @@ var resetPlan = phraseEngine.buildPhrasePlan([
     { time: 4, text: 'delta echo foxtrot' }     // p1 (after the interim resets)
 ], { difficulty: 'easy', audioDuration: 8 });
 var resetSession = phraseEngine.createPhraseSession(resetPlan);
+// Both lines were sung (energy in each window) — the reset robustness is about the
+// fence, not skipping, so both need in-window flow under the new gate.
+phraseEngine.addEvidence(resetSession, { id: 'vad-reset0', source: 'vad', text: '', words: [], receivedAtSec: 2, audioTimeSec: 2 });
+phraseEngine.addEvidence(resetSession, { id: 'vad-reset1', source: 'vad', text: '', words: [], receivedAtSec: 6, audioTimeSec: 6 });
 phraseEngine.reconcileInterimSnapshot(resetSession, 'alpha bravo charlie', 5);
 assert.strictEqual(resetSession.states['p0'].lyricStatus, 'confirmed', 'long early segment credits its line');
 // Interim resets to a shorter, divergent string (segment finalized/aborted).
@@ -350,9 +361,36 @@ var revPlan = phraseEngine.buildPhrasePlan([
     { time: 8, text: 'geese will fly' }   // p2
 ], { difficulty: 'easy', audioDuration: 12 });
 var revSession = phraseEngine.createPhraseSession(revPlan);
+// Only p1 [4,8] was sung (energy @6s); the skipped p0 [0,4] stays silent. Both the
+// forward-only floor AND the in-window-flow gate now keep p0 from being re-credited.
+phraseEngine.addEvidence(revSession, { id: 'vad-rev1', source: 'vad', text: '', words: [], receivedAtSec: 6, audioTimeSec: 6 });
 phraseEngine.reconcileInterimSnapshot(revSession, 'watch me fly', 9);
 phraseEngine.reconcileInterimSnapshot(revSession, 'switch me fly', 10); // revision -> new segment id
 assert.strictEqual(revSession.states['p1'].lyricStatus, 'confirmed', 'sung line p1 confirmed');
 assert.strictEqual(revSession.states['p0'].lyricStatus, 'missing', 'a browser-SR revision must NOT re-credit the skipped earlier line via the re-exposed shared anchor');
+
+// (F) Middle-skip leak (the "sing every other line" exploit): the forward-only floor
+// only protects lines BEFORE the last confirmed line. A skipped line sandwiched
+// BETWEEN two sung lines is unprotected, and on rap the next sung line repeats a hook
+// whose shared anchor bleeds back onto the skipped line while that next line is still
+// mid-flight (not yet an ended candidate). The fix gates interim credit on in-window
+// vocal energy: the skipped line had NONE (singer was silent during it), so it must
+// stay missing — and the sung line must reclaim its own words.
+var hookPlan = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'alpha bravo charlie' },     // p0 SUNG
+    { time: 4, text: 'dragon phoenix glory' },    // p1 SKIPPED (identical hook -> shares every anchor with p2)
+    { time: 8, text: 'dragon phoenix glory' }     // p2 SUNG (the repeated hook)
+], { difficulty: 'expert', audioDuration: 12 });
+var hookSession = phraseEngine.createPhraseSession(hookPlan);
+// Real-time vocal energy ONLY for the lines actually sung (p0 @2s in [0,4]; p2 @10s in [8,12]).
+// The skipped p1 [4,8] gets none — exactly what "skip a line" produces.
+phraseEngine.addEvidence(hookSession, { id: 'vad-h0', source: 'vad', text: '', words: [], receivedAtSec: 2, audioTimeSec: 2 });
+phraseEngine.addEvidence(hookSession, { id: 'vad-h2', source: 'vad', text: '', words: [], receivedAtSec: 10, audioTimeSec: 10 });
+phraseEngine.reconcileInterimSnapshot(hookSession, 'alpha bravo charlie', 5);                        // sing p0
+phraseEngine.reconcileInterimSnapshot(hookSession, 'alpha bravo charlie dragon phoenix glory', 10);  // mid-p2: p1 is the only ended candidate
+phraseEngine.reconcileInterimSnapshot(hookSession, 'alpha bravo charlie dragon phoenix glory', 13);  // p2 has now ended
+assert.strictEqual(hookSession.states['p0'].lyricStatus, 'confirmed', 'sung p0 confirmed');
+assert.strictEqual(hookSession.states['p1'].lyricStatus, 'missing', 'SKIPPED middle line (no in-window energy) must NOT be credited by the next line\'s repeated-hook anchor');
+assert.strictEqual(hookSession.states['p2'].lyricStatus, 'confirmed', 'the actually-sung repeated hook (p2) reclaims its own words');
 
 console.log('Phrase engine tests passed.');

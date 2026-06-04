@@ -34,6 +34,19 @@
     // speech-rec batch latency observed in telemetry (it can batch ~8 lines into
     // one late `final`). Tunable; see the design spec §7.
     var RECONCILE_LOOKBACK_SEC = 18;
+    // Interim reconciliation credits a line purely by word content (a repeated hook
+    // anchor from the NEXT line can match a SKIPPED middle line whose true owner has
+    // not yet ended — the forward-only floor only guards lines BEFORE the last
+    // confirmed one). The only signal that separates "sang it, recognized late" from
+    // "skipped it, next line bled back" is whether the singer vocalized DURING the
+    // line: contiguous lines share a boundary, so a word's timestamp cannot. So an
+    // interim credit requires an in-window flow event (live vad/content) for that
+    // line. Default STRICT (0ms): on the honest-play telemetry a grace recovered only
+    // ~4/462 lines (95% either way — within noise), while any grace opens a bleed
+    // window on BOTH edges of a skipped line (its start == prev line's end, its end ==
+    // next line's start), the exact direction this gate guards against. Kept as a knob:
+    // raise only if a sing-test shows honest sub-second bars dropping to partial.
+    var RECONCILE_FLOW_GRACE_MS = 0;
 
     function cloneProfile(profile) {
         return {
@@ -418,6 +431,20 @@
         return session;
     }
 
+    // Did the singer produce real-time energy/content inside this phrase's window?
+    // Gates interim reconciliation: boundary-bleed flow from an adjacent line lands
+    // OUTSIDE the strict window, so a line the singer skipped reads as silent here.
+    // Reuses the flow events the live path already records — no separate energy stream.
+    function hasInWindowFlow(state, phrase) {
+        if (!state || !phrase) return false;
+        var grace = RECONCILE_FLOW_GRACE_MS / 1000;
+        var lo = phrase.startSec - grace;
+        var hi = phrase.endSec + grace;
+        return (state.flowEvents || []).some(function(fe) {
+            return fe && fe.timeSec != null && fe.timeSec >= lo && fe.timeSec <= hi;
+        });
+    }
+
     // Content-based catch-up for late recognition. Runs AFTER the live addEvidence
     // path. For each token in spoken order, finds the first un-hit anchor in a
     // not-yet-cleared phrase whose endSec is inside the look-back window, scanning
@@ -436,11 +463,15 @@
         // revision re-presenting an already-credited word can't reach back to an
         // earlier, un-sung line. The late-final path passes no floor (unchanged).
         var minStartSec = (options && options.minStartSec != null) ? options.minStartSec : -Infinity;
+        var requireInWindowFlow = !!(options && options.requireInWindowFlow);
         var candidates = (session.plan.phrases || []).filter(function(phrase) {
             var state = session.states[phrase.phraseId];
             if (!state || state.cleared) return false;
             if (!(phrase.anchorsRequired > 0)) return false;
             if (phrase.startSec < minStartSec) return false;
+            // Interim path only: a line the singer was silent through (no in-window
+            // flow) must not be credited by content bleeding from an adjacent sung line.
+            if (requireInWindowFlow && !hasInWindowFlow(state, phrase)) return false;
             return phrase.endSec >= lookbackStart && phrase.endSec <= nowSec;
         }).sort(function(a, b) { return a.startSec - b.startSec; });
         if (candidates.length === 0) return [];
@@ -543,7 +574,7 @@
             words: [],
             receivedAtSec: nowSec,
             audioTimeSec: nowSec
-        }, nowSec, { minStartSec: floor });
+        }, nowSec, { minStartSec: floor, requireInWindowFlow: true });
         // Advance the forward-only floor past every line interim just confirmed, so a
         // later snapshot (esp. a revision that mints a fresh segment id) cannot reach
         // back and re-credit an earlier line the singer skipped.
