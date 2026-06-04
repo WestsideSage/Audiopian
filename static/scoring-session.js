@@ -514,23 +514,36 @@
     }
 
     function setEnergy(s, isSpeaking) { s.isSpeaking = !!isSpeaking; }
+
+    // Tick-driven prevLine finalize hook. No-op until Phase 3.2 wires the wall-clock ->
+    // media-clock conversion (finalize when now >= s.prevLine.overlapEnd). The call site
+    // lives in tick now so the orchestration order is locked.
+    function finalizePrevLineIfDue(s, now, events) { /* Phase 3.2 */ }
+
     // Per-tick orchestration. First the SR-handler-analog work (phrase evidence ->
     // hot-word match -> collectMatches+merge), then the _tickArcade-analog work
-    // (settle -> reconcile). This mirrors production's `updateHotWord(); _tickArcade();`
-    // call order (player.js:2497). The Phase-2 commit + honestPct steps slot in after
-    // reconcile in later tasks.
+    // (settle -> reconcile -> commit -> honestPct). This mirrors production's
+    // `updateHotWord(); _tickArcade();` call order (player.js:2497) and, inside the
+    // arcade block, _tickArcade's own order (settle -> reconcile -> commit -> honest %,
+    // player.js:1628-1647).
     function tick(s, now) {
         var events = [];
         var nowSec = isFinite(now) ? now : 0;
+        finalizePrevLineIfDue(s, now, events);  // tick-driven prevLine finalize (no-op until 3.2)
         drainPendingFinals(s, now, events);     // phrase evidence (uses fresh now)
         updateHotWordAndMatch(s, now, events);  // VAD provisional feed + hot-word match
         runDirtyCollect(s, now, events);        // collectMatches/whisper + merge + promotion
         // _tickArcade: settle phrases so ended lines are settling/settled, then catch up
-        // ended-and-uncleared lines from the converged interim BEFORE commit.
+        // ended-and-uncleared lines from the converged interim BEFORE commit, then commit
+        // each newly-settled phrase exactly once, then refresh the honest % headline.
         if (s.phraseSession && phraseEngine) {
             try { phraseEngine.settlePhrases(s.phraseSession, nowSec); } catch (e) {}
             if (s.flags.KARAOKEE_V2) {
                 reconcileInterim(s, nowSec, events);
+            }
+            commitNewlySettled(s, nowSec, true, events);
+            if (s.flags.KARAOKEE_V2) {
+                ev(events, 'honestPct', { pct: getHonestPct(s) });
             }
         }
         return events;

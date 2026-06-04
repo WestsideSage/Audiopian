@@ -399,7 +399,11 @@ function matchHotWordForTest(s, text, now) {
     session.tick(s, 1.0);                          // flowEvent inside p0 [0,3]
     session.setActiveLine(s, 1, 3.0);              // p0 ends
     session.ingestInterim(s, 'first line words');
-    session.tick(s, 4.5);                          // reconciles p0 (cleared) + settlePhrases -> p0 settled
+    // Reconcile-clear p0 at a pre-settlement tick (4.0 < 3+1.4=4.4) so p0 is cleared
+    // but only 'settling' — tick's own commit (Task 2.4) skips it. Then settle p0
+    // explicitly so the unit under test here, commitNewlySettled, performs the commit.
+    session.tick(s, 4.0);                          // reconciles p0 (cleared); p0 'settling', uncommitted
+    phrase.settlePhrases(s.phraseSession, 4.5);    // p0 now 'settled'
     var events = [];
     session.commitNewlySettled(s, 4.5, true, events);
     var arcadeEv = events.filter(function (e) { return e.type === 'arcade'; });
@@ -455,6 +459,62 @@ function matchHotWordForTest(s, text, now) {
     assert.strictEqual(s.arcadeEvents.length, 1, 'routeEvents=false still records the commit for telemetry');
     assert.ok(events.some(function (e) { return e.type === 'phraseMissed' && e.phraseId === 'p0'; }),
         'routeEvents=false still paints the phrase result');
+})();
+
+// --- Task 2.4: tick orchestration + honestPct event ---
+// tick runs the arcade block in _tickArcade order: reconcile (phraseCleared) ->
+// commit (arcade / phraseMissed) -> honestPct (last). A single tick that both
+// reconciles and commits p0 must emit the reconcile phraseCleared BEFORE the commit
+// arcade event, the arcade BEFORE honestPct, and honestPct must be the final event.
+(function () {
+    var s = session.createSession(threeLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);
+    session.tick(s, 1.0);                          // flowEvent inside p0 [0,3]
+    session.setActiveLine(s, 1, 3.0);              // p0 ends
+    session.ingestInterim(s, 'first line words');
+    var out = session.tick(s, 4.5);               // reconcile (clear) + settle + commit + honest
+    function idx(pred) { for (var i = 0; i < out.length; i++) if (pred(out[i])) return i; return -1; }
+    var iCleared = idx(function (e) { return e.type === 'phraseCleared'; });
+    var iArcade = idx(function (e) { return e.type === 'arcade'; });
+    var iHonest = idx(function (e) { return e.type === 'honestPct'; });
+    assert.ok(iCleared >= 0, 'tick emits a reconcile phraseCleared for p0');
+    assert.ok(iArcade >= 0, 'tick emits a commit arcade event for p0');
+    assert.ok(iHonest >= 0, 'tick emits a honestPct event');
+    assert.ok(iCleared < iArcade, 'reconcile (phraseCleared) precedes commit (arcade)');
+    assert.ok(iArcade < iHonest, 'commit (arcade) precedes honestPct');
+    assert.strictEqual(iHonest, out.length - 1, 'honestPct is the last event of the tick');
+    // honestPct payload equals getHonestPct(s) computed after the tick settled state.
+    assert.strictEqual(out[iHonest].pct, session.getHonestPct(s),
+        'the honestPct event value equals getHonestPct(s)');
+})();
+
+// Commit ordering for a missed phrase: reconcile emits nothing, commit emits the
+// arcade + phraseMissed, then honestPct closes the tick.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);              // silence -> p0 will settle as missed
+    var out = session.tick(s, 3.5);               // p0 settled at >=3.4
+    function idx(pred) { for (var i = 0; i < out.length; i++) if (pred(out[i])) return i; return -1; }
+    var iArcade = idx(function (e) { return e.type === 'arcade'; });
+    var iMissed = idx(function (e) { return e.type === 'phraseMissed' && e.phraseId === 'p0'; });
+    var iHonest = idx(function (e) { return e.type === 'honestPct'; });
+    assert.ok(iArcade >= 0 && iMissed >= 0, 'a missed phrase commits arcade + phraseMissed in tick');
+    assert.ok(iHonest >= 0 && iHonest === out.length - 1, 'honestPct closes the tick');
+})();
+
+// honestPct is only emitted under KARAOKEE_V2 (the headline ownership gate). With the
+// flag off, tick still settles/commits but emits no honestPct.
+(function () {
+    var L = [lyric(0, 'first line words'), lyric(2, 'second line words')];
+    var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
+                phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium',
+                flags: { KARAOKEE_V2: false } };
+    var s = session.createSession(cfg);
+    session.setActiveLine(s, 0, 0.0);
+    var out = session.tick(s, 3.5);
+    assert.strictEqual(out.filter(function (e) { return e.type === 'honestPct'; }).length, 0,
+        'no honestPct event when KARAOKEE_V2 is off');
 })();
 
 // ===========================================================================
