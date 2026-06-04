@@ -589,9 +589,17 @@
     }
     // Moved from player.js SR onresult (399, 413): latest interim is stored verbatim
     // and any ASR event marks the line as having had ASR activity.
+    // Deferral-closure #2: also mark collect dirty so the next tick runs
+    // runDirtyCollect with `transcript + latestInterim`, matching production's
+    // _collectMatches call on every onresult (player.js:431).
     function ingestInterim(s, text) {
         s.latestInterim = text || '';
-        s.lineHadAsrEvent = true;
+        if (text) {
+            s.lineHadAsrEvent = true;
+            // Mark dirty so runDirtyCollect runs on the next tick against the full
+            // transcript+interim text (mirrors player.js:431 onresult collect).
+            if (!s._collectDirty) s._collectDirty = 'browser_sr';
+        }
     }
     // Moved from player.js _reconcileInterim (1475-1488). Transform #1 (this.->s.),
     // #3 (_paintPhraseCleared -> phraseCleared event). Calls reconcileInterimSnapshot
@@ -705,7 +713,41 @@
         }
         return events;
     }
-    function endRun(s, now) { return []; }
+    // Final flush when the song ends or the player stops. Mirrors the end-screen flush
+    // at the controller level: collect any remaining active-line text, score the final
+    // active line, settle pending phrases, commit newly-settled (routeEvents=false so
+    // the HUD arcade banner is suppressed; the end screen renders from getScores/events).
+    // Idempotency: a sentinel flag `_endRunDone` prevents double-scoring.
+    function endRun(s, now) {
+        var events = [];
+        if (s._endRunDone) return events;
+        s._endRunDone = true;
+        var nowSec = isFinite(now) ? now : 0;
+
+        // Final collect pass on the active line (catches any unprocessed interim/final).
+        if (s.lineWords.length > 0 && s.lineHadAsrEvent) {
+            var unionMap = new Map();
+            collectMatches(s, (s.transcript || '') + (s.latestInterim || ''), unionMap, nowSec, events);
+            mergeConfirmedMatches(s.matchedSet, s.vadMatchedSet, s.asrConfirmedSet, unionMap);
+        }
+
+        // Score the active line.
+        if (s.activeLineIdx >= 0 && s.lineWords.length > 0) {
+            scoreLine(s, s.activeLineIdx, s.lineWords, s.matchedSet, s.lineHadAsrEvent,
+                      s.vadMatchedSet, s.asrConfirmedSet, events);
+        }
+
+        // Settle all remaining open phrases as of now.
+        if (s.phraseSession && phraseEngine) {
+            try { phraseEngine.settlePhrases(s.phraseSession, nowSec); } catch (e) {}
+        }
+
+        // Commit newly settled phrases (routeEvents=false: no HUD arcade event; end
+        // screen reads from getScores and the phrase paint events).
+        commitNewlySettled(s, nowSec, false, events);
+
+        return events;
+    }
     function getScores(s) {
         return { weightedTotal: s.weightedTotal, weightedMatched: s.weightedMatched,
                  totalWords: s.totalWords, matchedWords: s.matchedWords, linesScored: s.linesScored,

@@ -114,13 +114,16 @@ function matchHotWordForTest(s, text, now) {
     var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
                 phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium',
                 flags: { KARAOKEE_V2: true } };
-    // (silent) edit-distance-only match must be rejected.
+    // (silent) edit-distance-only match must be rejected by the HOT-WORD VAD path.
+    // Note: the collectMatches path (non-energy-gated) may still credit an edit-distance
+    // match via transcript+interim — that is correct production behavior (player.js:431).
+    // This test specifically checks the vad-confirmed branch is NOT triggered when silent.
     var s = session.createSession(cfg);
     session.setActiveLine(s, 0, 0.0);     // now=0.5 below lands the hot word on idx 0 (candle)
     session.setEnergy(s, false);
     var out = matchHotWordForTest(s, 'cendle', 0.5);
-    assert.strictEqual(out.filter(function (e) { return e.type === 'wordMatched'; }).length, 0,
-        'edit-distance match must be rejected while silent');
+    assert.strictEqual(out.filter(function (e) { return e.type === 'wordMatched' && e.method === 'vad-confirmed'; }).length, 0,
+        'vad-confirmed match must be rejected while silent (energy gate on hot-word path)');
     // (singing) the same edit-distance match is accepted.
     var s2 = session.createSession(cfg);
     session.setActiveLine(s2, 0, 0.0);
@@ -624,6 +627,83 @@ function matchHotWordForTest(s, text, now) {
     var out2 = session.tick(s, 6.0);                   // second tick
     var scored2 = out2.filter(function (e) { return e.type === 'lineScored' && e.lineIdx === 0; });
     assert.strictEqual(scored2.length, 0, 'second tick does not double-score the prevLine');
+})();
+
+// --- Task 3.3: ingestInterim marks collect-dirty (deferral-closure #2) ---
+// Production runs _collectMatches on every onresult (incl. interims, player.js:431).
+// The session must reproduce this: a multi-word interim without a final must credit
+// ALL its in-window words via the dirty collect path (not just the single hot word
+// that the hot-word match handles). This verifies runDirtyCollect runs on interim.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);                        // energized — VAD feed active
+    session.ingestInterim(s, 'first line words');      // interim only, no final
+    session.tick(s, 1.0);
+    // The dirty collect must credit all three words (not just the hot word at index 0).
+    // If only the hot-word path ran, matchedSet.size would be 1 (plus vad provisional).
+    // The full collect path credits all three.
+    assert.ok(s.matchedSet.size >= 3,
+        'all three interim words are credited via runDirtyCollect (not just the hot word)');
+})();
+
+// Without energy, the collect path (exact/phrase/contraction) is NOT energy-gated and
+// must still run when dirty. All three exact-match words must be credited.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, false);                       // silent
+    session.ingestInterim(s, 'first line words');      // exact words in interim
+    session.tick(s, 1.0);
+    // collectMatches is NOT energy-gated — all three words should be credited.
+    assert.ok(s.matchedSet.size >= 3, 'silent interim still credits all exact matches via collect path');
+})();
+
+// --- Task 3.3: endRun flush + idempotency ---
+// endRun must: collect the active line, score it, settle phrases, commit newly
+// settled (routeEvents=false). A second endRun must not double-score or re-commit.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    session.tick(s, 1.0);                              // collect + match
+    assert.strictEqual(s.matchedSet.size, 3, 'precondition: all words matched');
+
+    var out = session.endRun(s, 2.0);
+    // endRun must emit a lineScored for the active line.
+    var scored = out.filter(function (e) { return e.type === 'lineScored'; });
+    assert.strictEqual(scored.length, 1, 'endRun emits exactly one lineScored for the active line');
+    assert.strictEqual(scored[0].lineIdx, 0, 'lineScored is for line 0');
+    assert.strictEqual(scored[0].matched, 3, 'all three words are credited');
+    assert.strictEqual(session.getScores(s).linesScored, 1, 'linesScored incremented by endRun');
+
+    // Idempotency: a second endRun must not double-score.
+    var out2 = session.endRun(s, 3.0);
+    var scored2 = out2.filter(function (e) { return e.type === 'lineScored'; });
+    assert.strictEqual(scored2.length, 0, 'second endRun is idempotent — no duplicate lineScored');
+    assert.strictEqual(session.getScores(s).linesScored, 1, 'linesScored not incremented on second endRun');
+})();
+
+// endRun also commits any newly-settled phrases (routeEvents=false: no arcade HUD
+// events, but arcadeRecord is still pushed and phraseMissed/phraseCleared is still
+// emitted for the end-screen paint).
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    // Settle p0 past its window (2+1.4=3.4s) without any evidence (-> miss).
+    var out = session.endRun(s, 4.0);
+    // routeEvents=false: no arcade HUD event.
+    var arcadeHud = out.filter(function (e) { return e.type === 'arcade'; });
+    assert.strictEqual(arcadeHud.length, 0, 'endRun (routeEvents=false) does not emit arcade HUD events');
+    // arcadeRecord is still pushed for telemetry.
+    assert.ok(s.arcadeEvents.length >= 1, 'endRun still pushes arcadeRecord to s.arcadeEvents');
+    // phraseMissed emitted for the end-screen paint.
+    var missed = out.filter(function (e) { return e.type === 'phraseMissed'; });
+    assert.ok(missed.length >= 1, 'endRun emits phraseMissed for the end-screen paint');
+    // Second call is idempotent (commit-once guard).
+    var out2 = session.endRun(s, 5.0);
+    var ar2 = out2.filter(function (e) { return e.type === 'arcadeRecord'; });
+    assert.strictEqual(ar2.length, 0, 'second endRun does not re-commit (commit-once guard)');
 })();
 
 // ===========================================================================
