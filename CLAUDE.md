@@ -73,3 +73,17 @@ Each completed run auto-saves a JSON to `output_telemetry/<date>/` via `POST /te
 - `temp/audio.webm` holds only one song at a time (overwritten on each `/load`).
 - The JS helper files use `var` / plain functions (not ES modules) so they work in both browser `<script>` context and Node.js `require()`.
 - When writing JS files with backtick template literals on Windows, use the Edit or Write tools directly — do not delegate to Bash subagents (backtick expressions get stripped).
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues for `WestsideSage/Vocalz` (via the `gh` CLI; requires `gh` installed + `gh auth login`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage labels using default names (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
