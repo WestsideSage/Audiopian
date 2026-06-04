@@ -151,10 +151,151 @@
         return events;
     }
 
+    // Moved from player.js _setWordSource (753-761): source-rank bookkeeping. Pure.
+    function setWordSource(s, wordIndex, source) {
+        if (wordIndex === undefined || wordIndex === null || wordIndex < 0) return;
+        var rank = { vad: 1, browser_sr: 2, whisper: 3 };
+        var existing = s.wordSourceMap.get(wordIndex);
+        if (!existing || (rank[source] || 0) >= (rank[existing] || 0)) {
+            s.wordSourceMap.set(wordIndex, source);
+        }
+    }
+
+    // Moved from player.js _addPhraseEvidence (1445-1466). Transform #2: audio.currentTime
+    // -> now. Transform #3: each _paintPhraseCleared(...) -> phraseCleared event. The
+    // browser_final/whisper late-evidence reconcile branch is preserved verbatim; the
+    // vad-source feed (from the hot-word path) only adds evidence + settles (its source
+    // is 'vad', so it never enters the reconcile branch). These vad flowEvents are what
+    // the interim-reconcile energy gate (phrase-engine hasInWindowFlow) checks.
+    function addPhraseEvidence(s, evidence, now, events) {
+        if (!s.phraseSession || !phraseEngine) return;
+        try {
+            var nowSec = isFinite(now) ? now : 0;
+            phraseEngine.addEvidence(s.phraseSession, evidence);
+            phraseEngine.settlePhrases(s.phraseSession, nowSec);
+            if (evidence.source === 'browser_final' || evidence.source === 'whisper') {
+                var confirmed = phraseEngine.reconcileLateEvidence(s.phraseSession, evidence, nowSec);
+                if (confirmed && confirmed.length && s.flags.KARAOKEE_V2) {
+                    for (var ci = 0; ci < confirmed.length; ci++) {
+                        ev(events, 'phraseCleared', { phraseId: confirmed[ci] });
+                    }
+                }
+            }
+        } catch (e) {
+            // swallow (mirrors controller's console.warn-and-continue)
+        }
+    }
+
+    // Moved from player.js _matchHotWord (1498-1533). Transform #1: this.->s.
+    // Transform #3: the vad-confirmed _logMatch (1525-1527) -> wordMatched event;
+    // _setWordSource -> setWordSource(s,...). Energy gate preserved verbatim: when
+    // silent, edit-distance-only matches are skipped. Returns true if matched.
+    function matchHotWord(s, transcript, now, events) {
+        if (s.hotWordIndex < 0 || s.hotWordIndex >= s.lineWords.length) return false;
+        if (s.asrConfirmedSet.has(s.hotWordIndex)) return false; // already fully confirmed by ASR
+
+        var target = s.lineWords[s.hotWordIndex];
+        var targetPhonetic = s.wordTimings[s.hotWordIndex] ? s.wordTimings[s.hotWordIndex].phonetic : undefined;
+        var spoken = normalizeWords(transcript);
+
+        var searchStart = Math.max(s.lineStartTranscriptPos, spoken.length - 10);
+        for (var i = searchStart; i < spoken.length; i++) {
+            if (wordsMatch(spoken[i], target, targetPhonetic)) {
+                // Energy gate: if not speaking, require exact or phonetic match (not edit-distance)
+                if (!s.isSpeaking) {
+                    if (spoken[i] !== target) {
+                        var sp = doubleMetaphone(spoken[i]);
+                        var tp = doubleMetaphone(target);
+                        var phonetic = sp[0] && tp[0] && (sp[0] === tp[0] || sp[0] === tp[1] || (sp[1] && (sp[1] === tp[0] || sp[1] === tp[1])));
+                        if (!phonetic) continue; // skip edit-distance-only matches when silent
+                    }
+                }
+                s.matchedSet.set(s.hotWordIndex, 1.0);
+                setWordSource(s, s.hotWordIndex, 'browser_sr');
+                if (s.vadMatchedSet.has(s.hotWordIndex)) {
+                    s.asrConfirmedSet.add(s.hotWordIndex);
+                    setWordSource(s, s.hotWordIndex, 'browser_sr');
+                    ev(events, 'wordMatched', {
+                        lineIdx: s.activeLineIdx, wordIndex: s.hotWordIndex,
+                        spokenWord: spoken[i], targetWord: target, method: 'vad-confirmed',
+                        editDistance: -1, phoneticMatch: false, score: 1.0, matched: true,
+                        windowPosition: s.hotWordIndex, source: 'browser_sr'
+                    });
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Recompute the hot word + run the isSpeaking-gated VAD optimistic feed, then
+    // attempt a hot-word match against the accumulated transcript+interim. Moved from
+    // updateHotWord hot-index logic (player.js:1401-1442) + the SR-handler's
+    // _matchHotWord call (423). Transform #2: audio.currentTime -> now. The VAD branch
+    // (1423-1442) feeds vad-source evidence ONLY when s.isSpeaking — these flowEvents
+    // gate interim reconciliation. The vad-provisional _logMatch (1429-1433) -> event.
+    function updateHotWordAndMatch(s, now, events) {
+        if (!s.wordTimings || s.wordTimings.length === 0) {
+            s.hotWordIndex = -1;
+            return;
+        }
+        var t = (isFinite(now) ? now : 0) - s.lrcOffset;
+        var newHot = -1;
+        for (var i = 0; i < s.wordTimings.length; i++) {
+            if (s.matchedSet.has(i)) continue; // skip already-green words
+            var wt = s.wordTimings[i];
+            var winOpen = (s.wordTimings.useVad) ? (wt.estimatedTime - 0.05) : wt.windowStart;
+            if (t >= winOpen && t <= wt.windowEnd) {
+                newHot = i;
+                break;  // first unmatched window wins
+            }
+        }
+        s.hotWordIndex = newHot;
+
+        // VAD optimistic scoring: provisional amber + vad flow-event evidence, gated on
+        // isSpeaking (this is the 06dfde5 energy gate's flow source).
+        if (newHot >= 0 && s.isSpeaking && s.wordTimings.useVad && !s._suspended) {
+            if (!s.matchedSet.has(newHot)) {
+                s.matchedSet.set(newHot, 0.25);       // provisional — amber; upgradeable by ASR
+                s.vadMatchedSet.set(newHot, 0.25);
+                setWordSource(s, newHot, 'vad');
+                ev(events, 'wordMatched', {
+                    lineIdx: s.activeLineIdx, wordIndex: newHot,
+                    spokenWord: s.wordTimings[newHot] ? s.wordTimings[newHot].word : '',
+                    targetWord: s.lineWords[newHot] || '', method: 'vad-provisional',
+                    editDistance: -1, phoneticMatch: false, score: 0.25, matched: true,
+                    windowPosition: newHot, source: 'vad'
+                });
+                addPhraseEvidence(s, {
+                    source: 'vad',
+                    text: '',
+                    words: [],
+                    receivedAtSec: now,
+                    audioTimeSec: isFinite(now) ? now : null
+                }, now, events);
+            }
+        }
+
+        // Hot-word priority match against the accumulated transcript + interim. The SR
+        // handler used `transcript + interim` (no space; finals self-terminate with a
+        // trailing space). Mirror that concatenation here.
+        var hotMatched = matchHotWord(s, (s.transcript || '') + (s.latestInterim || ''), now, events);
+        if (hotMatched) ev(events, 'wordSpans', {});
+    }
+
     function ingestFinal(s, text, source) {}
-    function ingestInterim(s, text) {}
+    // Moved from player.js SR onresult (399, 413): latest interim is stored verbatim
+    // and any ASR event marks the line as having had ASR activity.
+    function ingestInterim(s, text) {
+        s.latestInterim = text || '';
+        s.lineHadAsrEvent = true;
+    }
     function setEnergy(s, isSpeaking) { s.isSpeaking = !!isSpeaking; }
-    function tick(s, now) { return []; }
+    function tick(s, now) {
+        var events = [];
+        updateHotWordAndMatch(s, now, events);
+        return events;
+    }
     function endRun(s, now) { return []; }
     function getScores(s) {
         return { weightedTotal: s.weightedTotal, weightedMatched: s.weightedMatched,

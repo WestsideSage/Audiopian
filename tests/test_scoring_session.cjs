@@ -87,6 +87,39 @@ function twoLineCfg() {
     assert.strictEqual(session.getHonestPct(s), null, 'no ended phrases yet -> null honest %');
 })();
 
+// --- Task 1.2: hot-word match emits wordMatched, energy-gated on edit distance ---
+// Target 'candle'; spoken 'cendle' is an edit-1 match that is NOT phonetic
+// (doubleMetaphone KNTL vs SNTL, verified). While silent the matchHotWord energy
+// gate must reject edit-distance-only matches; while singing it must accept.
+// Behavior is exercised through tick (never a private).
+function matchHotWordForTest(s, text, now) {
+    session.ingestInterim(s, text);
+    return session.tick(s, now);
+}
+(function () {
+    var L = [lyric(0, 'candle bright tonight')];
+    var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
+                phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium',
+                flags: { KARAOKEE_V2: true } };
+    // (silent) edit-distance-only match must be rejected.
+    var s = session.createSession(cfg);
+    session.setActiveLine(s, 0, 0.0);     // now=0.5 below lands the hot word on idx 0 (candle)
+    session.setEnergy(s, false);
+    var out = matchHotWordForTest(s, 'cendle', 0.5);
+    assert.strictEqual(out.filter(function (e) { return e.type === 'wordMatched'; }).length, 0,
+        'edit-distance match must be rejected while silent');
+    // (singing) the same edit-distance match is accepted.
+    var s2 = session.createSession(cfg);
+    session.setActiveLine(s2, 0, 0.0);
+    session.setEnergy(s2, true);
+    var out2 = matchHotWordForTest(s2, 'cendle', 0.5);
+    assert.ok(out2.some(function (e) { return e.type === 'wordMatched' && e.wordIndex === 0; }),
+        'edit-distance match accepted while singing');
+    assert.ok(out2.some(function (e) { return e.type === 'wordMatched' && e.method === 'vad-confirmed' && e.wordIndex === 0; }),
+        'singing path confirms the hot word via the vad-confirmed branch');
+    assert.ok(s2.matchedSet.has(0), 'matched word recorded in matchedSet while singing');
+})();
+
 // ===========================================================================
 // FORWARD-DECLARED CHARACTERIZATION TESTS (green progressively through Phase 1)
 // ===========================================================================
