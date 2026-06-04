@@ -215,4 +215,63 @@ var bareConfirmed = phraseEngine.reconcileLateEvidence(bareSession, {
 }, 9);
 assert.strictEqual(bareConfirmed.length, 1, 'a single shared token credits exactly one phrase, never all of them');
 
+// Dedup: tokens consumed by a first reconcile pass are not re-credited if the
+// same evidence is reconciled again.
+var dedupPlan = phraseEngine.buildPhrasePlan([
+    { time: 10, text: 'mountain river stone' },
+    { time: 14, text: 'second line here' }
+], { difficulty: 'easy', audioDuration: 18 });
+var dedupSession = phraseEngine.createPhraseSession(dedupPlan);
+var dedupEvidence = {
+    id: 'dup-1', source: 'browser_final', text: 'mountain river stone', words: [],
+    receivedAtSec: 16, audioTimeSec: 16
+};
+phraseEngine.reconcileLateEvidence(dedupSession, dedupEvidence, 16);
+var dedupHitsAfterFirst = Object.keys(dedupSession.states['p0'].anchorHits).length;
+var dedupSecondPass = phraseEngine.reconcileLateEvidence(dedupSession, dedupEvidence, 16);
+assert.deepStrictEqual(dedupSecondPass, [], 'a second reconcile of the same evidence confirms nothing new');
+assert.strictEqual(
+    Object.keys(dedupSession.states['p0'].anchorHits).length, dedupHitsAfterFirst,
+    'already-consumed tokens are not re-credited'
+);
+
+// Partial -> clear: a phrase needing 2 anchors stays partial after one late
+// word and clears when a second late word supplies the missing anchor.
+var partialPlan = phraseEngine.buildPhrasePlan([
+    { time: 10, text: 'mountain river stone' },
+    { time: 14, text: 'second line here' }
+], { difficulty: 'medium', audioDuration: 18 });
+assert.ok(partialPlan.phrases[0].anchorsRequired >= 2, 'medium requires >=2 anchors for a 3-anchor line');
+var partialSession = phraseEngine.createPhraseSession(partialPlan);
+var partialFirst = phraseEngine.reconcileLateEvidence(partialSession, {
+    id: 'part-1', source: 'whisper', text: 'mountain', words: [],
+    receivedAtSec: 16, audioTimeSec: 16
+}, 16);
+assert.deepStrictEqual(partialFirst, [], 'one anchor is not enough to confirm a 2-anchor phrase');
+assert.strictEqual(partialSession.states['p0'].lyricStatus, 'partial', 'phrase is partial after one anchor');
+var partialSecond = phraseEngine.reconcileLateEvidence(partialSession, {
+    id: 'part-2', source: 'whisper', text: 'river', words: [],
+    receivedAtSec: 17, audioTimeSec: 17
+}, 17);
+assert.deepStrictEqual(partialSecond, ['p0'], 'the second late anchor clears the phrase');
+assert.strictEqual(partialSession.states['p0'].lyricStatus, 'confirmed', 'phrase confirms once both anchors are supplied');
+
+// Cheese safety: filler-only and non-matching words credit nothing.
+var cheesePlan = phraseEngine.buildPhrasePlan([
+    { time: 10, text: 'mountain river stone' },
+    { time: 14, text: 'second line here' }
+], { difficulty: 'easy', audioDuration: 18 });
+var cheeseSession = phraseEngine.createPhraseSession(cheesePlan);
+var cheeseFiller = phraseEngine.reconcileLateEvidence(cheeseSession, {
+    id: 'cheese-1', source: 'browser_final', text: 'yeah yeah uh oh na', words: [],
+    receivedAtSec: 16, audioTimeSec: 16
+}, 16);
+assert.deepStrictEqual(cheeseFiller, [], 'filler words confirm nothing');
+var cheeseWrong = phraseEngine.reconcileLateEvidence(cheeseSession, {
+    id: 'cheese-2', source: 'browser_final', text: 'banana orange purple', words: [],
+    receivedAtSec: 16, audioTimeSec: 16
+}, 16);
+assert.deepStrictEqual(cheeseWrong, [], 'non-matching real words confirm nothing');
+assert.strictEqual(Object.keys(cheeseSession.states['p0'].anchorHits).length, 0, 'cheese credits no anchors');
+
 console.log('Phrase engine tests passed.');
