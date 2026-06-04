@@ -29,6 +29,11 @@
     // scorer's boundary fix. Without it the phrase engine (and V2 score) undercounts
     // vs the headline on songs with lagged recognition.
     var LATE_EVIDENCE_GRACE_MS = 1000;
+    // How far back (in audio seconds) reconciliation will look when crediting a
+    // late recognition result to an already-ended phrase. Sized to the browser
+    // speech-rec batch latency observed in telemetry (it can batch ~8 lines into
+    // one late `final`). Tunable; see the design spec §7.
+    var RECONCILE_LOOKBACK_SEC = 18;
 
     function cloneProfile(profile) {
         return {
@@ -413,6 +418,88 @@
         return session;
     }
 
+    // Content-based catch-up for late recognition. Runs AFTER the live addEvidence
+    // path. For each token in spoken order, finds the first un-hit anchor in a
+    // not-yet-cleared phrase whose endSec is inside the look-back window, scanning
+    // candidates forward from a monotonic pointer so a repeated anchor word cannot
+    // be pulled back to an earlier line and a single token cannot inflate multiple
+    // lines. Returns the phraseIds that reached 'confirmed' during this pass.
+    function reconcileLateEvidence(session, evidence, nowSec) {
+        if (!session || !session.plan || !evidence) return [];
+        var source = evidence.source || 'browser_final';
+        var tokens = evidenceTokens(evidence);
+        if (tokens.length === 0) return [];
+
+        var lookbackStart = nowSec - RECONCILE_LOOKBACK_SEC;
+        var candidates = (session.plan.phrases || []).filter(function(phrase) {
+            var state = session.states[phrase.phraseId];
+            if (!state || state.cleared) return false;
+            if (!(phrase.anchorsRequired > 0)) return false;
+            return phrase.endSec >= lookbackStart && phrase.endSec <= nowSec;
+        }).sort(function(a, b) { return a.startSec - b.startSec; });
+        if (candidates.length === 0) return [];
+
+        var minIdx = 0;
+        for (var ti = 0; ti < tokens.length; ti++) {
+            var token = tokens[ti];
+            var tokenId = evidence.id + ':' + token.idx;
+            if (session.consumedTokenIds[tokenId]) continue;
+            var isFiller = REPEATED_FILLER[token.word] || isAdlibWord(token.word);
+
+            for (var ci = minIdx; ci < candidates.length; ci++) {
+                var state = session.states[candidates[ci].phraseId];
+                var anchors = state.phrase.anchors || [];
+                var creditedAnchor = null;
+                var creditedScore = 0;
+                for (var ai = 0; ai < anchors.length; ai++) {
+                    var anchor = anchors[ai];
+                    if (state.anchorHits[anchor.anchorIdx]) continue;
+                    if (isFiller && !anchor.fillerOnly) continue;
+                    var result = scoring.wordsMatchScore(token.word, anchor.word, anchor.phonetic);
+                    if (result && result.score >= 0.75) {
+                        creditedAnchor = anchor;
+                        creditedScore = result.score;
+                        break;
+                    }
+                }
+                if (creditedAnchor) {
+                    session.consumedTokenIds[tokenId] = true;
+                    state.anchorHits[creditedAnchor.anchorIdx] = {
+                        word: creditedAnchor.word,
+                        source: source + '_reconciled',
+                        evidenceId: evidence.id,
+                        score: creditedScore
+                    };
+                    pushBounded(state, 'evidence', {
+                        evidenceId: evidence.id,
+                        source: source + '_reconciled',
+                        text: evidence.text || '',
+                        score: creditedScore,
+                        method: 'reconciled'
+                    }, MAX_EVIDENCE_PER_PHRASE);
+                    pushBounded(state, 'consumedTokens', {
+                        evidenceId: evidence.id,
+                        tokenIdx: token.idx,
+                        word: token.word,
+                        anchor: creditedAnchor.word,
+                        source: source + '_reconciled',
+                        timeSec: tokenTime(evidence, token),
+                        score: creditedScore
+                    }, MAX_TOKENS_PER_PHRASE);
+                    updatePhraseResult(session, state);
+                    minIdx = ci;
+                    break;
+                }
+            }
+        }
+
+        var newlyConfirmed = [];
+        candidates.forEach(function(phrase) {
+            if (session.states[phrase.phraseId].cleared) newlyConfirmed.push(phrase.phraseId);
+        });
+        return newlyConfirmed;
+    }
+
     function settlePhrases(session, nowSec) {
         if (!session || !session.plan) return session;
         var profile = session.plan.difficulty;
@@ -504,6 +591,7 @@
         selectAnchors: selectAnchors,
         createPhraseSession: createPhraseSession,
         addEvidence: addEvidence,
+        reconcileLateEvidence: reconcileLateEvidence,
         settlePhrases: settlePhrases,
         getPhraseTrace: getPhraseTrace,
         getLiveScore: getLiveScore

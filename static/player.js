@@ -1683,6 +1683,18 @@ class GameMode {
         });
     }
 
+    // V2: paint every span of a cleared phrase green (whole-line-green on pass).
+    // Shared by _commitNewlySettled (settle-time) and late-evidence reconciliation
+    // (a missed line flips green a few seconds late when its batched words arrive).
+    _paintPhraseCleared(phraseId) {
+        if (!window.KARAOKEE_V2) return;
+        var sel = '.word-span[data-phrase-id="' + phraseId + '"]';
+        document.querySelectorAll(sel).forEach(function (span) {
+            span.classList.remove('matched-partial', 'missed');
+            span.classList.add('matched');
+        });
+    }
+
     /** Read current mic RMS from the AnalyserNode. Returns 0 if not ready. */
     _readVadRms() {
         if (!this._vadAnalyser || !this._vadAnalyserBuf) return 0;
@@ -1774,11 +1786,21 @@ class GameMode {
     _addPhraseEvidence(evidence) {
         if (!this._phraseSession || !window.KaraokeePhraseEngine) return;
         try {
+            var nowSec = audio && isFinite(audio.currentTime) ? audio.currentTime : 0;
             KaraokeePhraseEngine.addEvidence(this._phraseSession, evidence);
-            KaraokeePhraseEngine.settlePhrases(
-                this._phraseSession,
-                audio && isFinite(audio.currentTime) ? audio.currentTime : 0
-            );
+            KaraokeePhraseEngine.settlePhrases(this._phraseSession, nowSec);
+            // Content-based catch-up for late recognition (browser SR can batch
+            // several lines into one late `final`; realtime Whisper lags too).
+            // Reconcile credits the words to the line they were sung on and flips
+            // wrongly-missed lines green. Live path handles the active phrase.
+            if (evidence.source === 'browser_final' || evidence.source === 'whisper') {
+                var confirmed = KaraokeePhraseEngine.reconcileLateEvidence(this._phraseSession, evidence, nowSec);
+                if (confirmed && confirmed.length && window.KARAOKEE_V2) {
+                    for (var ci = 0; ci < confirmed.length; ci++) {
+                        this._paintPhraseCleared(confirmed[ci]);
+                    }
+                }
+            }
         } catch (e) {
             console.warn('[PhraseEngine] evidence ignored:', e);
         }
@@ -1978,13 +2000,15 @@ class GameMode {
             // V2 coloring at settle: a passed line greens the whole phrase; a missed
             // line reds its key words only (non-key words stay neutral).
             if (window.KARAOKEE_V2) {
-                var _conf = pst.lyricStatus === 'confirmed';
-                var _sel = '.word-span[data-phrase-id="' + ph.phraseId + '"]';
-                document.querySelectorAll(_sel).forEach(function (span) {
-                    span.classList.remove('matched', 'matched-partial', 'missed');
-                    if (_conf) span.classList.add('matched');
-                    else if (span.classList.contains('key-word')) span.classList.add('missed');
-                });
+                if (pst.lyricStatus === 'confirmed') {
+                    this._paintPhraseCleared(ph.phraseId);
+                } else {
+                    var _sel = '.word-span[data-phrase-id="' + ph.phraseId + '"]';
+                    document.querySelectorAll(_sel).forEach(function (span) {
+                        span.classList.remove('matched', 'matched-partial', 'missed');
+                        if (span.classList.contains('key-word')) span.classList.add('missed');
+                    });
+                }
             }
         }
     }
