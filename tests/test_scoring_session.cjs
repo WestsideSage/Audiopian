@@ -160,29 +160,26 @@ function matchHotWordForTest(s, text, now) {
     assert.strictEqual(s.matchedSet.size, 3, 'whisper path matches all three present words');
 })();
 
-// CHARACTERIZATION (line-boundary deferral): a browser_sr final arriving just before
-// a line change runs its collect pass on the NEXT tick — by which point setActiveLine
-// has reset the fence to the new line, so the old line's words are NOT credited via
-// this path. This is a Phase-1 LIMITATION (NOT behavior-neutral: production credits
-// them); it is closed by Phase 3, when setActiveLine snapshots the outgoing line into
-// `prevLine` and runs its outgoing collectMatches pass BEFORE resetLineState
-// (player.js:1110-1122), landing the words in `prevLine.matchedSet`.
-// TRIPWIRE: `s.prevLine === null` is a Phase-1 truth that FLIPS when 3.1 lands (the
-// overlay becomes non-null). When this assertion fails during Phase 3, replace it with
-// a crediting assertion (e.g. on `prevLine.matchedSet` or a line-0 `lineScored` event).
-// Asserting matchedSet.size===0 here would be inert — Phase 3 credit lands in
-// prevLine.matchedSet and resetLineState then clears the active set, so it stays 0.
+// CREDITING ASSERTION (was TRIPWIRE): a browser_sr final arriving just before a line
+// change is now credited to the OUTGOING line by the Phase-3 setActiveLine outgoing
+// collectMatches pass (player.js:1110-1122), which runs BEFORE resetLineState and
+// snapshots the matched words into prevLine.matchedSet. The Phase-1 tripwire
+// (`s.prevLine === null`) has been replaced here with Phase-3 crediting assertions.
+// NOTE: lineScored itself is emitted by finalizePrevLine (Task 3.2) — not here.
 (function () {
     var s = session.createSession(twoLineCfg());
     session.setActiveLine(s, 0, 0.0);
     session.ingestFinal(s, 'first line words', 'browser_sr'); // line 0's words, line 0 active
-    session.setActiveLine(s, 1, 2.0);                          // line changes before any tick
-    session.tick(s, 2.1);                                      // deferred collect runs vs LINE 1's fence
+    session.setActiveLine(s, 1, 2.0);                         // outgoing pass credits line 0 BEFORE reset
+    // The transcript was accumulated by ingestFinal.
     assert.ok(/first line words/.test(s.transcript), 'transcript accumulates the final regardless');
-    assert.strictEqual(s.prevLine, null,
-        'Phase 1: no prevLine overlay exists yet, so a pre-boundary final is dropped at the boundary. ' +
-        'Phase 3 makes prevLine non-null (outgoing pass credits line 0) — this assertion will then fail; ' +
-        'replace it with a crediting assertion when 3.1 lands.');
+    // Phase 3: prevLine overlay is created (not null).
+    assert.ok(s.prevLine !== null, 'Phase 3: prevLine overlay exists after setActiveLine');
+    assert.strictEqual(s.prevLine.lineIdx, 0, 'prevLine.lineIdx is 0');
+    // The outgoing collectMatches pass (BEFORE resetLineState) credited line 0's words
+    // into the matchedSet that was then snapshot-copied into prevLine.matchedSet.
+    assert.strictEqual(s.prevLine.matchedSet.size, 3,
+        'pre-boundary final words are credited into prevLine.matchedSet by the outgoing pass');
 })();
 
 // --- Task 1.4 (+ folded-in Task 0.3): energy-gated interim reconciliation ---
@@ -515,6 +512,68 @@ function matchHotWordForTest(s, text, now) {
     var out = session.tick(s, 3.5);
     assert.strictEqual(out.filter(function (e) { return e.type === 'honestPct'; }).length, 0,
         'no honestPct event when KARAOKEE_V2 is off');
+})();
+
+// ===========================================================================
+// PER-TASK CHARACTERIZATION TESTS (Phase 3)
+// ===========================================================================
+
+// --- Task 3.1: setActiveLine transition → prevLine overlay + transition event ---
+// Advancing from line 0 (with matches) to line 1 must:
+//   - build a prevLine overlay (lineIdx=0, matchedSet snapshot, overlapEnd in media sec)
+//   - emit a transition event (fromIdx=0, toIdx=1)
+//   - set up the new active line (activeLineIdx=1, lineWords=line-1 words)
+//   - emit resetSpans for the incoming line
+// The lineScored for line 0 is emitted by finalizePrevLine (Task 3.2) when
+// tick sees now >= prevLine.overlapEnd — not directly by setActiveLine itself.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    // Populate matchedSet so outgoing pass has something to snapshot.
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    session.tick(s, 1.0);
+    assert.strictEqual(s.matchedSet.size, 3, 'precondition: all three words matched on line 0');
+
+    // Advance to line 1 — this triggers the full setActiveLine transition.
+    var out = session.setActiveLine(s, 1, 2.0);
+
+    // prevLine overlay must capture the outgoing line's state.
+    assert.ok(s.prevLine !== null, 'prevLine overlay is created for the outgoing line');
+    assert.strictEqual(s.prevLine.lineIdx, 0, 'prevLine.lineIdx is 0');
+    assert.strictEqual(s.prevLine.matchedSet.size, 3,
+        'prevLine.matchedSet is a snapshot of the outgoing matchedSet');
+
+    // prevLine.overlapEnd must be in media seconds (>= now=2.0), not wall-ms.
+    assert.ok(s.prevLine.overlapEnd > 2.0, 'prevLine.overlapEnd is > now (2.0) — stored as media seconds');
+    assert.ok(s.prevLine.overlapEnd < 30.0, 'prevLine.overlapEnd is < 30 — not a wall-clock ms value');
+
+    // Must emit a transition event.
+    var trans = out.filter(function (e) { return e.type === 'transition'; });
+    assert.strictEqual(trans.length, 1, 'setActiveLine emits exactly one transition event');
+    assert.strictEqual(trans[0].fromIdx, 0, 'transition.fromIdx is 0');
+    assert.strictEqual(trans[0].toIdx, 1, 'transition.toIdx is 1');
+
+    // New active line is set up correctly.
+    assert.strictEqual(s.activeLineIdx, 1, 's.activeLineIdx is 1 after setActiveLine(1)');
+    assert.deepStrictEqual(s.lineWords, ['second', 'line', 'words'],
+        's.lineWords is the normalized words of line 1');
+
+    // Must emit resetSpans for the incoming line.
+    var reset = out.filter(function (e) { return e.type === 'resetSpans'; });
+    assert.ok(reset.length >= 1, 'setActiveLine emits resetSpans for the new line');
+    assert.strictEqual(reset[0].lineIdx, 1, 'resetSpans.lineIdx is 1');
+})();
+
+// setActiveLine from -1 (not yet started) to line 0: no outgoing line, so
+// no prevLine overlay, no transition event; new line is set up correctly.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    var out = session.setActiveLine(s, 0, 0.0);
+    assert.strictEqual(s.prevLine, null, 'no prevLine when advancing from the initial -1 state');
+    assert.strictEqual(s.activeLineIdx, 0, 's.activeLineIdx is 0');
+    assert.deepStrictEqual(s.lineWords, ['first', 'line', 'words'], 'line 0 words set up correctly');
+    var trans = out.filter(function (e) { return e.type === 'transition'; });
+    assert.strictEqual(trans.length, 0, 'no transition event when advancing from initial -1 state');
 })();
 
 // ===========================================================================

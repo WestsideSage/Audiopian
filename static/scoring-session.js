@@ -37,6 +37,8 @@
     // sync-helpers exports (browser bare globals).
     var getSpokenWindowSize = pick(sync, 'getSpokenWindowSize');
     var getWindowParams = pick(sync, 'getWindowParams');
+    var getAdjustedOverlapDuration = pick(sync, 'getAdjustedOverlapDuration');
+    var getScoreDelay = pick(sync, 'getScoreDelay');
 
     function createSession(config) {
         var s = {
@@ -117,22 +119,105 @@
         s.isSpeaking = false;
     }
 
-    // setActiveLine new-line setup (player.js:1188-1227 non-DOM parts). The outgoing
-    // snapshot/score/transition + worklet-port + DOM-span-reset are added in Phase 3.
+    // Full setActiveLine transition (player.js:1099-1236 with three transforms).
+    // Order preserved exactly: (1) finalize existing prevLine overlay, (2) outgoing
+    // final pass BEFORE resetLineState (deferral-closure #1: credits a pre-boundary
+    // final to the outgoing line), (3) build prevLine overlay with overlapEnd in media
+    // seconds (NOT wall-clock ms) — setTimeout DELETED (tick-driven), (4) transition
+    // diagnostic event, (5) resetLineState + new-line setup with chunkTempo and
+    // resetSpans events (DOM/port calls DELETED).
     function setActiveLine(s, lineIdx, now) {
         var events = [];
-        // --- Set up new line ---
-        s.activeLineIdx = lineIdx;
-        resetLineState(s, (isFinite(now) ? now : 0), false);
+        var nowSec = isFinite(now) ? now : 0;
 
-        // Load interpolated word timings for this line
+        // Capture outgoing state for diagnostics BEFORE anything changes.
+        var _dbgFromIdx  = s.activeLineIdx;
+        var _dbgFromText = (_dbgFromIdx >= 0 && s.lyrics[_dbgFromIdx])
+            ? s.lyrics[_dbgFromIdx].text : '—';
+
+        // --- Soft boundary: finalize any existing prevLine overlay ---
+        // (player.js:1106) If there's already a prevLine, finalize it first (fast succession).
+        finalizePrevLine(s, nowSec, events);
+
+        // --- Outgoing final pass (player.js:1110-1122): BEFORE resetLineState ---
+        // Run the last available browser transcript/interim pass before snapshotting.
+        // This is deferral-closure #1: credits a pre-boundary final to the outgoing line.
+        if (s.lineWords.length > 0 && (s.transcript || s.latestInterim)) {
+            var finalMap = new Map();
+            collectMatches(s, (s.transcript || '') + ' ' + (s.latestInterim || ''), finalMap, nowSec, events);
+            var finalBeforeConfirmed = new Set(s.asrConfirmedSet);
+            mergeConfirmedMatches(s.matchedSet, s.vadMatchedSet, s.asrConfirmedSet, finalMap);
+            finalMap.forEach(function (score, i) {
+                if (!finalBeforeConfirmed.has(i) && s.asrConfirmedSet.has(i)) {
+                    ev(events, 'promotion', { source: 'browser_sr', wordIndex: i, score: score });
+                }
+                setWordSource(s, i, 'browser_sr');
+            });
+            ev(events, 'wordSpans', {});
+        }
+
+        // --- Build prevLine overlay (player.js:1124-1148) ---
+        // overlapEnd stored as MEDIA SECONDS (now + duration), NOT wall-clock ms.
+        // setTimeout DELETED — finalization is tick-driven (Task 3.2).
+        if (s.activeLineIdx >= 0 && s.lineWords.length > 0) {
+            var outgoingTempoClass = (s.wordTimings && s.wordTimings.tempoClass) || 'normal';
+            var overlapDuration = getAdjustedOverlapDuration
+                ? getAdjustedOverlapDuration(outgoingTempoClass, s.lineWords.length)
+                : 0.8;
+            var scoreDelay = getScoreDelay ? getScoreDelay(outgoingTempoClass) : 0.3;
+
+            s.prevLine = {
+                lineIdx:                s.activeLineIdx,
+                lineWords:              s.lineWords.slice(),
+                matchedSet:             new Map(s.matchedSet),
+                vadMatchedSet:          new Map(s.vadMatchedSet),
+                asrConfirmedSet:        new Set(s.asrConfirmedSet),
+                wordSourceMap:          new Map(s.wordSourceMap),
+                lineStartWordCount:     s.lineStartWordCount,
+                lineStartTranscriptPos: s.lineStartTranscriptPos,
+                wordTimings:            s.wordTimings,
+                params:                 s.currentParams,
+                // Media seconds (not wall-clock ms): tick checks now >= overlapEnd.
+                overlapEnd:             nowSec + overlapDuration + scoreDelay,
+                whisperBuffer:          s.whisperBuffer,
+                lineHadAsrEvent:        s.lineHadAsrEvent
+            };
+        }
+
+        // --- Transition diagnostic (player.js:1163-1186) ---
+        // _debugLog + _logTransition -> one transition event. Emitted regardless of
+        // debug flag (the controller/renderer decides whether to log it).
+        if (_dbgFromIdx >= 0 && s.lineWords.length > 0) {
+            ev(events, 'transition', {
+                fromIdx:           _dbgFromIdx,
+                toIdx:             lineIdx,
+                trigger:           'score',
+                fromText:          _dbgFromText,
+                matchedCount:      s.matchedSet.size,
+                total:             s.lineWords.length,
+                missedWords:       s.lineWords.filter(function (w, i) { return !s.matchedSet.has(i); }),
+                lineStartAudioTime: s._lineStartAudioTime,
+                sourceCounts:      countWordSources(s.wordSourceMap)
+            });
+        }
+
+        // --- New-line setup (player.js:1188-1235) ---
+        s.activeLineIdx = lineIdx;
+        resetLineState(s, nowSec, false);
+
+        // Load interpolated word timings for this line.
         s.wordTimings = (lineIdx >= 0 && lineIdx < s.allWordTimings.length)
             ? s.allWordTimings[lineIdx]
             : [];
-        // Load adaptive window params for this line's tempo
+        // Load adaptive window params for this line's tempo.
         s.currentParams = (s.wordTimings && s.wordTimings.tempoClass)
             ? getWindowParams(s.wordTimings.tempoClass)
             : getWindowParams('normal');
+
+        // _whisperNode.port.postMessage block (1201-1213) DELETED — emit chunkTempo
+        // event so controller can message the worklet.
+        var tempoClass = (s.wordTimings && s.wordTimings.tempoClass) || 'normal';
+        ev(events, 'chunkTempo', { tempoClass: tempoClass });
 
         if (lineIdx < 0 || lineIdx >= s.lyrics.length) {
             s.lineWords = [];
@@ -148,6 +233,10 @@
         var rawWords = lineText.split(' ');
         s.lineWords = rawWords.map(function (w) { return normalizeWord(w); })
                               .filter(function (w) { return w.length > 0; });
+
+        // DOM span reset (1229-1235) DELETED — emit resetSpans event.
+        ev(events, 'resetSpans', { lineIdx: lineIdx });
+
         return events;
     }
 
@@ -159,6 +248,17 @@
         if (!existing || (rank[source] || 0) >= (rank[existing] || 0)) {
             s.wordSourceMap.set(wordIndex, source);
         }
+    }
+
+    // Moved from player.js _countWordSources (762-770). Pure read over a source map.
+    function countWordSources(sourceMap) {
+        var counts = { vad: 0, browser_sr: 0, whisper: 0, unknown: 0 };
+        if (!sourceMap) return counts;
+        sourceMap.forEach(function (source) {
+            if (counts[source] === undefined) counts.unknown++;
+            else counts[source]++;
+        });
+        return counts;
     }
 
     // Moved from player.js _addPhraseEvidence (1445-1466). Transform #2: audio.currentTime
@@ -514,6 +614,11 @@
     }
 
     function setEnergy(s, isSpeaking) { s.isSpeaking = !!isSpeaking; }
+
+    // Finalize and late-score the prevLine overlay (moved from player.js _finalizePrevLine
+    // 983-1000). Stub filled in by Task 3.2 — currently a no-op to keep setActiveLine
+    // calls safe during 3.1. Also calls matchPrevLine (Task 3.2).
+    function finalizePrevLine(s, now, events) { /* Phase 3.2 */ }
 
     // Tick-driven prevLine finalize hook. No-op until Phase 3.2 wires the wall-clock ->
     // media-clock conversion (finalize when now >= s.prevLine.overlapEnd). The call site
