@@ -8,7 +8,7 @@
   - The primary runtime path is `app.py` + `static/`.
   - `downloader.py` owns YouTube metadata/download behavior.
   - `lyrics.py` owns lyric fetch/parsing behavior.
-  - Do not assume `src/` is production code. Treat it as non-authoritative unless the task explicitly targets it.
+  - Production code is `app.py` + `static/` (plus `downloader.py`/`lyrics.py`). There is no `src/` directory.
 
   ## Canonical Commands
   - Install: `pip install -r requirements.txt`
@@ -21,7 +21,7 @@
   - Keep backend route/process orchestration in `app.py`.
   - Keep focused backend logic in `downloader.py` and `lyrics.py`.
   - In frontend work, prefer extracting pure logic into helper files that can be tested from Node.
-  - Treat `static/` as the production frontend. Changes in `src/` may not affect the shipped app.
+  - Treat `static/` as the production frontend.
 
   ## Verification
   - When changing Python backend behavior, run the relevant pytest tests.
