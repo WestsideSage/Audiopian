@@ -120,6 +120,33 @@ function matchHotWordForTest(s, text, now) {
     assert.ok(s2.matchedSet.has(0), 'matched word recorded in matchedSet while singing');
 })();
 
+// --- Task 1.3: collectMatches + ingestFinal accumulation ---
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    // A clean browser_sr final covering the whole active line.
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    // ingestFinal accumulates into transcript (with a trailing space so the no-space
+    // concat in the hot-word path still tokenizes) and marks ASR activity.
+    assert.ok(/first line words/.test(s.transcript), 'browser_sr final accumulates into transcript');
+    assert.strictEqual(s.lineHadAsrEvent, true, 'a final marks the line as having had ASR');
+    var out = session.tick(s, 1.0);
+    // collectMatches fills the matched set for the present words.
+    assert.strictEqual(s.matchedSet.size, 3, 'all three present words matched into matchedSet');
+    var matched = out.filter(function (e) { return e.type === 'wordMatched' && e.matched === true; });
+    assert.ok(matched.length >= 3, 'emits a wordMatched for each present word');
+})();
+
+// Whisper final path: accumulates into whisperBuffer and matches via collectMatchesWhisper.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'first line words', 'whisper');
+    assert.ok(/first line words/.test(s.whisperBuffer), 'whisper final accumulates into whisperBuffer');
+    session.tick(s, 1.0);
+    assert.strictEqual(s.matchedSet.size, 3, 'whisper path matches all three present words');
+})();
+
 // ===========================================================================
 // FORWARD-DECLARED CHARACTERIZATION TESTS (green progressively through Phase 1)
 // ===========================================================================

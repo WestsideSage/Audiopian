@@ -283,7 +283,210 @@
         if (hotMatched) ev(events, 'wordSpans', {});
     }
 
-    function ingestFinal(s, text, source) {}
+    // Moved from player.js _collectMatches (1238-1299). Transform #1 (this.->s.),
+    // #2 (audio.currentTime->now), #3 (each _logMatch -> wordMatched event). Populates
+    // resultMap; the caller merges into matchedSet.
+    function collectMatches(s, transcript, resultMap, now, events) {
+        if (s.lineWords.length === 0) return;
+        var spoken = normalizeWords(transcript);
+        var windowSize = getSpokenWindowSize((s.wordTimings && s.wordTimings.tempoClass) || 'normal');
+        var maxWindow = s.lineWords.length * 3;
+        var spokenIdx = Math.max(s.lineStartTranscriptPos, spoken.length - Math.min(windowSize, maxWindow));
+        var nowT = isFinite(now) ? now : 0;
+        var driftWindow = s.currentParams.driftTrack1;
+        for (var li = 0; li < s.lineWords.length; li++) {
+            if (li < s.wordTimings.length) {
+                if (nowT < s.wordTimings[li].windowStart) continue;
+            }
+            var target = s.lineWords[li];
+            var targetPhonetic = s.wordTimings[li] ? s.wordTimings[li].phonetic : undefined;
+            for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
+                if (FILLER_WORDS.has(spoken[si]) && !FILLER_WORDS.has(target)) {
+                    spokenIdx = si + 1; si = spokenIdx - 1; continue;
+                }
+                s._lineComparisonCount++;
+
+                var consumed = multiWordContractionMatch(spoken, si, target);
+                if (consumed > 0) {
+                    resultMap.set(li, 1.0);
+                    ev(events, 'wordMatched', { lineIdx: s.activeLineIdx, wordIndex: li,
+                        spokenWord: spoken[si], targetWord: target, method: 'contraction',
+                        editDistance: 0, phoneticMatch: false, score: 1.0, matched: true,
+                        windowPosition: si, source: 'browser_sr' });
+                    spokenIdx = si + consumed;
+                    break;
+                }
+
+                var pm = phraseMatch(spoken, si, s.lineWords, li);
+                if (pm) {
+                    for (var pt = 0; pt < pm.targetConsumed; pt++) { resultMap.set(li + pt, 1.0); }
+                    ev(events, 'wordMatched', { lineIdx: s.activeLineIdx, wordIndex: li,
+                        spokenWord: spoken[si], targetWord: s.lineWords[li], method: 'phrase',
+                        editDistance: 0, phoneticMatch: false, score: 1.0, matched: true,
+                        windowPosition: si, source: 'browser_sr' });
+                    spokenIdx = si + pm.spokenConsumed;
+                    li += pm.targetConsumed - 1;
+                    break;
+                }
+
+                var result = wordsMatchScore(spoken[si], target, targetPhonetic);
+                if (result.score > 0) {
+                    var prev = resultMap.get(li);
+                    if (prev === undefined || result.score > prev) {
+                        resultMap.set(li, result.score);
+                    }
+                    ev(events, 'wordMatched', { lineIdx: s.activeLineIdx, wordIndex: li,
+                        spokenWord: spoken[si], targetWord: target, method: result.method,
+                        editDistance: result.method === 'edit1' ? 1 : result.method === 'edit2' ? 2 : 0,
+                        phoneticMatch: result.method === 'phonetic', score: result.score, matched: true,
+                        windowPosition: si, source: 'browser_sr' });
+                    spokenIdx = si + 1;
+                    break;
+                }
+
+                ev(events, 'wordMatched', { lineIdx: s.activeLineIdx, wordIndex: li,
+                    spokenWord: spoken[si], targetWord: target, method: 'none',
+                    editDistance: -1, phoneticMatch: false, score: 0.0, matched: false,
+                    windowPosition: si, source: 'browser_sr' });
+            }
+        }
+    }
+
+    // Moved from player.js _collectMatchesWhisper (1037-1097). Transforms #1/#2/#3.
+    // Merges into matchedSet inline (whisper is authoritative); promotion -> event;
+    // _setWordSource -> setWordSource. The prevLine track-2 match (1094-1096) is added
+    // in Phase 3 (prevLine handling); a no-op here when s.prevLine is null.
+    function collectMatchesWhisper(s, transcript, now, events) {
+        if (s.lineWords.length === 0) return;
+        var spoken = normalizeWords(transcript);
+        var whisperMap = new Map();
+        var windowSize = getSpokenWindowSize((s.wordTimings && s.wordTimings.tempoClass) || 'normal');
+        var perLineCap = Math.max(windowSize, s.lineWords.length * 4);
+        var spokenIdx = Math.max(0, spoken.length - perLineCap);
+        var nowT = isFinite(now) ? now : 0;
+        var driftWindow = s.currentParams.driftTrack2;
+        for (var li = 0; li < s.lineWords.length; li++) {
+            if (li < s.wordTimings.length) {
+                if (nowT < s.wordTimings[li].windowStart) continue;
+            }
+            var target = s.lineWords[li];
+            var targetPhonetic = s.wordTimings[li] ? s.wordTimings[li].phonetic : undefined;
+            for (var si = spokenIdx; si < Math.min(spokenIdx + driftWindow, spoken.length); si++) {
+                if (FILLER_WORDS.has(spoken[si]) && !FILLER_WORDS.has(target)) {
+                    spokenIdx = si + 1; si = spokenIdx - 1; continue;
+                }
+                var consumed = multiWordContractionMatch(spoken, si, target);
+                if (consumed > 0) {
+                    whisperMap.set(li, 1.0);
+                    spokenIdx = si + consumed;
+                    break;
+                }
+                var pm = phraseMatch(spoken, si, s.lineWords, li);
+                if (pm) {
+                    for (var pt = 0; pt < pm.targetConsumed; pt++) { whisperMap.set(li + pt, 1.0); }
+                    spokenIdx = si + pm.spokenConsumed;
+                    li += pm.targetConsumed - 1;
+                    break;
+                }
+                var result = wordsMatchScore(spoken[si], target, targetPhonetic);
+                if (result.score > 0) {
+                    whisperMap.set(li, result.score);
+                    spokenIdx = si + 1;
+                    break;
+                }
+            }
+        }
+        whisperMap.forEach(function (score, i) {
+            var existing = s.matchedSet.get(i);
+            if (existing === undefined || score > existing) {
+                s.matchedSet.set(i, score);
+            }
+            if (s.vadMatchedSet.has(i) && !s.asrConfirmedSet.has(i)) {
+                s.asrConfirmedSet.add(i);
+                ev(events, 'promotion', { source: 'whisper', wordIndex: i, score: score });
+            }
+            setWordSource(s, i, 'whisper');
+        });
+        ev(events, 'wordSpans', {});
+    }
+
+    // Moved from player.js _trimTranscriptWindow (504-509): 200-word rolling window.
+    function trimTranscriptWindow(buffer, text) {
+        var words = normalizeWords(((buffer || '') + ' ' + (text || '')).trim());
+        if (words.length > 200) {
+            words = words.slice(words.length - 200);
+        }
+        return words.join(' ');
+    }
+
+    // Accumulate a final ASR result. Mirrors the SR onresult final branch (409-420)
+    // for browser_sr/browser_final and _handleWhisperTranscript (722-743) for whisper:
+    // append to the transcript/whisperBuffer, mark ASR activity, feed phrase evidence,
+    // and flag a collect pass for the next tick (which carries the fresh `now`).
+    function ingestFinal(s, text, source) {
+        if (!text) return;
+        var pe = (s._pendingEvents = s._pendingEvents || []);
+        if (source === 'whisper') {
+            s.whisperBuffer = trimTranscriptWindow(s.whisperBuffer, text);
+            s.lineHadAsrEvent = true;
+            s._collectDirty = 'whisper';
+            // Phrase evidence is fed at the next tick where `now` is available, so the
+            // late-evidence reconcile uses the real media clock (see drainPendingFinals).
+            s._pendingFinals = s._pendingFinals || [];
+            s._pendingFinals.push({ source: 'whisper', text: text, words: [] });
+        } else {
+            // browser_sr / browser_final: append with a trailing space so the no-space
+            // `transcript + interim` concat in the hot-word path still tokenizes (409-411).
+            s.transcript += text + ' ';
+            s.transcriptWords = s.transcriptWords.concat(normalizeWords(text));
+            s.lineHadAsrEvent = true;
+            s._collectDirty = 'browser_sr';
+            s._pendingFinals = s._pendingFinals || [];
+            s._pendingFinals.push({ source: 'browser_final', text: text, words: [] });
+        }
+        return pe; // (no-op return; contract treats ingest as feed-only)
+    }
+
+    // Feed any queued final-evidence to the phrase engine using the current tick clock.
+    function drainPendingFinals(s, now, events) {
+        if (!s._pendingFinals || !s._pendingFinals.length) return;
+        var pending = s._pendingFinals;
+        s._pendingFinals = [];
+        for (var i = 0; i < pending.length; i++) {
+            addPhraseEvidence(s, {
+                source: pending[i].source,
+                text: pending[i].text || '',
+                words: pending[i].words || [],
+                receivedAtSec: now,
+                audioTimeSec: isFinite(now) ? now : null
+            }, now, events);
+        }
+    }
+
+    // Run the queued collect pass (browser_sr or whisper) for newly-arrived text,
+    // using the fresh tick clock. Mirrors the SR handler's collectMatches+merge (430-447)
+    // / _handleWhisperTranscript's collectMatchesWhisper (724). Runs once per new text.
+    function runDirtyCollect(s, now, events) {
+        var dirty = s._collectDirty;
+        if (!dirty) return;
+        s._collectDirty = null;
+        if (dirty === 'whisper') {
+            collectMatchesWhisper(s, s.whisperBuffer, now, events);
+            return;
+        }
+        // browser_sr: union map over transcript+interim, then merge + promotion (439-447).
+        var unionMap = new Map();
+        collectMatches(s, (s.transcript || '') + (s.latestInterim || ''), unionMap, now, events);
+        var beforeConfirmed = new Set(s.asrConfirmedSet);
+        mergeConfirmedMatches(s.matchedSet, s.vadMatchedSet, s.asrConfirmedSet, unionMap);
+        unionMap.forEach(function (score, i) {
+            if (!beforeConfirmed.has(i) && s.asrConfirmedSet.has(i)) {
+                ev(events, 'promotion', { source: 'browser_sr', wordIndex: i, score: score });
+            }
+            setWordSource(s, i, 'browser_sr');
+        });
+        ev(events, 'wordSpans', {});
+    }
     // Moved from player.js SR onresult (399, 413): latest interim is stored verbatim
     // and any ASR event marks the line as having had ASR activity.
     function ingestInterim(s, text) {
@@ -291,9 +494,15 @@
         s.lineHadAsrEvent = true;
     }
     function setEnergy(s, isSpeaking) { s.isSpeaking = !!isSpeaking; }
+    // Per-tick orchestration. Order mirrors the production SR handler's internal order
+    // (phrase evidence -> hot-word match -> collectMatches+merge), with the VAD feed
+    // kept adjacent to the hot-word match (both in updateHotWordAndMatch). The Phase-2
+    // settle/commit and Phase-1.4 reconcile + honestPct steps are added in later tasks.
     function tick(s, now) {
         var events = [];
-        updateHotWordAndMatch(s, now, events);
+        drainPendingFinals(s, now, events);     // phrase evidence (uses fresh now)
+        updateHotWordAndMatch(s, now, events);  // VAD provisional feed + hot-word match
+        runDirtyCollect(s, now, events);        // collectMatches/whisper + merge + promotion
         return events;
     }
     function endRun(s, now) { return []; }
