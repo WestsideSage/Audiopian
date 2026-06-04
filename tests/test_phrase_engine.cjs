@@ -277,4 +277,82 @@ var cheeseWrong = phraseEngine.reconcileLateEvidence(cheeseSession, {
 assert.deepStrictEqual(cheeseWrong, [], 'non-matching real words confirm nothing');
 assert.strictEqual(Object.keys(cheeseSession.states['p0'].anchorHits).length, 0, 'cheese credits no anchors');
 
+// ---------------------------------------------------------------------------
+// Interim-snapshot reconciliation: synthesize the per-line "final" that Chrome's
+// endpointer won't emit during continuous singing. The browser_sr hypothesis is
+// CUMULATIVE (one growing string spanning lines), so the engine must fence words
+// it has already consumed — otherwise a shared anchor re-presented in every
+// snapshot would inflate lines the singer never reached.
+// ---------------------------------------------------------------------------
+
+// (A) A converged interim for a sung, already-ended line credits and clears it,
+// the same way a real browser_final would.
+var snapPlan = phraseEngine.buildPhrasePlan([
+    { time: 10, text: 'mountain river stone' },
+    { time: 14, text: 'second line here' }
+], { difficulty: 'easy', audioDuration: 18 });
+var snapSession = phraseEngine.createPhraseSession(snapPlan);
+var snapConfirmed = phraseEngine.reconcileInterimSnapshot(snapSession, 'mountain river stone', 16);
+assert.deepStrictEqual(snapConfirmed, ['p0'], 'converged interim snapshot credits the sung, ended line');
+assert.strictEqual(snapSession.states['p0'].cleared, true, 'interim snapshot clears the line');
+assert.ok(
+    snapSession.states['p0'].consumedTokens.some(function(t) { return /_reconciled$/.test(t.source); }),
+    'interim-snapshot credits are tagged *_reconciled for telemetry audit'
+);
+
+// (C) Re-feeding the SAME (unchanged) snapshot adds no new words -> no-op.
+var snapAgain = phraseEngine.reconcileInterimSnapshot(snapSession, 'mountain river stone', 17);
+assert.deepStrictEqual(snapAgain, [], 'an unchanged interim snapshot confirms nothing new');
+
+// (B) Inflation guard for cumulative re-submission: singer reaches p1 then p2.
+// The interim grows "watch me fly" -> "watch me fly geese will fly". The repeated
+// "watch me fly" (and its "fly") must NOT, on the second snapshot, credit the
+// un-sung p0 "birds can fly" that shares the "fly" anchor.
+var inflPlan = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'birds can fly' },   // p0 (never sung)
+    { time: 4, text: 'watch me fly' },    // p1
+    { time: 8, text: 'geese will fly' }   // p2
+], { difficulty: 'easy', audioDuration: 12 });
+var inflSession = phraseEngine.createPhraseSession(inflPlan);
+phraseEngine.reconcileInterimSnapshot(inflSession, 'watch me fly', 9);
+phraseEngine.reconcileInterimSnapshot(inflSession, 'watch me fly geese will fly', 13);
+assert.strictEqual(inflSession.states['p1'].lyricStatus, 'confirmed', 'sung line p1 confirmed from interim');
+assert.strictEqual(inflSession.states['p2'].lyricStatus, 'confirmed', 'sung line p2 confirmed from its new interim words');
+assert.strictEqual(inflSession.states['p0'].lyricStatus, 'missing', 'cumulative re-submission does NOT inflate the un-sung shared-anchor line');
+assert.strictEqual(Object.keys(inflSession.states['p0'].anchorHits).length, 0, 'no spurious anchor credit on the un-sung line');
+
+// (D) Reset robustness: Chrome's interim is NOT one monotonic string for the whole
+// song — it resets to short segments (observed in real telemetry: a long verse
+// hypothesis, then a bare " ya ya " outro). A reset (a new hypothesis that no longer
+// extends the prior one) must NOT desync the fence: the post-reset segment's words
+// must still credit their line, even though the new string is shorter than what was
+// already consumed.
+var resetPlan = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'alpha bravo charlie' },   // p0 (long early segment)
+    { time: 4, text: 'delta echo foxtrot' }     // p1 (after the interim resets)
+], { difficulty: 'easy', audioDuration: 8 });
+var resetSession = phraseEngine.createPhraseSession(resetPlan);
+phraseEngine.reconcileInterimSnapshot(resetSession, 'alpha bravo charlie', 5);
+assert.strictEqual(resetSession.states['p0'].lyricStatus, 'confirmed', 'long early segment credits its line');
+// Interim resets to a shorter, divergent string (segment finalized/aborted).
+var resetConfirmed = phraseEngine.reconcileInterimSnapshot(resetSession, 'delta echo', 9);
+assert.deepStrictEqual(resetConfirmed, ['p1'], 'post-reset shorter segment still credits its line (fence does not desync)');
+assert.strictEqual(resetSession.states['p1'].lyricStatus, 'confirmed', 'reset line confirmed');
+
+// (E) Revision guard: the singer SKIPS p0, sings p1; Chrome then REVISES the
+// segment's first word (watch -> switch) so the snapshot no longer prefix-extends,
+// forcing a new segment id that re-exposes the already-credited "fly". A forward-only
+// floor (interim crediting never reaches back before the latest line it confirmed)
+// must keep the skipped earlier line from being credited by the re-presented anchor.
+var revPlan = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'birds can fly' },   // p0 (skipped)
+    { time: 4, text: 'watch me fly' },    // p1 (sung)
+    { time: 8, text: 'geese will fly' }   // p2
+], { difficulty: 'easy', audioDuration: 12 });
+var revSession = phraseEngine.createPhraseSession(revPlan);
+phraseEngine.reconcileInterimSnapshot(revSession, 'watch me fly', 9);
+phraseEngine.reconcileInterimSnapshot(revSession, 'switch me fly', 10); // revision -> new segment id
+assert.strictEqual(revSession.states['p1'].lyricStatus, 'confirmed', 'sung line p1 confirmed');
+assert.strictEqual(revSession.states['p0'].lyricStatus, 'missing', 'a browser-SR revision must NOT re-credit the skipped earlier line via the re-exposed shared anchor');
+
 console.log('Phrase engine tests passed.');

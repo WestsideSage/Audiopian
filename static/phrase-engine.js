@@ -424,17 +424,23 @@
     // candidates forward from a monotonic pointer so a repeated anchor word cannot
     // be pulled back to an earlier line and a single token cannot inflate multiple
     // lines. Returns the phraseIds that reached 'confirmed' during this pass.
-    function reconcileLateEvidence(session, evidence, nowSec) {
+    function reconcileLateEvidence(session, evidence, nowSec, options) {
         if (!session || !session.plan || !evidence) return [];
         var source = evidence.source || 'browser_final';
         var tokens = evidenceTokens(evidence);
         if (tokens.length === 0) return [];
 
         var lookbackStart = nowSec - RECONCILE_LOOKBACK_SEC;
+        // Optional forward-only floor (interim path): never credit a line that starts
+        // before the latest line interim has already confirmed, so a browser-SR
+        // revision re-presenting an already-credited word can't reach back to an
+        // earlier, un-sung line. The late-final path passes no floor (unchanged).
+        var minStartSec = (options && options.minStartSec != null) ? options.minStartSec : -Infinity;
         var candidates = (session.plan.phrases || []).filter(function(phrase) {
             var state = session.states[phrase.phraseId];
             if (!state || state.cleared) return false;
             if (!(phrase.anchorsRequired > 0)) return false;
+            if (phrase.startSec < minStartSec) return false;
             return phrase.endSec >= lookbackStart && phrase.endSec <= nowSec;
         }).sort(function(a, b) { return a.startSec - b.startSec; });
         if (candidates.length === 0) return [];
@@ -498,6 +504,56 @@
             if (session.states[phrase.phraseId].cleared) newlyConfirmed.push(phrase.phraseId);
         });
         return newlyConfirmed;
+    }
+
+    // Interim-snapshot catch-up. Chrome's Web Speech endpointer rarely fires
+    // `isFinal` during continuous singing over a track, so the correctly-heard
+    // words live in the interim hypothesis. That hypothesis is NOT one monotonic
+    // string for the whole song: Web Speech grows a recognition segment by
+    // appending, then resets to a fresh (often short) segment when it finalizes or
+    // aborts (real telemetry: a long verse hypothesis, then a bare " ya ya " outro).
+    //
+    // We detect segment continuity by prefix: a snapshot that still begins with the
+    // prior one is the SAME segment (token indices stay stable as it appends) and
+    // reuses its evidence id, so the engine's `consumedTokenIds` naturally dedups the
+    // re-presented prefix — without it a shared anchor would inflate lines the singer
+    // never reached. A snapshot that no longer extends the prior one is a NEW segment
+    // (the reset), so it gets a fresh id: post-reset words still credit their line
+    // (the fence cannot desync), and a legitimately re-sung word in a later segment
+    // is credited as its own utterance rather than falsely deduped. Crediting is the
+    // same monotonic one-token-one-line, ended-lines-only pass as a real late `final`.
+    function reconcileInterimSnapshot(session, text, nowSec) {
+        if (!session || !session.plan) return [];
+        var words = normalizedWords(text);
+        if (words.length === 0) return [];
+        var prev = session._interimPrevWords || [];
+        var extendsPrev = words.length >= prev.length;
+        for (var i = 0; extendsPrev && i < prev.length; i++) {
+            if (words[i] !== prev[i]) extendsPrev = false;
+        }
+        if (!extendsPrev || session._interimSegmentId == null) {
+            session._interimSegmentId = (session._interimSegmentId || 0) + 1;
+        }
+        session._interimPrevWords = words;
+        var floor = (session._interimFloorSec != null) ? session._interimFloorSec : -Infinity;
+        var confirmed = reconcileLateEvidence(session, {
+            id: 'bsr-int-' + session._interimSegmentId,
+            source: 'browser_interim',
+            text: words.join(' '),
+            words: [],
+            receivedAtSec: nowSec,
+            audioTimeSec: nowSec
+        }, nowSec, { minStartSec: floor });
+        // Advance the forward-only floor past every line interim just confirmed, so a
+        // later snapshot (esp. a revision that mints a fresh segment id) cannot reach
+        // back and re-credit an earlier line the singer skipped.
+        for (var ci = 0; ci < confirmed.length; ci++) {
+            var cst = session.states[confirmed[ci]];
+            if (cst && cst.phrase && (session._interimFloorSec == null || cst.phrase.startSec > session._interimFloorSec)) {
+                session._interimFloorSec = cst.phrase.startSec;
+            }
+        }
+        return confirmed;
     }
 
     function settlePhrases(session, nowSec) {
@@ -592,6 +648,7 @@
         createPhraseSession: createPhraseSession,
         addEvidence: addEvidence,
         reconcileLateEvidence: reconcileLateEvidence,
+        reconcileInterimSnapshot: reconcileInterimSnapshot,
         settlePhrases: settlePhrases,
         getPhraseTrace: getPhraseTrace,
         getLiveScore: getLiveScore

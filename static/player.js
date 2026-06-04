@@ -1806,6 +1806,28 @@ class GameMode {
         }
     }
 
+    // Feed the converged browser_sr interim hypothesis to the phrase engine as the
+    // per-line "final" Chrome won't emit (continuous singing starves its endpointer,
+    // so the correct words live only in the cumulative interim). The engine fences
+    // already-consumed words, so this is safe to call every tick: it credits only
+    // ended-and-uncleared lines and repaints any it clears green. Honesty-bounded —
+    // same monotonic one-token-one-line attribution as late-final reconciliation;
+    // the live arcade multiplier does not retro-update (blessed divergence).
+    _reconcileInterim(nowSec) {
+        if (!this._phraseSession || !window.KaraokeePhraseEngine) return;
+        try {
+            var snapText = (this.transcript || '') + ' ' + (this.latestInterim || '');
+            var confirmed = KaraokeePhraseEngine.reconcileInterimSnapshot(this._phraseSession, snapText, nowSec);
+            if (confirmed && confirmed.length) {
+                for (var ci = 0; ci < confirmed.length; ci++) {
+                    this._paintPhraseCleared(confirmed[ci]);
+                }
+            }
+        } catch (e) {
+            console.warn('[PhraseEngine] interim reconcile ignored:', e);
+        }
+    }
+
     /**
      * Attempt to match the current hot word against spoken words.
      * Uses more aggressive matching: accepts any word in the recent
@@ -1948,6 +1970,14 @@ class GameMode {
         if (!this.active || !this._phraseSession || !window.KaraokeePhraseEngine) return;
         var now = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
         try { KaraokeePhraseEngine.settlePhrases(this._phraseSession, now); } catch (e) {}
+        // Catch up ended lines from the converged browser_sr interim hypothesis —
+        // the per-line "final" Chrome's endpointer won't emit during continuous
+        // singing. Runs BEFORE commit so a line whose words have already arrived in
+        // the interim settles as cleared (not missed); reconcile only touches
+        // ended-and-uncleared lines, so the active line is never prematurely cleared.
+        if (window.KARAOKEE_V2) {
+            this._reconcileInterim(now);
+        }
         this._commitNewlySettled(true);
 
         if (window.KARAOKEE_V2) {
@@ -2658,6 +2688,9 @@ class GameMode {
                 var _endNow = (audio && isFinite(audio.duration)) ? audio.duration + 5 : 1e9;
                 KaraokeePhraseEngine.settlePhrases(this._phraseSession, _endNow);
             } catch (e) {}
+            // Final catch-up of the trailing lines from the converged interim before
+            // the end-screen tally (mirrors the per-tick reconcile in _tickArcade).
+            if (window.KARAOKEE_V2) this._reconcileInterim(_endNow);
             this._commitNewlySettled(false);
         }
         this._finalizeTelemetry('song_ended');
