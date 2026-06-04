@@ -208,11 +208,11 @@ git commit -m "test(scoring-session): harness + first contract test (red)"
             // phrase/arcade
             committedPhrases: {}, arcadeEvents: [], prevLine: null, _lineStartAudioTime: null
         };
-        if (s.phrasePlan && phraseEngine && phraseEngine.createSession) {
-            s.phraseSession = phraseEngine.createSession(s.phrasePlan);
+        if (s.phrasePlan && phraseEngine && phraseEngine.createPhraseSession) {
+            s.phraseSession = phraseEngine.createPhraseSession(s.phrasePlan);
         }
-        if (s.phrasePlan && arcade && arcade.createState) {
-            s.arcadeState = arcade.createState(s.difficulty);
+        if (s.phrasePlan && arcade && arcade.createArcadeState) {
+            s.arcadeState = arcade.createArcadeState(s.difficulty);
         }
         return s;
     }
@@ -237,7 +237,7 @@ git commit -m "test(scoring-session): harness + first contract test (red)"
 });
 ```
 
-> **Note:** verify the real `phrase-engine.js`/`scoring-arcade.js` factory function names for session/state creation (`createSession`, `createState`) and adjust the two guarded calls above to match. If `scoring-arcade.js` exposes e.g. `init(difficulty)`, use that.
+> **Note (verified during execution):** the real construction API is `KaraokeePhraseEngine.createPhraseSession(plan)` and `KaraokeeArcade.createArcadeState(difficulty)` (and `KaraokeePhraseEngine.buildPhrasePlan(lyrics, opts)` for fixtures). The skeleton above already uses the correct names. Confirmed: the module loads under Node with `node --check` clean and all dep APIs resolve (commit `9646dca`).
 
 - [ ] **Step 2: Add the script tag**
 
@@ -383,7 +383,7 @@ where `matchHotWordForTest` is a thin wrapper the test defines: `function matchH
 
 - [ ] **Step 1: Test** — the Phase 0 case (A)/(B) energy-gated assertions now become live. Also add: a `browser_final` that batches two ended lines reconciles each to its own line (assert two distinct `phraseCleared`), and a repeated-anchor case does not double-credit (monotonic). Mirror the cases in `tests/test_phrase_engine.cjs` reconciliation tests but at the session level.
 - [ ] **Step 2: Run → FAIL** (and Phase 0 case (B) flips to exercised).
-- [ ] **Step 3: Implement** — move both into privates `addPhraseEvidence(s, evidence, now, events)` / `reconcileInterim(s, now, events)`. Transforms: `this.`→`s.`; `audio.currentTime`→`now`; replace each `this._paintPhraseCleared(confirmed[ci])` with `ev(events,'phraseCleared',{phraseId:confirmed[ci]})`. **Preserve the source gate verbatim** (`evidence.source === 'browser_final' || 'whisper'`) and the interim snapshot assembly (`s.transcript + ' ' + s.latestInterim`). The **energy gate** from `06dfde5`: keep whatever in-window-energy condition the current `_reconcileInterim`/`_tickArcade` path applies — locate it (grep `isSpeaking`/energy in the 1445–1648 range) and reproduce it against `s.isSpeaking`.
+- [ ] **Step 3: Implement** — move both into privates `addPhraseEvidence(s, evidence, now, events)` / `reconcileInterim(s, now, events)`. Transforms: `this.`→`s.`; `audio.currentTime`→`now`; replace each `this._paintPhraseCleared(confirmed[ci])` with `ev(events,'phraseCleared',{phraseId:confirmed[ci]})`. **Preserve the source gate verbatim** (`evidence.source === 'browser_final' || 'whisper'`) and the interim snapshot assembly (`s.transcript + ' ' + s.latestInterim`). The **energy gate** from `06dfde5` is **internal to `phrase-engine.js`** (verified): `reconcileInterimSnapshot(session, text, nowSec)` is 3-arg and gates via `hasInWindowFlow(state, phrase)`, which checks `state.flowEvents` (recorded by the live `addEvidence` path) within the phrase window — there is **no** energy parameter. So **do NOT re-implement an energy check in the session.** Preserve the gate by faithfully reproducing the live `addEvidence` feeding — specifically the `isSpeaking`-gated VAD flow-event evidence in the hot-word path (Task 1.2; `player.js:1423` `if (newHot >= 0 && this.isSpeaking && this.wordTimings.useVad && !this._suspended) …` feeds the `vad`-source evidence that becomes a `flowEvent`). If `setEnergy`/the hot-word VAD feeding is reproduced correctly, the interim gate works automatically. The Phase-0 Task 0.3 case (B) therefore only goes green once Task 1.2 (VAD feed) **and** Task 1.4 (reconcile) are both in.
 - [ ] **Step 4: Run → PASS** (Phase 0 (A) and (B) both green).
 - [ ] **Step 5: Commit** — `git commit -am "feat(scoring-session): phrase evidence + energy-gated interim reconcile"`
 
