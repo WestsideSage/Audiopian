@@ -1354,6 +1354,116 @@ class GameMode {
         });
     }
 
+    // V2: red the key words of a missed phrase at settle (non-key spans untouched).
+    // Extracted verbatim from the old _commitNewlySettled else-branch (1695-1700).
+    _paintPhraseMissed(phraseId) {
+        if (!window.KARAOKEE_V2) return;
+        var _sel = '.word-span[data-phrase-id="' + phraseId + '"]';
+        document.querySelectorAll(_sel).forEach(function (span) {
+            span.classList.remove('matched', 'matched-partial', 'missed');
+            if (span.classList.contains('key-word')) span.classList.add('missed');
+        });
+    }
+
+    // Render a scored line: mark unmatched spans red (V1 only) and flash the per-line
+    // score. Extracted verbatim from the old _scoreLine DOM block (1563-1580); reads the
+    // event payload (e.lineIdx / e.missedWordIndices / e.matched / e.scoredTotal) so it
+    // never depends on this.activeLineIdx (which the session, not the controller, owns).
+    _renderLineScored(e) {
+        var lines = lyricsScroll.querySelectorAll('.lyric-line');
+        var lineEl = lines[e.lineIdx];
+        if (lineEl) {
+            if (!window.KARAOKEE_V2) {
+                lineEl.querySelectorAll('.word-span').forEach(function (span, wi) {
+                    if (e.missedWordIndices.indexOf(wi) >= 0) span.classList.add('missed');
+                });
+            }
+            // Flash per-line score
+            var flash = document.createElement('div');
+            flash.className = 'line-score-flash';
+            flash.textContent = '+' + e.matched + '/' + e.scoredTotal;
+            flash.style.top = lineEl.offsetTop + 'px';
+            document.getElementById('lyrics-container').appendChild(flash);
+            setTimeout(function () { flash.remove(); }, 1300);
+        }
+    }
+
+    // Reset a new active line's spans to grey. Extracted verbatim from the old
+    // setActiveLine span-reset (1229-1235); reads e.lineIdx (session-owned line index).
+    _resetLineSpans(lineIdx) {
+        var lines = lyricsScroll.querySelectorAll('.lyric-line');
+        if (lines[lineIdx]) {
+            lines[lineIdx].querySelectorAll('.word-span').forEach(function (s) {
+                s.classList.remove('matched', 'matched-partial', 'missed', 'asr-confirmed');
+            });
+        }
+    }
+
+    // Resize the Whisper chunk for the new line's tempo. Extracted verbatim from the
+    // old setActiveLine _whisperNode.port.postMessage block (1201-1213). No-op when the
+    // realtime-Whisper provider is active (no AudioWorklet node / port).
+    _applyChunkTempo(tempoClass) {
+        if (this._whisperNode && this._whisperNode.port) {
+            this._whisperNode.port.postMessage({ type: 'flush' });
+            this._whisperNode.port.postMessage({
+                type: 'setChunkSize',
+                samples: getChunkSamples(tempoClass)
+            });
+            this._whisperNode.port.postMessage({
+                type: 'enableOverlap',
+                enabled: tempoClass === 'fast'
+            });
+        }
+    }
+
+    // Dispatch the render-intent events returned by the scoring session to the existing
+    // DOM/telemetry renderers. The session owns the scoring state machine and reads no
+    // DOM/clock; the controller renders here. Each case maps 1:1 to the inline DOM the
+    // moved methods used to do (see the scoring-session-seam plan, Task 4.1).
+    //
+    // READ-MODEL SYNC (top of render): the kept renderers/loggers
+    // (_updateWordSpans, _logMatch, _logPromotion, _updateRunningScore, telemetry) read
+    // controller instance fields the session now owns. Fields the session REASSIGNS
+    // (matchedSet = new Map() each line, tallies) must be re-mirrored every render or a
+    // one-time alias goes stale. Objects the session only mutates in place
+    // (phraseSession/arcadeState/committedPhrases/arcadeEvents) are aliased once in
+    // start() instead. Event-painting helpers read the event payload, not this.*, so the
+    // mid-setActiveLine frame (where activeLineIdx has already advanced to the new line)
+    // misattributes only the cosmetic V1 promotion/wordSpans repaint — never the
+    // phraseId-keyed V2 paint or the lineIdx-carrying lineScored/resetSpans.
+    _renderEvents(events) {
+        if (this._session) {
+            var s = this._session;
+            this.activeLineIdx  = s.activeLineIdx;
+            this.matchedSet     = s.matchedSet;
+            this.vadMatchedSet  = s.vadMatchedSet;
+            this.asrConfirmedSet = s.asrConfirmedSet;
+            this.wordSourceMap  = s.wordSourceMap;
+            this.weightedTotal  = s.weightedTotal;
+            this.weightedMatched = s.weightedMatched;
+            this.lineWords      = s.lineWords;
+        }
+        if (!events) return;
+        for (var i = 0; i < events.length; i++) {
+            var e = events[i];
+            switch (e.type) {
+                case 'lineScored': this._renderLineScored(e); break;
+                case 'wordMatched': this._logMatch(e.spokenWord, e.targetWord, e.method, e.editDistance, e.phoneticMatch, e.score, e.matched, e.windowPosition); break;
+                case 'promotion': this._logPromotion(e.source, e.wordIndex, e.score); break;
+                case 'phraseCleared': this._paintPhraseCleared(e.phraseId); break;
+                case 'phraseMissed': this._paintPhraseMissed(e.phraseId); break;
+                case 'arcade': this._onArcadeEvent(e.evt); break;
+                case 'arcadeRecord': /* already in session.arcadeEvents; telemetry reads it at build time */ break;
+                case 'honestPct': { var el = document.getElementById('score-pct'); if (el && e.pct != null) el.textContent = e.pct + '%'; break; }
+                case 'runningScore': this._updateRunningScore(); break;
+                case 'transition': if (window._kDebug) this._logTransition(e.fromIdx, e.toIdx, e.trigger, e.fromText, e.matchedCount, e.total, e.missedWords, e.lineStartAudioTime, e.sourceCounts); break;
+                case 'resetSpans': this._resetLineSpans(e.lineIdx); break;
+                case 'wordSpans': this._updateWordSpans(); break;
+                case 'chunkTempo': this._applyChunkTempo(e.tempoClass); break;
+            }
+        }
+    }
+
     /** Read current mic RMS from the AnalyserNode. Returns 0 if not ready. */
     _readVadRms() {
         if (!this._vadAnalyser || !this._vadAnalyserBuf) return 0;
