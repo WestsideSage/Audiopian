@@ -162,12 +162,16 @@ function matchHotWordForTest(s, text, now) {
 
 // CHARACTERIZATION (line-boundary deferral): a browser_sr final arriving just before
 // a line change runs its collect pass on the NEXT tick — by which point setActiveLine
-// has reset the line fence to the new line, so the old line's words are NOT credited
-// via this path in Phase 1 (the new-line fence skips them). This pins current
-// behavior. TRIPWIRE FOR PHASE 3: setActiveLine's own outgoing collectMatches pass
-// (player.js:1110-1122) MUST run BEFORE resetLineState, which is what credits these
-// words once Phase 3 lands — at which point the second assertion below flips to
-// matched and should be updated. The transcript still accumulates regardless.
+// has reset the fence to the new line, so the old line's words are NOT credited via
+// this path. This is a Phase-1 LIMITATION (NOT behavior-neutral: production credits
+// them); it is closed by Phase 3, when setActiveLine snapshots the outgoing line into
+// `prevLine` and runs its outgoing collectMatches pass BEFORE resetLineState
+// (player.js:1110-1122), landing the words in `prevLine.matchedSet`.
+// TRIPWIRE: `s.prevLine === null` is a Phase-1 truth that FLIPS when 3.1 lands (the
+// overlay becomes non-null). When this assertion fails during Phase 3, replace it with
+// a crediting assertion (e.g. on `prevLine.matchedSet` or a line-0 `lineScored` event).
+// Asserting matchedSet.size===0 here would be inert — Phase 3 credit lands in
+// prevLine.matchedSet and resetLineState then clears the active set, so it stays 0.
 (function () {
     var s = session.createSession(twoLineCfg());
     session.setActiveLine(s, 0, 0.0);
@@ -175,9 +179,10 @@ function matchHotWordForTest(s, text, now) {
     session.setActiveLine(s, 1, 2.0);                          // line changes before any tick
     session.tick(s, 2.1);                                      // deferred collect runs vs LINE 1's fence
     assert.ok(/first line words/.test(s.transcript), 'transcript accumulates the final regardless');
-    assert.strictEqual(s.matchedSet.size, 0,
-        'Phase 1: a pre-boundary final is not credited to the old line via the deferred collect ' +
-        '(Phase 3 setActiveLine outgoing pass will credit it — update this when 3.1 lands)');
+    assert.strictEqual(s.prevLine, null,
+        'Phase 1: no prevLine overlay exists yet, so a pre-boundary final is dropped at the boundary. ' +
+        'Phase 3 makes prevLine non-null (outgoing pass credits line 0) — this assertion will then fail; ' +
+        'replace it with a crediting assertion when 3.1 lands.');
 })();
 
 // --- Task 1.4 (+ folded-in Task 0.3): energy-gated interim reconciliation ---

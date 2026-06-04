@@ -435,6 +435,10 @@ where `matchHotWordForTest` is a thin wrapper the test defines: `function matchH
 
 ## Phase 3 — Move the line transition (`setActiveLine`) + prevLine
 
+> **MUST close these Phase-1 deferrals (flagged by Phase-1 spec review):**
+> 1. **Boundary crediting** — `setActiveLine`'s outgoing `collectMatches` pass MUST run BEFORE `resetLineState` (player.js:1110–1122), crediting a pre-boundary `final`'s words to the outgoing line via `prevLine.matchedSet`. The `test_scoring_session.cjs` boundary "TRIPWIRE" case currently asserts `s.prevLine === null`; when it fails here, replace it with a crediting assertion (on `prevLine.matchedSet` or a line-0 `lineScored`).
+> 2. **Interim-only collect** — `ingestInterim` currently only stores `latestInterim`; it does NOT mark the collect dirty, so continuous singing with no `final` never full-collects (production runs `_collectMatches` on every `onresult` incl. interims — player.js:431). Make `ingestInterim` mark collect-dirty (or have `tick` collect `transcript + ' ' + latestInterim`), and add a characterization test: a multi-word interim with energy credits all its in-window words via `tick`.
+
 ### Task 3.1: `setActiveLine` body (snapshot + new-line setup) → events
 
 **Files:** Source: `setActiveLine` (1099–1236).
