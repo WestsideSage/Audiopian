@@ -576,6 +576,56 @@ function matchHotWordForTest(s, text, now) {
     assert.strictEqual(trans.length, 0, 'no transition event when advancing from initial -1 state');
 })();
 
+// --- Task 3.2: tick-driven prevLine finalize (media clock, not wall clock) ---
+// Set up a prevLine with overlapEnd=5.0; tick at 4.9 must NOT finalize it;
+// tick at 5.0 must finalize it and emit the prevLine's lineScored.
+// This is the wall-clock→media-clock conversion guard (gotcha #4 in spec).
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    // Populate line 0 with matches so there is something to score at finalize.
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    session.tick(s, 1.0);
+    assert.strictEqual(s.matchedSet.size, 3, 'precondition: all three words matched');
+
+    // Advance to line 1 (now=2.0) — builds prevLine with overlapEnd > 2.0.
+    session.setActiveLine(s, 1, 2.0);
+    assert.ok(s.prevLine !== null, 'precondition: prevLine overlay exists');
+    var overlapEnd = s.prevLine.overlapEnd;
+    assert.ok(overlapEnd > 2.0, 'precondition: overlapEnd is in media seconds');
+
+    // Force overlapEnd to 5.0 so we can test at exact boundary.
+    s.prevLine.overlapEnd = 5.0;
+
+    // tick at 4.9 — still inside the overlap window — must NOT finalize.
+    var out49 = session.tick(s, 4.9);
+    assert.ok(s.prevLine !== null, 'prevLine still exists at now=4.9 (before overlapEnd=5.0)');
+    var scored49 = out49.filter(function (e) { return e.type === 'lineScored' && e.lineIdx === 0; });
+    assert.strictEqual(scored49.length, 0, 'no lineScored for prevLine at now=4.9 (too early)');
+
+    // tick at 5.0 — at the boundary — must finalize.
+    var out50 = session.tick(s, 5.0);
+    assert.strictEqual(s.prevLine, null, 'prevLine is nulled after finalization at now=5.0');
+    var scored50 = out50.filter(function (e) { return e.type === 'lineScored' && e.lineIdx === 0; });
+    assert.strictEqual(scored50.length, 1, 'exactly one lineScored for prevLine emitted at now=5.0');
+    assert.strictEqual(scored50[0].matched, 3, 'finalized prevLine scores all three matched words');
+})();
+
+// finalizePrevLine must also null s.prevLine so a second tick does not score it again.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    session.tick(s, 1.0);
+    session.setActiveLine(s, 1, 2.0);
+    s.prevLine.overlapEnd = 5.0;
+    session.tick(s, 5.0);                              // finalizes
+    assert.strictEqual(s.prevLine, null, 'prevLine null after finalization');
+    var out2 = session.tick(s, 6.0);                   // second tick
+    var scored2 = out2.filter(function (e) { return e.type === 'lineScored' && e.lineIdx === 0; });
+    assert.strictEqual(scored2.length, 0, 'second tick does not double-score the prevLine');
+})();
+
 // ===========================================================================
 // FORWARD-DECLARED CHARACTERIZATION TESTS (green progressively through Phase 1)
 // ===========================================================================

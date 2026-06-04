@@ -615,15 +615,67 @@
 
     function setEnergy(s, isSpeaking) { s.isSpeaking = !!isSpeaking; }
 
-    // Finalize and late-score the prevLine overlay (moved from player.js _finalizePrevLine
-    // 983-1000). Stub filled in by Task 3.2 — currently a no-op to keep setActiveLine
-    // calls safe during 3.1. Also calls matchPrevLine (Task 3.2).
-    function finalizePrevLine(s, now, events) { /* Phase 3.2 */ }
+    // Moved from player.js _matchPrevLine (1001-1035). Transform #1 (this.->s.),
+    // #2 (performance.now() -> now: the media-clock boundary check is now `now >=
+    // s.prevLine.overlapEnd`, handled by the caller finalizePrevLine/finalizePrevLineIfDue;
+    // this function does NOT re-check the boundary). Transform #3: the DOM span block
+    // (1026-1031) -> wordSpans event (the controller repaints). Returns true if any
+    // match was found (mirrors the original return value).
+    function matchPrevLine(s, transcript, track, now, events) {
+        if (!s.prevLine) return false;
+        var prev = s.prevLine;
+        var spoken = normalizeWords(transcript);
+        var spokenIdx = (track === 'track1') ? prev.lineStartTranscriptPos : 0;
+        var driftWindow = (track === 'track1') ? prev.params.driftTrack1 : prev.params.driftTrack2;
+        var cursor = spokenIdx;
+        var anyMatched = false;
 
-    // Tick-driven prevLine finalize hook. No-op until Phase 3.2 wires the wall-clock ->
-    // media-clock conversion (finalize when now >= s.prevLine.overlapEnd). The call site
-    // lives in tick now so the orchestration order is locked.
-    function finalizePrevLineIfDue(s, now, events) { /* Phase 3.2 */ }
+        for (var li = 0; li < prev.lineWords.length; li++) {
+            if (prev.matchedSet.has(li)) { cursor++; continue; }
+            var target = prev.lineWords[li];
+            var targetPhonetic = prev.wordTimings && prev.wordTimings[li] ? prev.wordTimings[li].phonetic : undefined;
+            var m = findMatchInWindow(spoken, cursor, driftWindow, target, targetPhonetic);
+            if (m) {
+                prev.matchedSet.set(li, m.score);
+                if (prev.wordSourceMap) prev.wordSourceMap.set(li, track === 'track2' ? 'whisper' : 'browser_sr');
+                if (prev.vadMatchedSet && prev.vadMatchedSet.has(li) && prev.asrConfirmedSet && !prev.asrConfirmedSet.has(li)) {
+                    prev.asrConfirmedSet.add(li);
+                }
+                cursor = m.spokenIdx + 1;
+                anyMatched = true;
+                // DOM span update (1026-1031) -> wordSpans repaint event.
+                ev(events, 'wordSpans', {});
+            }
+        }
+        return anyMatched;
+    }
+
+    // Moved from player.js _finalizePrevLine (983-993). Transform #1 (this.->s.),
+    // #3: calls lateScoreLine (which emits lineScored) instead of _scoreLine, to match
+    // the Phase-2 DRY delegation already in lateScoreLine. Nulls s.prevLine FIRST so
+    // that recursive calls (fast succession) are safe, then delegates to lateScoreLine
+    // for the snapshot scoring. Mirrors the original null-first-then-score order.
+    function finalizePrevLine(s, now, events) {
+        if (!s.prevLine) return;
+        var prev = s.prevLine;
+        s.prevLine = null;                          // null first (mirrors original)
+
+        if (prev.lineWords.length > 0) {
+            lateScoreLine(s, prev.lineIdx, prev.lineWords, prev.matchedSet,
+                          prev.lineStartWordCount, prev.lineHadAsrEvent,
+                          prev.vadMatchedSet, prev.asrConfirmedSet, events);
+        }
+    }
+
+    // Tick-driven prevLine finalize hook (replaces the performance.now() + setTimeout
+    // approach of production). Media seconds: finalize when now >= prevLine.overlapEnd.
+    // Called at the TOP of tick so that the prevLine window expiry is always checked
+    // before the arcade/reconcile block that might produce honestPct.
+    function finalizePrevLineIfDue(s, now, events) {
+        if (s.prevLine && now >= s.prevLine.overlapEnd) {
+            finalizePrevLine(s, now, events);
+        }
+    }
 
     // Per-tick orchestration. First the SR-handler-analog work (phrase evidence ->
     // hot-word match -> collectMatches+merge), then the _tickArcade-analog work
