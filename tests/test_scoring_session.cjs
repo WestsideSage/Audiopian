@@ -348,6 +348,44 @@ function matchHotWordForTest(s, text, now) {
     assert.strictEqual(session.getScores(s).linesScored, 0, 'zero-ASR fence: linesScored untouched');
 })();
 
+// --- Task 2.2: lateScoreLine (late-arriving final still scores the line) ---
+// A final that lands after the line ended is matched against the rolling
+// transcriptWords (with the -4 boundary lookback) and then scored. The credited
+// words land in the passed snapshot matchedSet and the line emits a lineScored
+// for the correct lineIdx. DRY: lateScoreLine delegates to scoreLine to tally.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    // Words arrive into the rolling transcript (as a browser_sr final would) but we
+    // do NOT run the in-line collect — simulating recognition that lands only after
+    // the line boundary, which is exactly what the 800ms late pass is for.
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    var snapshot = new Map();                       // nothing matched in-line
+    var events = [];
+    session.lateScoreLine(s, 0, ['first', 'line', 'words'], snapshot,
+                          0 /* lineStartWordCount */, true /* lineHadAsrEvent */,
+                          new Map(), new Set(), events);
+    var scored = events.filter(function (e) { return e.type === 'lineScored'; });
+    assert.strictEqual(scored.length, 1, 'a late final produces one lineScored');
+    assert.strictEqual(scored[0].lineIdx, 0, 'lineScored is attributed to the correct (late) line');
+    assert.strictEqual(scored[0].matched, 3, 'all three late-arriving words are credited');
+    assert.strictEqual(snapshot.size, 3, 'late-credited words land in the snapshot matchedSet');
+    assert.strictEqual(session.getScores(s).linesScored, 1, 'late scoring increments linesScored');
+})();
+
+// lateScoreLine inherits the zero-ASR fence via its delegation to scoreLine: a late
+// pass with lineHadAsrEvent === false credits nothing-scoring (no lineScored).
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    var events = [];
+    session.lateScoreLine(s, 0, ['first', 'line', 'words'], new Map(),
+                          0, false /* no ASR */, new Map(), new Set(), events);
+    assert.strictEqual(events.filter(function (e) { return e.type === 'lineScored'; }).length, 0,
+        'late pass respects the zero-ASR fence (delegated to scoreLine)');
+})();
+
 // ===========================================================================
 // FORWARD-DECLARED CHARACTERIZATION TESTS (green progressively through Phase 1)
 // ===========================================================================

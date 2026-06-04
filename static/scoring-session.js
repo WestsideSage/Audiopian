@@ -615,8 +615,59 @@
         ev(events, 'runningScore', {});
     }
 
+    // --- Task 2.2: lateScoreLine (moved from player.js _lateScoreLine 1786-1833) ---
+    // The 800ms late pass: re-match the line against the rolling transcriptWords with
+    // a -4 boundary lookback (slack for finals that land just after the line change),
+    // then delegate to scoreLine to tally (DRY — the original ends with _scoreLine).
+    // Transform #1 (this.->s.). Transform #3: the per-word V1 span-light DOM block
+    // (1817-1826) becomes a single wordSpans repaint hint (the original emitted no
+    // telemetry here, so no wordMatched events are invented). The matchedSet /
+    // asrConfirmedSet mutations and the -4 / 20-word window are preserved verbatim.
+    function lateScoreLine(s, lineIdx, lineWords, matchedSet, lineStartWordCount, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet, events) {
+        if (lineWords.length === 0) return;
+
+        var spokenNow = s.transcriptWords;
+        // Intentionally retains the -4 lookback (unlike collectMatches which uses a
+        // strict fence). This method runs 800ms after line change, so it needs slack
+        // to catch late-arriving recognition finals from the transition boundary.
+        var startOff  = Math.max(0, lineStartWordCount - 4);
+        var spokenIdx = startOff;
+
+        var lateWordTimings = s.allWordTimings[lineIdx];
+        var lit = false;
+        for (var li = 0; li < lineWords.length; li++) {
+            if (matchedSet.has(li)) { spokenIdx++; continue; }
+            var target = lineWords[li];
+            var targetPhonetic = lateWordTimings && lateWordTimings[li] ? lateWordTimings[li].phonetic : undefined;
+            for (var si = spokenIdx; si < Math.min(spokenIdx + 20, spokenNow.length); si++) {
+                var result = wordsMatchScore(spokenNow[si], target, targetPhonetic);
+                if (result.score > 0) {
+                    var existing = matchedSet.get ? matchedSet.get(li) : undefined;
+                    if (existing === undefined || result.score > existing) {
+                        if (matchedSet.set) {
+                            matchedSet.set(li, result.score);
+                        } else {
+                            matchedSet.add(li); // fallback for Set
+                        }
+                    }
+                    // Promote VAD word to ASR-confirmed if late ASR just matched it
+                    if (vadMatchedSet && vadMatchedSet.has(li) && asrConfirmedSet && !asrConfirmedSet.has(li)) {
+                        asrConfirmedSet.add(li);
+                    }
+                    spokenIdx = si + 1;
+                    // Light the span — this word just arrived late (DOM -> render hint).
+                    lit = true;
+                    break;
+                }
+            }
+        }
+        if (lit) ev(events, 'wordSpans', {});
+
+        scoreLine(s, lineIdx, lineWords, matchedSet, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet, events);
+    }
+
     return { createSession: createSession, setActiveLine: setActiveLine,
              ingestFinal: ingestFinal, ingestInterim: ingestInterim, setEnergy: setEnergy,
              tick: tick, endRun: endRun, getScores: getScores, getHonestPct: getHonestPct,
-             scoreLine: scoreLine };
+             scoreLine: scoreLine, lateScoreLine: lateScoreLine };
 });
