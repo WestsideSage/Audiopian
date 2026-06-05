@@ -77,11 +77,33 @@
         return !!(ADLIB_WORDS && typeof ADLIB_WORDS.has === 'function' && ADLIB_WORDS.has(word));
     }
 
+    // Split a raw lyric line into normalized words, tagging each with whether it was
+    // inside parentheses in the ORIGINAL text. Mirrors the inParen walk that
+    // scoring.interpolateWordTimings already does (scoring.js ~401-409), so the phrase
+    // engine classifies parenthetical content as adlib instead of treating it as a
+    // required anchor. Bare "(" / ")" tokens normalize to "" and are dropped, but still
+    // toggle the inParen state (handles spaced parentheses).
+    function splitLyricWordsWithParens(text) {
+        var raw = String(text || '').trim().split(/\s+/);
+        var out = [];
+        var inParen = false;
+        for (var i = 0; i < raw.length; i++) {
+            var tok = raw[i];
+            if (!tok) continue;
+            if (tok.indexOf('(') >= 0) inParen = true;
+            var word = scoring.normalizeWord(tok);
+            if (word) out.push({ word: word, inParen: inParen });
+            if (tok.indexOf(')') >= 0) inParen = false;
+        }
+        return out;
+    }
+
     function selectAnchors(words, difficultyProfile) {
         var anchors = [];
         for (var i = 0; i < words.length; i++) {
-            var word = words[i];
-            var wordClass = classifyWord ? classifyWord(word, false) : 'core';
+            var word = words[i] ? words[i].word : '';
+            var inParen = !!(words[i] && words[i].inParen);
+            var wordClass = classifyWord ? classifyWord(word, inParen) : 'core';
             if (!word || word.length < 3) continue;
             if (wordClass === 'function' || wordClass === 'adlib') continue;
             if (REPEATED_FILLER[word] || isAdlibWord(word)) continue;
@@ -103,7 +125,7 @@
         // line is permanently unscoreable in the phrase engine.
         if (anchors.length === 0 && words.length > 0) {
             for (var fi = 0; fi < words.length; fi++) {
-                var fw = words[fi];
+                var fw = words[fi] ? words[fi].word : '';
                 if (!fw) continue;
                 anchors.push({
                     anchorIdx: anchors.length,
@@ -130,17 +152,20 @@
         return start + 8;
     }
 
-    function chunkWords(words, startSec, endSec) {
-        var chunks = [];
-        if (words.length <= 14) return [{ words: words, startSec: startSec, endSec: endSec }];
-        var chunkSize = words.length <= 20 ? Math.ceil(words.length / 2) : 8;
+    function chunkWords(wordObjs, startSec, endSec) {
+        function mk(slice, s, e) {
+            return { words: slice.map(function (o) { return o.word; }), wordObjs: slice, startSec: s, endSec: e };
+        }
+        if (wordObjs.length <= 14) return [mk(wordObjs, startSec, endSec)];
+        var chunkSize = wordObjs.length <= 20 ? Math.ceil(wordObjs.length / 2) : 8;
         chunkSize = Math.max(6, Math.min(10, chunkSize));
         var duration = Math.max(0, endSec - startSec);
-        for (var i = 0; i < words.length; i += chunkSize) {
-            var part = words.slice(i, i + chunkSize);
-            var partStart = startSec + duration * (i / words.length);
-            var partEnd = startSec + duration * (Math.min(i + chunkSize, words.length) / words.length);
-            chunks.push({ words: part, startSec: partStart, endSec: partEnd });
+        var chunks = [];
+        for (var i = 0; i < wordObjs.length; i += chunkSize) {
+            var part = wordObjs.slice(i, i + chunkSize);
+            var partStart = startSec + duration * (i / wordObjs.length);
+            var partEnd = startSec + duration * (Math.min(i + chunkSize, wordObjs.length) / wordObjs.length);
+            chunks.push(mk(part, partStart, partEnd));
         }
         return chunks;
     }
@@ -154,14 +179,26 @@
             var line = lyrics[lineIdx] || {};
             var startSec = Number(line.time) || 0;
             var endSec = phraseEndForLine(lyrics, lineIdx, options.audioDuration);
-            var words = normalizedWords(line.text || '');
+            var wordObjs = splitLyricWordsWithParens(line.text || '');
+            var words = wordObjs.map(function (o) { return o.word; });
             var duration = Math.max(0.001, endSec - startSec);
             var shouldSplit = words.length > 14 || (words.length / duration) > 3.5;
-            var chunks = shouldSplit ? chunkWords(words, startSec, endSec) : [{ words: words, startSec: startSec, endSec: endSec }];
+            var chunks = shouldSplit
+                ? chunkWords(wordObjs, startSec, endSec)
+                : [{ words: words, wordObjs: wordObjs, startSec: startSec, endSec: endSec }];
             for (var c = 0; c < chunks.length; c++) {
                 var chunk = chunks[c];
-                var anchors = selectAnchors(chunk.words, difficulty);
+                var anchors = selectAnchors(chunk.wordObjs, difficulty);
                 var anchorsRequired = anchors.length > 0 ? Math.max(1, Math.ceil(anchors.length * difficulty.requiredAnchorRatio)) : 0;
+                // Force-all relief: a line big enough to spare one anchor shouldn't require
+                // EVERY one of them, so a single ASR-impossible word (e.g. "greaze", "velour")
+                // can't sink a correctly-sung line. Only triggers when the ratio rounds up to
+                // all N AND there are >=4 anchors (short 2-3 anchor lines keep needing all, so
+                // they can't collapse). Auto-scales by difficulty: force-all only happens at
+                // high ratios, so Easy/Medium never reach it. Lowers only, never raises.
+                if (anchors.length >= 4 && anchorsRequired >= anchors.length) {
+                    anchorsRequired = anchors.length - 1;
+                }
                 // Fast-tempo recognition allowance (cheese-floored): lower the bar on
                 // high-WPS lines the recognizer can't fully transcribe, but never below
                 // FAST_RECOGNIZED_FLOOR genuinely-recognized anchors. Only lowers, never raises.
@@ -751,6 +788,14 @@
                 liveClean: state.liveClean,
                 anchorsHit: anchorsHit,
                 anchorsRequired: phrase.anchorsRequired,
+                anchors: (phrase.anchors || []).map(function (a) {
+                    return {
+                        word: a.word,
+                        wordClass: a.wordClass,
+                        weight: a.weight,
+                        hit: !!state.anchorHits[a.anchorIdx]
+                    };
+                }),
                 evidence: state.evidence.slice(),
                 consumedTokens: state.consumedTokens.slice(),
                 rejectedCandidates: state.rejectedCandidates.slice(),
@@ -762,6 +807,7 @@
 
     return {
         buildPhrasePlan: buildPhrasePlan,
+        splitLyricWordsWithParens: splitLyricWordsWithParens,
         getDifficultyProfile: getDifficultyProfile,
         selectAnchors: selectAnchors,
         createPhraseSession: createPhraseSession,
