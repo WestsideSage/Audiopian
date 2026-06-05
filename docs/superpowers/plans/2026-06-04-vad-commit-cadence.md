@@ -254,7 +254,7 @@ Run (PowerShell):
 ```powershell
 Get-ChildItem "static/vendor/vad" | Select-Object Name
 ```
-Expected to include at least: `bundle.min.js`, `vad.worklet.bundle.min.js`, a Silero model `*.onnx` (e.g. `silero_vad.onnx`/`silero_vad_v5.onnx`), `ort.wasm.min.js`, and one or more `ort-wasm*.wasm` files.
+Expected to include at least: `bundle.min.js`, `vad.worklet.bundle.min.js`, a Silero model `*.onnx` (e.g. `silero_vad_v5.onnx`), `ort.wasm.min.js`, the **`ort-wasm-simd-threaded.mjs` loader glue (REQUIRED** — `ort.wasm.min.js` dynamically `import()`s it; omitting it 404s and silently disables the VAD), and the `ort-wasm-simd-threaded.wasm` binary. (The `.jsep.*` variants are webgpu-only — not needed.)
 If any are missing, list `$tmp/node_modules/@ricky0123/vad-web/dist` and `$tmp/node_modules/onnxruntime-web/dist` and copy the missing model/wasm by name. **Record the exact `.onnx` filename** — Task 3 does not hardcode it (vad-web resolves it from `baseAssetPath`), but you must confirm it loads with no 404 in Task 6.
 
 - [ ] **Step 3: Commit**
