@@ -77,6 +77,27 @@
         return !!(ADLIB_WORDS && typeof ADLIB_WORDS.has === 'function' && ADLIB_WORDS.has(word));
     }
 
+    // Split a raw lyric line into normalized words, tagging each with whether it was
+    // inside parentheses in the ORIGINAL text. Mirrors the inParen walk that
+    // scoring.interpolateWordTimings already does (scoring.js ~401-409), so the phrase
+    // engine classifies parenthetical content as adlib instead of treating it as a
+    // required anchor. Bare "(" / ")" tokens normalize to "" and are dropped, but still
+    // toggle the inParen state (handles spaced parentheses).
+    function splitLyricWordsWithParens(text) {
+        var raw = String(text || '').trim().split(/\s+/);
+        var out = [];
+        var inParen = false;
+        for (var i = 0; i < raw.length; i++) {
+            var tok = raw[i];
+            if (!tok) continue;
+            if (tok.indexOf('(') >= 0) inParen = true;
+            var word = scoring.normalizeWord(tok);
+            if (word) out.push({ word: word, inParen: inParen });
+            if (tok.indexOf(')') >= 0) inParen = false;
+        }
+        return out;
+    }
+
     function selectAnchors(words, difficultyProfile) {
         var anchors = [];
         for (var i = 0; i < words.length; i++) {
@@ -762,6 +783,7 @@
 
     return {
         buildPhrasePlan: buildPhrasePlan,
+        splitLyricWordsWithParens: splitLyricWordsWithParens,
         getDifficultyProfile: getDifficultyProfile,
         selectAnchors: selectAnchors,
         createPhraseSession: createPhraseSession,
