@@ -726,4 +726,26 @@ function matchHotWordForTest(s, text, now) {
     assert.ok(scored.length >= 1, 'expected at least one wordMatched event for "hello world"');
 })();
 
+// --- #3 fix: live overlap crediting (matchPrevLine wired into tick) ---
+// A final carrying the OUTGOING line's words that arrives AFTER the line boundary must
+// credit the prevLine LIVE during its overlap window (not only at finalize via
+// lateScoreLine). Before the fix, matchPrevLine was defined but never called, so the
+// outgoing line's late words greened only at finalize. tick now re-matches prevLine while
+// it is still inside its overlap window.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setActiveLine(s, 1, 2.0);                 // line 0 -> prevLine; boundary collect saw empty transcript
+    assert.ok(s.prevLine && s.prevLine.lineIdx === 0, 'precondition: prevLine is line 0 in overlap');
+    assert.strictEqual(s.prevLine.matchedSet.size, 0, 'precondition: nothing credited to prevLine at the boundary');
+    // line 0's words arrive LATE (after the boundary), then a tick fires during overlap
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    var out = session.tick(s, 2.05);                  // 2.05 < overlapEnd, still in overlap window
+    assert.ok(s.prevLine, 'still in overlap window after the tick');
+    assert.strictEqual(s.prevLine.matchedSet.size, 3,
+        '#3: late boundary words are credited to the OUTGOING line LIVE during overlap (matchPrevLine wired)');
+    assert.ok(out.some(function (e) { return e.type === 'wordSpans'; }),
+        '#3: live overlap crediting emits a wordSpans repaint');
+})();
+
 console.log('Scoring session tests passed.');

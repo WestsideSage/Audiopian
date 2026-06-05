@@ -698,6 +698,15 @@
         drainPendingFinals(s, now, events);     // phrase evidence (uses fresh now)
         updateHotWordAndMatch(s, now, events);  // VAD provisional feed + hot-word match
         runDirtyCollect(s, now, events);        // collectMatches/whisper + merge + promotion
+        // Live overlap crediting (#3): while the outgoing line is still in its overlap
+        // window (prevLine not yet finalized by finalizePrevLineIfDue above), re-match it
+        // against the current transcript so late boundary words green the OUTGOING line
+        // LIVE — not only at finalize via lateScoreLine. Restores production's _matchPrevLine
+        // (moved in Phase 3 but left unwired). Idempotent vs lateScoreLine's finalize collect
+        // (same matchedSet keyed by index); track1 fences from prevLine.lineStartTranscriptPos.
+        if (s.prevLine) {
+            matchPrevLine(s, (s.transcript || '') + ' ' + (s.latestInterim || ''), 'track1', now, events);
+        }
         // _tickArcade: settle phrases so ended lines are settling/settled, then catch up
         // ended-and-uncleared lines from the converged interim BEFORE commit, then commit
         // each newly-settled phrase exactly once, then refresh the honest % headline.
