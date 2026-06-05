@@ -70,4 +70,30 @@ check('Easy never force-all: N=4 -> 1', () => {
   assert.strictEqual(planFor('shadows dancing rivers mountains', 'easy').anchorsRequired, 1);
 });
 
+// --- Task 4: per-anchor trace detail (§3C) ---
+check('getPhraseTrace exposes per-anchor word/wordClass/weight/hit', () => {
+  const plan = PE.buildPhrasePlan(
+    [{ time: 0, text: 'shadows dancing (forever) tonight' }],
+    { difficulty: 'expert' }
+  );
+  const phrase = plan.phrases[0];
+  const state = {
+    anchorHits: {}, status: 'open', lyricStatus: 'partial', accuracyStatus: 'missing',
+    flowStatus: 'silent', cleared: false, rescuedByWhisper: false, liveClean: false,
+    evidence: [], consumedTokens: [], rejectedCandidates: [], flowEvents: [], overflow: {}
+  };
+  state.anchorHits[phrase.anchors[0].anchorIdx] = { word: phrase.anchors[0].word };
+  const session = { plan: plan, states: {} };
+  session.states[phrase.phraseId] = state;
+
+  const trace = PE.getPhraseTrace(session)[0];
+  assert.strictEqual(trace.anchors.length, phrase.anchors.length);
+  assert.ok(trace.anchors.every(a =>
+    typeof a.word === 'string' && typeof a.wordClass === 'string' &&
+    typeof a.weight === 'number' && typeof a.hit === 'boolean'));
+  assert.strictEqual(trace.anchors.filter(a => a.hit).length, 1);
+  assert.strictEqual(trace.anchors.find(a => a.word === phrase.anchors[0].word).hit, true);
+  assert.ok(trace.anchors.every(a => a.wordClass !== 'adlib'));
+});
+
 console.log('anchor-selection: ' + passed + ' checks passed');

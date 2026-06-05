@@ -788,6 +788,14 @@
                 liveClean: state.liveClean,
                 anchorsHit: anchorsHit,
                 anchorsRequired: phrase.anchorsRequired,
+                anchors: (phrase.anchors || []).map(function (a) {
+                    return {
+                        word: a.word,
+                        wordClass: a.wordClass,
+                        weight: a.weight,
+                        hit: !!state.anchorHits[a.anchorIdx]
+                    };
+                }),
                 evidence: state.evidence.slice(),
                 consumedTokens: state.consumedTokens.slice(),
                 rejectedCandidates: state.rejectedCandidates.slice(),
