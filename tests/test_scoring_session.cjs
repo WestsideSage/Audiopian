@@ -446,6 +446,31 @@ function matchHotWordForTest(s, text, now) {
         'a missed phrase does NOT emit phraseCleared');
 })();
 
+// A settled phrase with SOME anchors hit but not confirmed commits as a PARTIAL and emits
+// phrasePartial (amber), NOT phraseMissed (red): the lenient streak survives a partial, so
+// the paint must match it rather than read as a total failure.
+(function () {
+    var s = session.createSession(threeLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);
+    session.tick(s, 1.0);                          // flowEvent inside p0 [0,3]
+    session.setActiveLine(s, 1, 3.0);              // p0 ends
+    session.ingestInterim(s, 'first');             // only ONE anchor word -> partial (medium needs >=2)
+    session.tick(s, 4.0);                          // reconcile: p0 gets one anchor, stays partial
+    phrase.settlePhrases(s.phraseSession, 4.5);    // p0 settled
+    var p0 = s.phraseSession.states['p0'];
+    assert.ok(Object.keys(p0.anchorHits).length > 0, 'precondition: p0 has at least one anchor hit');
+    assert.notStrictEqual(p0.lyricStatus, 'confirmed', 'precondition: p0 is NOT confirmed (partial)');
+    var events = [];
+    session.commitNewlySettled(s, 4.5, true, events);
+    assert.ok(events.some(function (e) { return e.type === 'phrasePartial' && e.phraseId === 'p0'; }),
+        'a partial phrase (some anchors hit) emits phrasePartial (amber)');
+    assert.strictEqual(events.filter(function (e) { return e.type === 'phraseMissed'; }).length, 0,
+        'a partial phrase does NOT emit phraseMissed (full red)');
+    assert.strictEqual(events.filter(function (e) { return e.type === 'phraseCleared'; }).length, 0,
+        'a partial phrase does NOT emit phraseCleared (green)');
+})();
+
 // routeEvents=false (the end-screen flush) suppresses the HUD arcade event but still
 // commits (arcadeRecord pushed) and still paints the phrase result.
 (function () {

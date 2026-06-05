@@ -1006,6 +1006,20 @@ class GameMode {
         });
     }
 
+    // V2: a PARTIAL phrase (some anchors hit — the lenient streak survives) paints amber,
+    // not full red. Hit key words keep their green; un-hit key words go amber (.matched-partial)
+    // instead of red, so the line reads as "partial credit" rather than "failure".
+    _paintPhrasePartial(phraseId) {
+        if (!window.KARAOKEE_V2) return;
+        var sel = '.word-span[data-phrase-id="' + phraseId + '"]';
+        document.querySelectorAll(sel).forEach(function (span) {
+            span.classList.remove('missed');
+            if (span.classList.contains('key-word') && !span.classList.contains('matched')) {
+                span.classList.add('matched-partial');
+            }
+        });
+    }
+
     // Render a scored line: mark unmatched spans red (V1 only) and flash the per-line
     // score. Extracted verbatim from the old _scoreLine DOM block (1563-1580); reads the
     // event payload (e.lineIdx / e.missedWordIndices / e.matched / e.scoredTotal) so it
@@ -1093,6 +1107,7 @@ class GameMode {
                 case 'promotion': this._logPromotion(e.source, e.wordIndex, e.score); break;
                 case 'phraseCleared': this._paintPhraseCleared(e.phraseId); break;
                 case 'phraseMissed': this._paintPhraseMissed(e.phraseId); break;
+                case 'phrasePartial': this._paintPhrasePartial(e.phraseId); break;
                 case 'arcade': this._onArcadeEvent(e.evt); break;
                 case 'arcadeRecord': /* already in session.arcadeEvents; telemetry reads it at build time */ break;
                 case 'honestPct': { var el = document.getElementById('score-pct'); if (el && e.pct != null) el.textContent = e.pct + '%'; break; }
