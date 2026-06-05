@@ -748,4 +748,28 @@ function matchHotWordForTest(s, text, now) {
         '#3: live overlap crediting emits a wordSpans repaint');
 })();
 
+// --- Seek-reset primitive: resetActiveLine discards the current line + re-fences ---
+// After ingesting line-0 words, a "seek" (resetActiveLine) must clear the matched set,
+// clear lineHadAsrEvent (so the seeked-away line won't score), realign the transcript
+// fence to now, drop any prevLine, and prevent the pre-seek transcript from crediting
+// the post-seek line.
+(function () {
+    var s = session.createSession(threeLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    session.tick(s, 1.0);
+    assert.ok(s.matchedSet.size > 0, 'precondition: line 0 accumulated matches');
+    // SEEK away from line 0.
+    session.resetActiveLine(s, 5.0);
+    assert.strictEqual(s.matchedSet.size, 0, 'resetActiveLine clears the matched set');
+    assert.strictEqual(s.lineHadAsrEvent, false, 'resetActiveLine clears lineHadAsrEvent (seeked-away line wont score)');
+    assert.strictEqual(s.lineStartTranscriptPos, s.transcriptWords.length, 'transcript fence realigned to now');
+    assert.strictEqual(s.prevLine, null, 'resetActiveLine does not snapshot a prevLine');
+    // Land on line 2; the pre-seek 'first line words' must not credit it ('third line words').
+    session.setActiveLine(s, 2, 5.0);
+    session.tick(s, 5.1);
+    assert.strictEqual(s.matchedSet.size, 0, 'pre-seek transcript does not credit the post-seek line');
+})();
+
 console.log('Scoring session tests passed.');

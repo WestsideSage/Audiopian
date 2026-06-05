@@ -397,10 +397,12 @@ class GameMode {
         // seek would double-count). When the seek crosses a line boundary, the next
         // updateLyrics poll calls setActiveLine for the new position, which resets the
         // session's line state (matchedSet, fence, prevLine) and re-fences the transcript.
-        // A same-line backward seek therefore keeps the already-matched spans until the
-        // line advances — acceptable for an edge interaction; a dedicated session reset
-        // API (e.g. resetActiveLine) is the proper fix and is deferred. We only repaint
-        // here for immediate visual feedback.
+        // Discard the current line's accumulated match state and re-fence the transcript
+        // to NOW so pre-seek words cannot credit the post-seek position: a backward in-line
+        // seek drops stale matches, and a boundary-crossing seek won't score the seeked-away
+        // line (resetActiveLine clears lineHadAsrEvent -> the next setActiveLine hits
+        // scoreLine's zero-ASR fence). Then repaint for immediate visual feedback.
+        if (this._session) KaraokeeScoringSession.resetActiveLine(this._session, this._now());
         this._updateWordSpans();
     }
 
@@ -505,8 +507,12 @@ class GameMode {
         var bits = [];
         var titleEl = document.getElementById('song-title');
         if (titleEl && titleEl.textContent) bits.push(titleEl.textContent);
-        if (lyrics && lyrics.length) {
-            bits.push(lyrics.slice(0, 8).map(function(line) { return line.text || ''; }).join(' '));
+        // Bias the recognizer toward the song's vocabulary (spelling hint for uncommon
+        // words) using a DEDUPED whole-song vocabulary rather than the lyric sequence: the
+        // sequence lets the model predict the next expected word (a honesty risk), whereas
+        // the deduped vocab only nudges spelling. Covers the whole song, not just the open.
+        if (lyrics && lyrics.length && typeof buildLyricVocabulary === 'function') {
+            bits.push(buildLyricVocabulary(lyrics, 800));
         }
         return bits.join(' ').slice(0, 900);
     }

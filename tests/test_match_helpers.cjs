@@ -154,3 +154,32 @@ assert.strictEqual(isEdit2PrefixTruncation('work',  'words'),   false, 'work→w
 assert.strictEqual(isEdit2PrefixTruncation('rhythm', 'rhyth'),  false, 'rhythm→rhyth spoken longer');
 
 console.log('isEdit2PrefixTruncation: 9 tests passed');
+
+// === fix(detection): new contraction entries + buildLyricVocabulary ===
+var CMAP = fakeModule.exports.CONTRACTION_MAP;
+assert.strictEqual(CMAP['aint'], 'is not', 'aint (apostrophe-stripped) reachable');
+assert.strictEqual(CMAP['lemme'], 'let me', 'lemme added');
+assert.strictEqual(CMAP['gimme'], 'give me', 'gimme added');
+assert.strictEqual(CMAP['imma'], 'i am going to', 'imma added');
+assert.strictEqual(contractionsMatch('lemme', 'let'), true, "spoken 'lemme' matches target 'let'");
+assert.strictEqual(contractionsMatch('aint', 'is'), true, "spoken 'aint' matches target 'is'");
+console.log('New contraction entries: 6 tests passed');
+
+var buildLyricVocabulary = fakeModule.exports.buildLyricVocabulary;
+(function () {
+    var lyrics = [
+        { time: 0, text: 'Roughneck cutthroat roughneck' },
+        { time: 2, text: 'the a I go to (swizz) beat!' },
+        { time: 4, text: 'muzzle muzzle muzzle' }
+    ];
+    var words = buildLyricVocabulary(lyrics, 800).split(' ');
+    assert.ok(words.indexOf('roughneck') >= 0 && words.indexOf('cutthroat') >= 0, 'includes uncommon words');
+    assert.ok(words.indexOf('swizz') >= 0, 'punctuation stripped, swizz included');
+    assert.strictEqual(words.filter(function (w) { return w === 'roughneck'; }).length, 1, 'roughneck deduped');
+    assert.strictEqual(words.indexOf('the'), -1, 'short common word "the" dropped');
+    assert.strictEqual(words.indexOf('go'), -1, 'short word "go" (<4) dropped');
+    assert.strictEqual(buildLyricVocabulary(lyrics, 12), 'roughneck', 'cap trims to whole words');
+    assert.strictEqual(buildLyricVocabulary([], 800), '', 'empty lyrics -> empty vocab');
+    assert.strictEqual(buildLyricVocabulary(null, 800), '', 'null lyrics -> empty vocab');
+})();
+console.log('buildLyricVocabulary: tests passed');
