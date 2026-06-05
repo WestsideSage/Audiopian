@@ -64,6 +64,10 @@ var CONTRACTION_MAP = {
     'getchu':  'get you',
     'gotchu':  'got you',
     'letchu':  'let you',
+    'lemme':   'let me',
+    'gimme':   'give me',
+    'imma':    'i am going to',
+    'aint':    'is not',
 };
 
 // --- Slang / ASR-mishearing dictionary ---
@@ -368,9 +372,34 @@ function isEdit2PrefixTruncation(spoken, target) {
     return target.startsWith(spoken);
 }
 
+// Build a deduplicated vocabulary string from lyric lines, for biasing the realtime
+// recognizer toward the song's words (a spelling hint). Deduped and stripped of short
+// common words, and NOT the lyric sequence — it nudges spelling of uncommon words without
+// handing the model the next expected word to predict (which would inflate honesty rather
+// than transcribe). Capped (with no partial trailing word) for the realtime prompt budget.
+function buildLyricVocabulary(lyrics, maxChars) {
+    maxChars = maxChars || 800;
+    var seen = {};
+    var vocab = [];
+    for (var i = 0; i < (lyrics ? lyrics.length : 0); i++) {
+        var text = (lyrics[i] && lyrics[i].text) || '';
+        var words = String(text).split(/\s+/);
+        for (var w = 0; w < words.length; w++) {
+            var word = words[w].toLowerCase().replace(/[^a-z']/g, '');
+            if (word.length < 4) continue;          // skip short common words (already well-recognized)
+            if (seen[word]) continue;
+            seen[word] = true;
+            vocab.push(word);
+        }
+    }
+    var out = vocab.join(' ');
+    return out.length > maxChars ? out.slice(0, maxChars).replace(/\s+\S*$/, '') : out;
+}
+
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
+        buildLyricVocabulary: buildLyricVocabulary,
         CONTRACTION_MAP: CONTRACTION_MAP,
         REVERSE_CONTRACTION_MAP: REVERSE_CONTRACTION_MAP,
         contractionsMatch: contractionsMatch,

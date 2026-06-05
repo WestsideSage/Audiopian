@@ -507,8 +507,12 @@ class GameMode {
         var bits = [];
         var titleEl = document.getElementById('song-title');
         if (titleEl && titleEl.textContent) bits.push(titleEl.textContent);
-        if (lyrics && lyrics.length) {
-            bits.push(lyrics.slice(0, 8).map(function(line) { return line.text || ''; }).join(' '));
+        // Bias the recognizer toward the song's vocabulary (spelling hint for uncommon
+        // words) using a DEDUPED whole-song vocabulary rather than the lyric sequence: the
+        // sequence lets the model predict the next expected word (a honesty risk), whereas
+        // the deduped vocab only nudges spelling. Covers the whole song, not just the open.
+        if (lyrics && lyrics.length && typeof buildLyricVocabulary === 'function') {
+            bits.push(buildLyricVocabulary(lyrics, 800));
         }
         return bits.join(' ').slice(0, 900);
     }
