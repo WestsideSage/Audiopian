@@ -25,6 +25,7 @@ python -m pytest tests/test_app.py::test_transcribe_returns_transcript -v
 node tests/test_match_helpers.cjs
 node tests/test_sync_helpers.cjs
 node tests/test_telemetry.cjs
+node tests/test_scoring_session.cjs
 ```
 
 ### Whisper / transcription configuration (environment variables)
@@ -66,7 +67,8 @@ Wraps yt-dlp: `extract_metadata()` (no download), `download_audio()` (saves to `
 ### Frontend (plain HTML/JS — `static/`)
 No build step; files are served directly by Flask.
 
-- **`player.js`** — main karaoke controller (DOM, audio playback, lyric scrolling, mic capture, game mode, HUD). Orchestration only: it binds the matching/scoring primitives from `window.KaraokeeScoring` (see `scoring.js`) rather than implementing them.
+- **`player.js`** — main karaoke controller (DOM, audio playback, lyric scrolling, mic capture, game mode, HUD). Orchestration and rendering only: it feeds events into `KaraokeeScoringSession` (see `scoring-session.js`) and renders the session's emitted events via `_renderEvents`. The scoring state machine itself (match→reconcile→score→commit) lives in `scoring-session.js`.
+- **`scoring-session.js`** (`window.KaraokeeScoringSession`) — the per-run scoring state machine (match→reconcile→score→commit) extracted from `player.js`; DOM-free, clock-injected, emits render-intent events that `player.js` `_renderEvents` paints. Tested in `tests/test_scoring_session.cjs`.
 - **`scoring.js`** (`window.KaraokeeScoring`) — phonetic/fuzzy matching + line scoring engine: `doubleMetaphone`, `editDistance`, `wordsMatch`/`wordsMatchScore`, word normalization, syllable-weighted `interpolateWordTimings`, `computeLineScore`, `findMatchInWindow`, `mergeConfirmedMatches`. **Single source of truth** for these — `player.js` binds them. Tested in `test_scoring.cjs`.
 - **`phrase-engine.js`** (`window.KaraokeePhraseEngine`) — phrase-level scoring built on `scoring.js`: anchor matching, line settle/commit, late-evidence reconciliation. Tested in `test_phrase_engine.cjs` / `test_phrase_score.cjs`.
 - **`scoring-arcade.js`** (`window.KaraokeeArcade`) — pure arcade scoring state machine (combos, points, grade). Tested in `test_scoring_arcade.cjs`.
@@ -79,7 +81,7 @@ No build step; files are served directly by Flask.
 - **`audio-processor.js`** — AudioWorklet processor that buffers mic samples, emits chunks to the main thread for whisper, and posts RMS energy for VAD.
 
 ### JS helper isolation pattern
-The helper modules above (`scoring.js`, `phrase-engine.js`, `scoring-arcade.js`, `match-helpers.js`, `sync-helpers.js`, `vad-helpers.js`, `telemetry-helpers.js`, `lyric-paint-helpers.js`, `realtime-whisper.js`) are pure (no DOM/AudioContext) and use a UMD wrapper, so they can be `require()`d by the `.cjs` test files in `tests/` **and** loaded as `<script>` globals in the browser. `player.js` is the only DOM-bound file. When adding logic, prefer a pure helper module (with a `.cjs` test) over growing `player.js`, and preserve Node.js compatibility.
+The helper modules above (`scoring.js`, `phrase-engine.js`, `scoring-arcade.js`, `scoring-session.js`, `match-helpers.js`, `sync-helpers.js`, `vad-helpers.js`, `telemetry-helpers.js`, `lyric-paint-helpers.js`, `realtime-whisper.js`) are pure (no DOM/AudioContext) and use a UMD wrapper, so they can be `require()`d by the `.cjs` test files in `tests/` **and** loaded as `<script>` globals in the browser. `player.js` is the only DOM-bound file. When adding logic, prefer a pure helper module (with a `.cjs` test) over growing `player.js`, and preserve Node.js compatibility.
 
 ### Telemetry
 Each completed run auto-saves a JSON to `output_telemetry/<date>/` via `POST /telemetry` (Flask writes it; the client builds it in `player.js` `_buildTelemetryPayload`, called on song-end and on stop). Schema v2 (`meta.schemaVersion: 2`) adds a `summary` block (final scores, arcade outcome, recognizer attribution, sync drift, and a cheese/honesty correlation) and an `arcade` block (per-phrase commit events + high score). Lean by default; the heavy raw arrays (`asr`/`matches`/`promotions`/`phraseEngine.traces`) are included only when debug is on (press `D`). The `summary` digest is derived by the pure `static/telemetry-helpers.js` (`summarizeRun`, golden-tested in `tests/test_telemetry_helpers.cjs`). For offline analysis of scoring honesty/economy and timing drift — not part of the production serving path.
