@@ -474,7 +474,20 @@
             if (requireInWindowFlow && !hasInWindowFlow(state, phrase)) return false;
             return phrase.endSec >= lookbackStart && phrase.endSec <= nowSec;
         }).sort(function(a, b) { return a.startSec - b.startSec; });
-        if (candidates.length === 0) return [];
+        // Candidate set for the cheese-safe UNIQUE-anchor catch-up pass below: same filter
+        // as `candidates` but WITHOUT the forward-only floor (minStartSec). A distinctive
+        // anchor recognized late/out-of-order can credit its (in-window-flow / sung) line
+        // even below the floor, because uniqueness removes the mis-credit ambiguity the
+        // floor guards against. Built BEFORE the main loop so it captures phrases the
+        // monotonic pass clears (its filter drops only already-cleared phrases).
+        var flowCandidates = (session.plan.phrases || []).filter(function(phrase) {
+            var st = session.states[phrase.phraseId];
+            if (!st || st.cleared) return false;
+            if (!(phrase.anchorsRequired > 0)) return false;
+            if (requireInWindowFlow && !hasInWindowFlow(st, phrase)) return false;
+            return phrase.endSec >= lookbackStart && phrase.endSec <= nowSec;
+        });
+        if (candidates.length === 0 && flowCandidates.length === 0) return [];
 
         var minIdx = 0;
         for (var ti = 0; ti < tokens.length; ti++) {
@@ -530,8 +543,67 @@
             }
         }
 
+        // --- Unique-anchor out-of-order catch-up (cheese-safe) ---
+        // The monotonic pass + the interim floor are forward-only: they stop a repeated/
+        // shared word reaching back to credit an earlier (often un-sung) line. But they
+        // also SKIP a clearly-recognized, distinctive anchor presented out of order or
+        // after a later line confirmed (observed Class-2: words the matcher matched yet
+        // never credited; empty rejectedCandidates). Safe relaxation: credit an un-consumed
+        // token to an un-hit anchor ONLY when that anchor word is UNIQUE among the un-hit
+        // anchors of the in-window-flow candidate set — a unique word maps to exactly one
+        // line, so it cannot mis-credit another, and the repeated-hook cheese case is
+        // non-unique by construction (stays guarded). consumedTokenIds + the flow gate
+        // still apply; the floor and minIdx do not.
+        if (flowCandidates.length > 0) {
+            var unhitWordCount = {};
+            flowCandidates.forEach(function(phrase) {
+                var st = session.states[phrase.phraseId];
+                (st.phrase.anchors || []).forEach(function(anchor) {
+                    if (st.anchorHits[anchor.anchorIdx]) return;
+                    unhitWordCount[anchor.word] = (unhitWordCount[anchor.word] || 0) + 1;
+                });
+            });
+            for (var uti = 0; uti < tokens.length; uti++) {
+                var utoken = tokens[uti];
+                var utokenId = evidence.id + ':' + utoken.idx;
+                if (session.consumedTokenIds[utokenId]) continue;
+                if (REPEATED_FILLER[utoken.word] || isAdlibWord(utoken.word)) continue;
+                for (var uci = 0; uci < flowCandidates.length; uci++) {
+                    var ustate = session.states[flowCandidates[uci].phraseId];
+                    var uanchors = ustate.phrase.anchors || [];
+                    var ucredited = null, uscore = 0;
+                    for (var uai = 0; uai < uanchors.length; uai++) {
+                        var uanchor = uanchors[uai];
+                        if (ustate.anchorHits[uanchor.anchorIdx]) continue;
+                        if (unhitWordCount[uanchor.word] !== 1) continue;   // ambiguous -> stay guarded
+                        var ures = scoring.wordsMatchScore(utoken.word, uanchor.word, uanchor.phonetic);
+                        if (ures && ures.score >= 0.8) { ucredited = uanchor; uscore = ures.score; break; }
+                    }
+                    if (ucredited) {
+                        session.consumedTokenIds[utokenId] = true;
+                        unhitWordCount[ucredited.word] = 0;   // consumed; no longer creditable
+                        ustate.anchorHits[ucredited.anchorIdx] = {
+                            word: ucredited.word, source: source + '_reconciled',
+                            evidenceId: evidence.id, score: uscore
+                        };
+                        pushBounded(ustate, 'evidence', {
+                            evidenceId: evidence.id, source: source + '_reconciled',
+                            text: evidence.text || '', score: uscore, method: 'reconciled_unique'
+                        }, MAX_EVIDENCE_PER_PHRASE);
+                        pushBounded(ustate, 'consumedTokens', {
+                            evidenceId: evidence.id, tokenIdx: utoken.idx, word: utoken.word,
+                            anchor: ucredited.word, source: source + '_reconciled',
+                            timeSec: tokenTime(evidence, utoken), score: uscore
+                        }, MAX_TOKENS_PER_PHRASE);
+                        updatePhraseResult(session, ustate);
+                        break;
+                    }
+                }
+            }
+        }
+
         var newlyConfirmed = [];
-        candidates.forEach(function(phrase) {
+        flowCandidates.forEach(function(phrase) {   // superset of `candidates` — covers both passes
             if (session.states[phrase.phraseId].cleared) newlyConfirmed.push(phrase.phraseId);
         });
         return newlyConfirmed;

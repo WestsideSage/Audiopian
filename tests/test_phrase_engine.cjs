@@ -393,4 +393,27 @@ assert.strictEqual(hookSession.states['p0'].lyricStatus, 'confirmed', 'sung p0 c
 assert.strictEqual(hookSession.states['p1'].lyricStatus, 'missing', 'SKIPPED middle line (no in-window energy) must NOT be credited by the next line\'s repeated-hook anchor');
 assert.strictEqual(hookSession.states['p2'].lyricStatus, 'confirmed', 'the actually-sung repeated hook (p2) reclaims its own words');
 
+// === Class-2 fix: a UNIQUE anchor recognized out-of-order / after a later line confirmed
+// (so the forward-only floor advanced past it) is still credited — WITHOUT enabling
+// shared-word cheese. A unique anchor word belongs to exactly one candidate line, so it
+// cannot mis-credit another; the repeated-hook cheese case is non-unique by construction
+// and stays guarded (see the shared-anchor + skipped-hook tests above). ===
+var uniqPlan = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'roughneck alpha zero' },    // p0 [0,4]: distinctive 'roughneck'
+    { time: 4, text: 'bravo charlie delta' }       // p1 [4,8]: later line, recognized first
+], { difficulty: 'easy', audioDuration: 8 });
+var uniqSession = phraseEngine.createPhraseSession(uniqPlan);
+// Both lines actually sung -> in-window vocal energy (flow) for each.
+phraseEngine.addEvidence(uniqSession, { id: 'vad-u0', source: 'vad', text: '', words: [], receivedAtSec: 1, audioTimeSec: 1 });
+phraseEngine.addEvidence(uniqSession, { id: 'vad-u1', source: 'vad', text: '', words: [], receivedAtSec: 5, audioTimeSec: 5 });
+// Step 1: the interim carries the LATER line first -> confirms p1, advancing the
+// forward-only floor PAST p0 (the recognizer caught p1's words before p0's).
+phraseEngine.reconcileInterimSnapshot(uniqSession, 'bravo charlie delta', 9);
+assert.strictEqual(uniqSession.states['p1'].lyricStatus, 'confirmed', 'p1 confirmed first (advances the floor past p0)');
+// Step 2: a later snapshot now also carries p0's distinctive 'roughneck' (late/out of order).
+phraseEngine.reconcileInterimSnapshot(uniqSession, 'bravo charlie delta roughneck alpha zero', 10);
+assert.ok(Object.keys(uniqSession.states['p0'].anchorHits).length > 0,
+    'CLASS-2 FIX: a unique anchor below the advanced floor is still credited (was silently skipped)');
+console.log('Class-2 unique-anchor reconcile: passed.');
+
 console.log('Phrase engine tests passed.');
