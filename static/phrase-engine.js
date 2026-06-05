@@ -190,6 +190,15 @@
                 var chunk = chunks[c];
                 var anchors = selectAnchors(chunk.wordObjs, difficulty);
                 var anchorsRequired = anchors.length > 0 ? Math.max(1, Math.ceil(anchors.length * difficulty.requiredAnchorRatio)) : 0;
+                // Force-all relief: a line big enough to spare one anchor shouldn't require
+                // EVERY one of them, so a single ASR-impossible word (e.g. "greaze", "velour")
+                // can't sink a correctly-sung line. Only triggers when the ratio rounds up to
+                // all N AND there are >=4 anchors (short 2-3 anchor lines keep needing all, so
+                // they can't collapse). Auto-scales by difficulty: force-all only happens at
+                // high ratios, so Easy/Medium never reach it. Lowers only, never raises.
+                if (anchors.length >= 4 && anchorsRequired >= anchors.length) {
+                    anchorsRequired = anchors.length - 1;
+                }
                 // Fast-tempo recognition allowance (cheese-floored): lower the bar on
                 // high-WPS lines the recognizer can't fully transcribe, but never below
                 // FAST_RECOGNIZED_FLOOR genuinely-recognized anchors. Only lowers, never raises.

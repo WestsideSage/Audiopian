@@ -44,4 +44,30 @@ check('parenthetical content word is excluded from anchors', () => {
   assert.deepStrictEqual(words, ['dancing', 'shadows', 'tonight']);
 });
 
+// --- Task 3: Fix B — don't force ALL anchors on lines big enough to spare one ---
+function planFor(text, difficulty) {
+  return PE.buildPhrasePlan([{ time: 0, text: text }], { difficulty: difficulty }).phrases[0];
+}
+check('N=4 Expert: ceil(4*0.8)=4 force-all -> capped to 3', () => {
+  const p = planFor('shadows dancing rivers mountains', 'expert');
+  assert.strictEqual(p.anchors.length, 4);
+  assert.strictEqual(p.anchorsRequired, 3);
+});
+check('N=4 Medium: ceil(4*0.45)=2 (not force-all) -> unchanged', () => {
+  assert.strictEqual(planFor('shadows dancing rivers mountains', 'medium').anchorsRequired, 2);
+});
+check('N=2 Expert: short line not collapsed -> still 2', () => {
+  const p = planFor('shadows dancing', 'expert');
+  assert.strictEqual(p.anchors.length, 2);
+  assert.strictEqual(p.anchorsRequired, 2);
+});
+check('N=5 Expert: ceil(5*0.8)=4 < 5 (has headroom) -> unchanged', () => {
+  const p = planFor('shadows dancing rivers mountains thunder', 'expert');
+  assert.strictEqual(p.anchors.length, 5);
+  assert.strictEqual(p.anchorsRequired, 4);
+});
+check('Easy never force-all: N=4 -> 1', () => {
+  assert.strictEqual(planFor('shadows dancing rivers mountains', 'easy').anchorsRequired, 1);
+});
+
 console.log('anchor-selection: ' + passed + ' checks passed');
