@@ -14,7 +14,7 @@ Two coupled defects in the realtime recognition path, both diagnosed from teleme
 1. **Blind commit cadence → fragmented transcripts.** `_startRealtimeWhisperCommitTimer` ([static/player.js:599-615](../../../static/player.js#L599)) fires `input_audio_buffer.commit` on a **`setInterval(…, 700)`** — every 700 ms regardless of speech state. On dense/continuous singing the model transcribes sub-second slices in isolation (`"I got"`, `"Okay"`, `"Today"`), so the phrase engine — which trusts only `whisper` finals + `browser_final` — is **evidence-starved** on hard content. `gpt-realtime-whisper` has **no `turn_detection`** configured ([static/realtime-whisper.js:59-66](../../../static/realtime-whisper.js#L59)), so nothing aligns commits to speech boundaries.
 2. **Hand-rolled energy VAD is brittle and over-credits noise.** The energy gate uses a one-shot calibration `min(baseline+0.025, 0.06)` over the first 2 s of *playback* ([static/player.js:~1664](../../../static/player.js)) that can silently pin to the `0.01` floor (noisy room → `isSpeaking` always true) or the `0.06` cap (loud start → VAD deaf). Any energy — a finger tap, fan, cough — can satisfy the `hasInWindowFlow` anti-cheese gate, because RMS cannot tell *voice* from *noise*.
 
-The counterproductive corollary: `getChunkSamples` ([static/sync-helpers.js:85-92](../../../static/sync-helpers.js#L85)) uses **smaller** 0.625 s chunks on fast tempo "to commit sooner" — which *increases* fragmentation exactly where it hurts most.
+(Note: `getChunkSamples`'s fast-tempo small chunks ([static/sync-helpers.js:85-92](../../../static/sync-helpers.js)) drive only the **local** faster-whisper AudioWorklet via `_applyChunkTempo`, which is a **no-op on the realtime path** ([static/player.js:1059-1061](../../../static/player.js)). So it is NOT the realtime fragmentation cause and is **out of scope** here — the realtime cause is purely the 700 ms commit timer.)
 
 ## 2. Goals / Non-goals
 
@@ -38,41 +38,42 @@ The counterproductive corollary: `getChunkSamples` ([static/sync-helpers.js:85-9
 - **Safety cap:** if speech is continuous past a **tempo-aware max** (`fast ≈ 1.5 s`, `normal ≈ 2.0 s`, `slow ≈ 2.5 s` — starting values, tunable), force a commit at the cap so breathless rap still flushes and worst-case latency is bounded.
 - **No-op guard:** never commit an empty/near-empty buffer (no speech since last commit) — avoids spurious empty transcriptions.
 - **Mechanism unchanged:** still client-driven `input_audio_buffer.commit` over the data channel — the *proven* path (it's what runs today). Only the *trigger* changes. Server `server_vad` is **not** used (unverified for `gpt-realtime-whisper`; the manual path is known-good).
-- **Removed:** the `setInterval(…, 700)` timer; the fast-tempo small-chunk behavior in `getChunkSamples` (fast tempo now commits on phrasing + cap, not pre-fragmentation).
+- **Removed (V2 only):** the `setInterval(…, 700)` blind commit. (`getChunkSamples` is untouched — local-path only, see §1 note.)
 
-### 3.2 Neural VAD (Silero v5)
-- **Model:** Silero VAD v5 (`silero_vad.onnx`), run via **onnxruntime-web (WASM)** on the **main thread**, consuming the audio frames the existing AudioWorklet already posts ([static/audio-processor.js](../../../static/audio-processor.js)). This is Karaokee's first on-device model.
-- **Assets (no build step):** vendor `silero_vad.onnx` + the `onnxruntime-web` WASM/JS into `static/vendor/` (or similar), served by Flask; load via `<script>` + configured `onnxWASMBasePath`. Reference integration: `@ricky0123/vad-web` (use the core, not the React binding — Karaokee has no build step).
-- **Output:** per-frame speech probability → fed into the (pure) debounce/hysteresis layer (§3.4) → a latched `isSpeaking` + speech-start/speech-end edges.
+### 3.2 Neural VAD — Silero v5 via `@ricky0123/vad-web`
+- **Library:** `@ricky0123/vad-web` (runs Silero v5 over onnxruntime-web/WASM). It loads via plain **`<script>` tags — no build step** — exposing `vad.MicVAD.new({...})`. MicVAD owns the Silero ONNX plumbing, frame buffering, and the speech hysteresis state machine, and emits `onSpeechStart` / `onSpeechEnd` directly. We do **not** hand-roll Silero tensor plumbing or our own hysteresis.
+- **Stream reuse (no second mic):** pass `getStream: () => Promise.resolve(this._whisperStream)` so MicVAD reuses Karaokee's already-open capture stream (it makes its own internal 16 kHz AudioContext from it). Override `pauseStream`/`resumeStream` to no-ops so MicVAD never stops the shared tracks. This avoids the dual-`getUserMedia` unreliability the teardown flagged.
+- **Assets (self-hosted, no build step):** vendor `bundle.min.js` (vad-web), `ort.wasm.min.js` + `*.wasm` (onnxruntime-web), and the Silero model/worklet assets into `static/vendor/vad/`, served by Flask; configure `baseAssetPath` + `onnxWASMBasePath` to `/static/vendor/vad/`. **Pin** `@ricky0123/vad-web@0.0.29` + `onnxruntime-web@1.22.0` (the documented-compatible pair; 0.0.34 has a known regression).
+- **Output consumed:** `onSpeechStart` → `isSpeaking = true`; `onSpeechEnd` → `isSpeaking = false` + a commit trigger (§3.1). The latched `isSpeaking` is the single signal feeding the session (§3.3).
 - **Capture stream:** unchanged (`echoCancellation/noiseSuppression/autoGainControl: true`). Silero works on processed audio; holding the stream constant keeps the `gpt-realtime-whisper` audio characteristics fixed.
 
 ### 3.3 Anti-cheese gate
 - `hasInWindowFlow` and the amber "flow"/provisional path switch from **raw RMS threshold** to the neural VAD's **latched voiced-speech** decision.
 - **Effect:** strengthens anti-cheese — non-voice transients (tap/fan/cough) no longer satisfy the in-window-flow requirement, while genuine singing still does. The honesty boundary is otherwise unchanged: only content-matched anchors credit ≥0.75; VAD remains *flow/presence only*, never lyric proof.
-- **Removed:** the one-shot energy calibration (`_vadBaseline`, `min(baseline+0.025, 0.06)`, the "ready-latch" path).
+- **What changes (V2 only):** `updateHotWord` currently sets `isSpeaking` from `updateVad(this._vadState, vadRms)` (RMS hysteresis, [static/player.js:1147-1151](../../../static/player.js)). MicVAD's `isSpeaking` replaces it; the RMS-hysteresis `_vadState`/`updateVad` path becomes unused on the V2 path (`vad-helpers.js` left in place — see §3.4).
+- **V1 untouched:** the flag-off baseline (the one-shot `min(baseline+0.025, 0.06)` calibration, [static/player.js:1152-1168](../../../static/player.js)) is the A/B comparison and stays exactly as-is until the flag-flip.
 - **Acknowledged limit:** Silero fires on **humming** (voiced) — humming-the-melody cheese is the pitch axis's job, not this increment's.
 
 ### 3.4 Module boundaries (testability)
-- **`static/vad-helpers.js`** (already pure) — extend the debounce/hysteresis state machine to consume the neural VAD's frame **probability** (open/close thresholds + N-frame debounce already model this; generalize `updateVad` to take a probability in `[0,1]` rather than only RMS, or add a sibling). Stays `.cjs`-testable; **no** onnxruntime import here.
-- **New pure commit-trigger helper** — `shouldCommit(state, msSinceLastCommit, tempoClass) → boolean` (speech-end edge OR cap exceeded; with the empty-buffer guard expressed as state). Lives in `sync-helpers.js` or a new `commit-helpers.js`; golden `.cjs` tests.
-- **`static/player.js`** — impure glue only: run ort-web inference on posted frames → pure `vad-helpers` → pure commit-trigger → `dc.send(commitEvent)`; and feed the latched voiced-speech signal to the `hasInWindowFlow` path. Replaces `_startRealtimeWhisperCommitTimer`'s interval body and the energy-gate read.
+- **MicVAD owns the VAD state machine** (Silero plumbing + hysteresis) — no new pure VAD helper needed, and `vad-helpers.js` is **not** modified (it stays in place, still `.cjs`-tested; it becomes unused on the V2 path — optional cleanup once MicVAD is the confirmed default, out of scope here).
+- **New pure module `static/commit-helpers.js`** — the only new pure logic: the commit-cadence state machine. `createCommitState()`, `noteSpeechStart(s)`, `noteSpeechEnd(s, nowMs) → {commit}`, `checkCap(s, nowMs, tempoClass) → {commit}`, `noteCommitted(s, nowMs, stillSpeaking)`, and `capMsForTempo(tempoClass)`. No DOM/onnx imports; golden `.cjs` tests (`tests/test_commit_helpers.cjs`).
+- **`static/player.js`** — impure glue only: create/destroy the MicVAD instance (reusing `_whisperStream`); its `onSpeechStart`/`onSpeechEnd` callbacks update `this.isSpeaking` and drive `commit-helpers`; `updateHotWord`'s 100 ms tick runs the cap check and relays `isSpeaking` to the session. Replaces `_startRealtimeWhisperCommitTimer`'s blind interval and the V2 RMS read.
 
 ### 3.5 Data flow (after)
 ```
-mic → getUserMedia (EC/NS/AGC on, unchanged)
-    → AudioWorklet (audio-processor.js) posts frames + (legacy RMS, now unused for gating)
-    → [main thread] onnxruntime-web Silero VAD  → per-frame speech prob
-        → vad-helpers (pure): debounce/hysteresis → isSpeaking + speech-start/end edges
-            ├→ commit-trigger (pure): speech-end OR tempo cap → dc.send(input_audio_buffer.commit)
-            │      → gpt-realtime-whisper transcribes a COHERENT phrase → whisper final → phrase engine
-            └→ hasInWindowFlow / amber flow  (voiced-speech, not RMS)
+mic → getUserMedia (EC/NS/AGC on, unchanged; one shared _whisperStream)
+    ├→ WebRTC track → OpenAI realtime audio buffer (continuous, as today)
+    └→ MicVAD (vad-web, reuses the stream): Silero + hysteresis → onSpeechStart / onSpeechEnd
+          → this.isSpeaking (+ commit-helpers state machine)
+              ├→ onSpeechEnd / cap-exceeded → dc.send(input_audio_buffer.commit)
+              │      → gpt-realtime-whisper transcribes a COHERENT phrase → whisper final → phrase engine
+              └→ updateHotWord setEnergy relay → flow events → hasInWindowFlow / amber (voiced-speech, not RMS)
 ```
 
 ## 4. Testing & validation (honesty-gated)
 
 1. **Automated:** all `.cjs` + pytest suites green, plus new golden tests:
-   - commit-trigger: speech-end fires; cap fires on continuous speech; empty-buffer no-op; no double-commit.
-   - vad-helpers: probability-driven hysteresis/debounce (open/close, N-frame).
+   - `commit-helpers`: speech-end fires a commit; cap fires on continuous speech; no commit without speech since last commit (empty-buffer guard); no double-commit; tempo cap values. (MicVAD owns VAD hysteresis — covered by the library, not re-tested here.)
 2. **Replay corpus:** re-run the 5 real Expert telemetry runs through the harness — assert `whisper` finals arrive as **coherent multi-word phrases** (fragment rate down) and **`summary.honesty.suspectedCheeseInflation` stays clean** (no cheese regression).
 3. **Live sing-test (the flag-flip gate — only a human can):** cheese probes — silence-on-headphones, humming, "yeah yeah", mumbling, **finger-taps/noise** (the new gate should *improve* this) — must NOT build points or lift the multiplier; honest-but-sloppy scores fair; **latency visibly improves on a dense rap**. Set `benchmarkIntent` and scan the saved JSON.
 
