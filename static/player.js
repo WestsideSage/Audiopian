@@ -647,6 +647,12 @@ class GameMode {
         var self = this;
         this._commitState = KaraokeeCommitHelpers.createCommitState();
         try {
+            // ort's threaded wasm needs SharedArrayBuffer (cross-origin isolation); without
+            // COOP/COEP headers that's unavailable, so force single-threaded to avoid an init
+            // throw. Silero is tiny (RTF << 1), so one thread is plenty.
+            if (window.ort && window.ort.env && window.ort.env.wasm) {
+                window.ort.env.wasm.numThreads = 1;
+            }
             this._micVad = await window.vad.MicVAD.new({
                 // Reuse Karaokee's already-open stream; never let MicVAD stop its tracks.
                 getStream: function () { return Promise.resolve(self._whisperStream); },
@@ -1585,6 +1591,8 @@ class GameMode {
         meta.schemaVersion = 2;
         meta.gameVersion   = '2.0';
         meta.karaokeeV2    = !!window.KARAOKEE_V2;
+        meta.neuralVadActive = !!this._neuralVadActive;       // did Silero VAD init this run?
+        meta.vadInitError    = this._vadInitError || null;    // why not, if it didn't
         meta.endedAt       = new Date().toISOString();
         meta.endReason     = endReason || 'manual';
         meta.completed     = !!(audio && isFinite(audio.duration) && audio.currentTime >= audio.duration - 0.5);
