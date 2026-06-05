@@ -85,7 +85,7 @@ function getScoreDelay(tempoClass) {
 function getChunkSamples(tempoClass) {
     switch (tempoClass) {
         case 'slow':   return 32000; // 2.0s
-        case 'fast':   return 12000; // 0.75s
+        case 'fast':   return 10000; // 0.625s — smaller chunk on fast tempo so the realtime recognizer commits sooner (less of the "catching up" lag on dense verses); realtime keeps context server-side
         case 'normal': // fall through
         default:       return 24000; // 1.5s
     }

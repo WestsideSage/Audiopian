@@ -33,6 +33,7 @@ node tests/test_scoring_session.cjs
 WHISPER_PROVIDER=auto          # auto|local (faster-whisper) | openai | openai_realtime (gpt-realtime-whisper, browser-streamed)
 OPENAI_API_KEY=...             # required for the openai / openai_realtime providers
 OPENAI_TRANSCRIBE_MODEL=gpt-realtime-whisper  # model for the openai / openai_realtime paths
+OPENAI_TRANSCRIBE_DELAY=       # gpt-realtime-whisper latency/accuracy: minimal|low|medium|high|xhigh — set low/minimal to cut the recognizer "catching up" lag on fast/dense songs (small accuracy cost)
 WHISPER_MODEL=large-v3-turbo   # default local faster-whisper model
 WHISPER_DEVICE=cpu             # default (cublas64_12.dll unavailable on this machine); set to "cuda" or "auto" to opt in
 WHISPER_COMPUTE=int8           # default; use "float16" when WHISPER_DEVICE=cuda

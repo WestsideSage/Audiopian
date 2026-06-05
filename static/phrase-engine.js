@@ -34,6 +34,14 @@
     // speech-rec batch latency observed in telemetry (it can batch ~8 lines into
     // one late `final`). Tunable; see the design spec §7.
     var RECONCILE_LOOKBACK_SEC = 18;
+    // Fast-tempo recognition allowance: on high-WPS (>= FAST_WPS_THRESHOLD) lines the
+    // recognizer demonstrably drops words (a hard ASR limit, not a wrong performance), so
+    // demanding the full anchor ratio is unfair and frustrating. buildPhrasePlan lowers
+    // anchorsRequired on such lines toward ~half the anchors, FLOORED at FAST_RECOGNIZED_FLOOR
+    // genuinely-RECOGNIZED anchors. anchorHits only come from real recognition/reconcile
+    // (never bare VAD energy), so humming/cheese (0-1 recognized) still fails the floor.
+    var FAST_WPS_THRESHOLD = 4.0;
+    var FAST_RECOGNIZED_FLOOR = 2;
     // Interim reconciliation credits a line purely by word content (a repeated hook
     // anchor from the NEXT line can match a SKIPPED middle line whose true owner has
     // not yet ended — the forward-only floor only guards lines BEFORE the last
@@ -154,6 +162,14 @@
                 var chunk = chunks[c];
                 var anchors = selectAnchors(chunk.words, difficulty);
                 var anchorsRequired = anchors.length > 0 ? Math.max(1, Math.ceil(anchors.length * difficulty.requiredAnchorRatio)) : 0;
+                // Fast-tempo recognition allowance (cheese-floored): lower the bar on
+                // high-WPS lines the recognizer can't fully transcribe, but never below
+                // FAST_RECOGNIZED_FLOOR genuinely-recognized anchors. Only lowers, never raises.
+                var chunkWps = chunk.words.length / Math.max(0.001, chunk.endSec - chunk.startSec);
+                if (anchorsRequired > 0 && chunkWps >= FAST_WPS_THRESHOLD) {
+                    var fastBar = Math.max(FAST_RECOGNIZED_FLOOR, Math.ceil(anchors.length * 0.5));
+                    anchorsRequired = Math.min(anchorsRequired, fastBar);
+                }
                 phrases.push({
                     phraseId: 'p' + phrases.length,
                     lineIdx: lineIdx,
