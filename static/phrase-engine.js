@@ -101,8 +101,9 @@
     function selectAnchors(words, difficultyProfile) {
         var anchors = [];
         for (var i = 0; i < words.length; i++) {
-            var word = words[i];
-            var wordClass = classifyWord ? classifyWord(word, false) : 'core';
+            var word = words[i] ? words[i].word : '';
+            var inParen = !!(words[i] && words[i].inParen);
+            var wordClass = classifyWord ? classifyWord(word, inParen) : 'core';
             if (!word || word.length < 3) continue;
             if (wordClass === 'function' || wordClass === 'adlib') continue;
             if (REPEATED_FILLER[word] || isAdlibWord(word)) continue;
@@ -124,7 +125,7 @@
         // line is permanently unscoreable in the phrase engine.
         if (anchors.length === 0 && words.length > 0) {
             for (var fi = 0; fi < words.length; fi++) {
-                var fw = words[fi];
+                var fw = words[fi] ? words[fi].word : '';
                 if (!fw) continue;
                 anchors.push({
                     anchorIdx: anchors.length,
@@ -151,17 +152,20 @@
         return start + 8;
     }
 
-    function chunkWords(words, startSec, endSec) {
-        var chunks = [];
-        if (words.length <= 14) return [{ words: words, startSec: startSec, endSec: endSec }];
-        var chunkSize = words.length <= 20 ? Math.ceil(words.length / 2) : 8;
+    function chunkWords(wordObjs, startSec, endSec) {
+        function mk(slice, s, e) {
+            return { words: slice.map(function (o) { return o.word; }), wordObjs: slice, startSec: s, endSec: e };
+        }
+        if (wordObjs.length <= 14) return [mk(wordObjs, startSec, endSec)];
+        var chunkSize = wordObjs.length <= 20 ? Math.ceil(wordObjs.length / 2) : 8;
         chunkSize = Math.max(6, Math.min(10, chunkSize));
         var duration = Math.max(0, endSec - startSec);
-        for (var i = 0; i < words.length; i += chunkSize) {
-            var part = words.slice(i, i + chunkSize);
-            var partStart = startSec + duration * (i / words.length);
-            var partEnd = startSec + duration * (Math.min(i + chunkSize, words.length) / words.length);
-            chunks.push({ words: part, startSec: partStart, endSec: partEnd });
+        var chunks = [];
+        for (var i = 0; i < wordObjs.length; i += chunkSize) {
+            var part = wordObjs.slice(i, i + chunkSize);
+            var partStart = startSec + duration * (i / wordObjs.length);
+            var partEnd = startSec + duration * (Math.min(i + chunkSize, wordObjs.length) / wordObjs.length);
+            chunks.push(mk(part, partStart, partEnd));
         }
         return chunks;
     }
@@ -175,13 +179,16 @@
             var line = lyrics[lineIdx] || {};
             var startSec = Number(line.time) || 0;
             var endSec = phraseEndForLine(lyrics, lineIdx, options.audioDuration);
-            var words = normalizedWords(line.text || '');
+            var wordObjs = splitLyricWordsWithParens(line.text || '');
+            var words = wordObjs.map(function (o) { return o.word; });
             var duration = Math.max(0.001, endSec - startSec);
             var shouldSplit = words.length > 14 || (words.length / duration) > 3.5;
-            var chunks = shouldSplit ? chunkWords(words, startSec, endSec) : [{ words: words, startSec: startSec, endSec: endSec }];
+            var chunks = shouldSplit
+                ? chunkWords(wordObjs, startSec, endSec)
+                : [{ words: words, wordObjs: wordObjs, startSec: startSec, endSec: endSec }];
             for (var c = 0; c < chunks.length; c++) {
                 var chunk = chunks[c];
-                var anchors = selectAnchors(chunk.words, difficulty);
+                var anchors = selectAnchors(chunk.wordObjs, difficulty);
                 var anchorsRequired = anchors.length > 0 ? Math.max(1, Math.ceil(anchors.length * difficulty.requiredAnchorRatio)) : 0;
                 // Fast-tempo recognition allowance (cheese-floored): lower the bar on
                 // high-WPS lines the recognizer can't fully transcribe, but never below

@@ -33,4 +33,15 @@ check('empty / whitespace input yields empty array', () => {
   assert.deepStrictEqual(PE.splitLyricWordsWithParens(''), []);
 });
 
+// --- Task 2: Fix A — parenthetical content is not an anchor ---
+check('parenthetical content word is excluded from anchors', () => {
+  const plan = PE.buildPhrasePlan(
+    [{ time: 0, text: 'shadows dancing (forever) tonight' }],
+    { difficulty: 'expert' }
+  );
+  const words = plan.phrases[0].anchors.map(a => a.word).sort();
+  assert.ok(!words.includes('forever'), '"forever" was in parens — must not be an anchor');
+  assert.deepStrictEqual(words, ['dancing', 'shadows', 'tonight']);
+});
+
 console.log('anchor-selection: ' + passed + ' checks passed');
