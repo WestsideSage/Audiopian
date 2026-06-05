@@ -953,6 +953,11 @@
             if (s.flags.KARAOKEE_V2) {
                 if (pst.lyricStatus === 'confirmed') {
                     ev(events, 'phraseCleared', { phraseId: ph.phraseId });
+                } else if (Object.keys(pst.anchorHits).length > 0) {
+                    // Partial: some anchors landed (the lenient streak survives a partial),
+                    // so paint amber, not the full red of a true miss — the visual then
+                    // matches the streak instead of reading as a total failure.
+                    ev(events, 'phrasePartial', { phraseId: ph.phraseId });
                 } else {
                     ev(events, 'phraseMissed', { phraseId: ph.phraseId });
                 }
