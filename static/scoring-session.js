@@ -119,6 +119,18 @@
         s.isSpeaking = false;
     }
 
+    // Seek primitive: discard the CURRENT line's accumulated match state and realign the
+    // transcript fence to NOW, WITHOUT scoring the line or snapshotting a prevLine. Used
+    // when the playhead jumps (seek) so pre-seek transcript/interim cannot credit the
+    // post-seek position. Keeps activeLineIdx/lineWords (a same-line backward seek stays
+    // on the line; the singer re-sings from the seek point). lineHadAsrEvent is cleared,
+    // so if a boundary-crossing seek then triggers setActiveLine, the seeked-away line
+    // hits scoreLine's zero-ASR fence and is not scored.
+    function resetActiveLine(s, now) {
+        resetLineState(s, isFinite(now) ? now : 0, true);  // clear match sets + realign fence + drop prevLine
+        s.latestInterim = '';                               // drop stale pre-seek interim
+    }
+
     // Full setActiveLine transition (player.js:1099-1236 with three transforms).
     // Order preserved exactly: (1) finalize existing prevLine overlay, (2) outgoing
     // final pass BEFORE resetLineState (deferral-closure #1: credits a pre-boundary
@@ -952,5 +964,5 @@
              ingestFinal: ingestFinal, ingestInterim: ingestInterim, setEnergy: setEnergy,
              tick: tick, endRun: endRun, getScores: getScores, getHonestPct: getHonestPct,
              scoreLine: scoreLine, lateScoreLine: lateScoreLine,
-             commitNewlySettled: commitNewlySettled };
+             commitNewlySettled: commitNewlySettled, resetActiveLine: resetActiveLine };
 });

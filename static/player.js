@@ -397,10 +397,12 @@ class GameMode {
         // seek would double-count). When the seek crosses a line boundary, the next
         // updateLyrics poll calls setActiveLine for the new position, which resets the
         // session's line state (matchedSet, fence, prevLine) and re-fences the transcript.
-        // A same-line backward seek therefore keeps the already-matched spans until the
-        // line advances — acceptable for an edge interaction; a dedicated session reset
-        // API (e.g. resetActiveLine) is the proper fix and is deferred. We only repaint
-        // here for immediate visual feedback.
+        // Discard the current line's accumulated match state and re-fence the transcript
+        // to NOW so pre-seek words cannot credit the post-seek position: a backward in-line
+        // seek drops stale matches, and a boundary-crossing seek won't score the seeked-away
+        // line (resetActiveLine clears lineHadAsrEvent -> the next setActiveLine hits
+        // scoreLine's zero-ASR fence). Then repaint for immediate visual feedback.
+        if (this._session) KaraokeeScoringSession.resetActiveLine(this._session, this._now());
         this._updateWordSpans();
     }
 
