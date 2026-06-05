@@ -159,6 +159,10 @@ class GameMode {
         this._vadBaselineSamples = [];
         this._vadAnalyser = null;        // AnalyserNode for real-time VAD
         this._vadAnalyserBuf = null;     // Float32Array reused each tick
+        this._micVad = null;             // @ricky0123/vad-web MicVAD instance (V2 neural VAD)
+        this._neuralVadActive = false;   // true once MicVAD inits OK (else fall back to RMS)
+        this._commitState = null;        // KaraokeeCommitHelpers state machine
+        this._vadInitError = null;       // last neural-VAD init error (telemetry/HUD)
         this.currentParams = getWindowParams('normal'); // adaptive window params for active line
 
         this.lrcOffset = 0;   // seconds to add to all LRC timestamps (positive = delay lyrics)
@@ -356,6 +360,10 @@ class GameMode {
         this._vadBaselineSamples = [];
         this._vadAnalyser = null;
         this._vadAnalyserBuf = null;
+        this._micVad = null;
+        this._neuralVadActive = false;
+        this._commitState = null;
+        this._vadInitError = null;
         this._energyThreshold = 0.01;
         this._whisperInFlight = 0;
         this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null, provider: null, model: null };
@@ -603,6 +611,10 @@ class GameMode {
             var dc = self._whisperRealtimeDc;
             if (!dc || dc.readyState !== 'open') return;
             if (!window.KaraokeeRealtimeWhisper) return;
+            // V2 with neural VAD active: commits are VAD-driven (onSpeechEnd) + the tempo
+            // cap (updateHotWord). The blind timer stays inert. If neural VAD failed to
+            // init (_neuralVadActive false), this 700ms fallback keeps the path alive.
+            if (window.KARAOKEE_V2 && self._neuralVadActive) return;
             try {
                 dc.send(JSON.stringify(KaraokeeRealtimeWhisper.buildCommitEvent()));
                 self._whisperRealtimeCommitsSent++;
@@ -618,6 +630,63 @@ class GameMode {
         if (this._whisperRealtimeCommitTimer) {
             clearInterval(this._whisperRealtimeCommitTimer);
             this._whisperRealtimeCommitTimer = null;
+        }
+    }
+
+    // V2 neural VAD: Silero via @ricky0123/vad-web, reusing the existing mic stream.
+    // MicVAD owns Silero + hysteresis and emits speech-start/end; we drive isSpeaking
+    // and the commit cadence (commit-helpers) from those edges. Falls back silently
+    // to the RMS path if the library/model fails to load.
+    async _startNeuralVad() {
+        if (!window.KARAOKEE_V2) return;
+        if (!window.vad || !window.vad.MicVAD || !window.KaraokeeCommitHelpers) {
+            this._vadInitError = 'vad-web/commit-helpers not loaded';
+            return;
+        }
+        if (!this._whisperStream) { this._vadInitError = 'no mic stream'; return; }
+        var self = this;
+        this._commitState = KaraokeeCommitHelpers.createCommitState();
+        try {
+            this._micVad = await window.vad.MicVAD.new({
+                // Reuse Karaokee's already-open stream; never let MicVAD stop its tracks.
+                getStream: function () { return Promise.resolve(self._whisperStream); },
+                pauseStream: function () { return Promise.resolve(); },
+                resumeStream: function () { return Promise.resolve(self._whisperStream); },
+                baseAssetPath: '/static/vendor/vad/',
+                onnxWASMBasePath: '/static/vendor/vad/',
+                onSpeechStart: function () {
+                    self.isSpeaking = true;
+                    KaraokeeCommitHelpers.noteSpeechStart(self._commitState, performance.now());
+                },
+                onSpeechEnd: function () {
+                    self.isSpeaking = false;
+                    var r = KaraokeeCommitHelpers.noteSpeechEnd(self._commitState, performance.now());
+                    if (r.commit) self._commitRealtimeBuffer();
+                }
+            });
+            this._micVad.start();
+            this._neuralVadActive = true;
+        } catch (err) {
+            this._vadInitError = (err && err.message) ? err.message : 'vad init failed';
+            this._neuralVadActive = false;
+            this._micVad = null;
+        }
+    }
+
+    // Send one input_audio_buffer.commit on the realtime data channel and advance the
+    // commit-cadence state. Shared by the speech-end edge and the tempo cap.
+    _commitRealtimeBuffer() {
+        var dc = this._whisperRealtimeDc;
+        if (!dc || dc.readyState !== 'open') return;
+        if (!window.KaraokeeRealtimeWhisper) return;
+        try {
+            dc.send(JSON.stringify(KaraokeeRealtimeWhisper.buildCommitEvent()));
+            this._whisperRealtimeCommitsSent++;
+            if (this._commitState && window.KaraokeeCommitHelpers) {
+                KaraokeeCommitHelpers.noteCommitted(this._commitState, performance.now());
+            }
+        } catch (err) {
+            this._whisperRealtimeLastError = (err && err.message) ? err.message : 'commit send failed';
         }
     }
 
@@ -737,6 +806,7 @@ class GameMode {
             src.connect(this._vadAnalyser);
             if (this._isRealtimeWhisperProvider()) {
                 await this._openRealtimeWhisperConnection();
+                await this._startNeuralVad();
             } else {
                 await this._whisperCtx.audioWorklet.addModule('/static/audio-processor.js');
                 this._whisperNode = new AudioWorkletNode(this._whisperCtx, 'chunk-processor');
@@ -806,6 +876,12 @@ class GameMode {
             this._whisperCtx.close();
             this._whisperCtx = null;
         }
+        if (this._micVad) {
+            try { this._micVad.destroy(); } catch (e) {}
+            this._micVad = null;
+        }
+        this._neuralVadActive = false;
+        this._commitState = null;
         this._vadAnalyser    = null;
         this._vadAnalyserBuf = null;
         if (this._whisperStream) {
@@ -1142,6 +1218,17 @@ class GameMode {
     // VAD-optimistic provisional scoring, and hot-word match are now done by the session
     // inside tick() (updateHotWordAndMatch); this method only owns the mic energy read.
     updateHotWord() {
+        // V2 neural VAD: isSpeaking is maintained by MicVAD callbacks (not RMS). Run the
+        // tempo-aware commit cap here (100ms granularity is fine for a 1.5-2.5s cap),
+        // then relay isSpeaking to the session. Falls through to the RMS path if neural
+        // VAD is not active (init failed) or V1.
+        if (window.KARAOKEE_V2 && this._neuralVadActive && this._commitState && window.KaraokeeCommitHelpers) {
+            var _tempoClass = (this.wordTimings && this.wordTimings.vadTempoClass) || 'normal';
+            var _capRes = KaraokeeCommitHelpers.checkCap(this._commitState, performance.now(), _tempoClass);
+            if (_capRes.commit) this._commitRealtimeBuffer();
+            if (this._session) KaraokeeScoringSession.setEnergy(this._session, this.isSpeaking);
+            return;
+        }
         // Refresh isSpeaking from AnalyserNode — real-time, not tied to Whisper chunk rate
         var vadRms = this._readVadRms();
         if (window.KARAOKEE_V2 && this._vadState && typeof updateVad === 'function') {
