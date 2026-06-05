@@ -416,4 +416,29 @@ assert.ok(Object.keys(uniqSession.states['p0'].anchorHits).length > 0,
     'CLASS-2 FIX: a unique anchor below the advanced floor is still credited (was silently skipped)');
 console.log('Class-2 unique-anchor reconcile: passed.');
 
+// === Fast-tempo recognition allowance (cheese-floored bar) ===
+// High-WPS lines the recognizer can't fully transcribe get a LOWER anchorsRequired,
+// floored at 2 genuinely-recognized anchors (cheese with 0-1 recognized still fails);
+// normal-tempo lines keep the full bar. The buff is fast-tempo only.
+var fastP = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'alpha bravo charlie delta echo foxtrot golf hotel' }, // ~5 wps -> fast
+    { time: 1.6, text: 'tail line words here now' }
+], { difficulty: 'expert', audioDuration: 12 });
+var fastChunks = fastP.phrases.filter(function (p) {
+    return p.lineIdx === 0 &&
+        (p.words.length / Math.max(0.001, p.endSec - p.startSec)) >= 4.0 && p.anchors.length >= 3;
+});
+assert.ok(fastChunks.length > 0, 'precondition: a fast chunk with >=3 anchors exists');
+fastChunks.forEach(function (p) {
+    var fastBar = Math.max(2, Math.ceil(p.anchors.length * 0.5));
+    assert.ok(p.anchorsRequired <= fastBar, 'fast chunk: bar lowered to <= max(2, ceil(anchors*0.5))');
+    assert.ok(p.anchorsRequired >= 2, 'cheese floor: fast bar is never below 2 recognized anchors');
+});
+var normP = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'slow measured steady careful chosen words' }          // very low wps -> normal
+], { difficulty: 'expert', audioDuration: 30 });
+assert.ok(normP.phrases[0].anchorsRequired > 2,
+    'a normal-tempo expert line keeps its full (higher) bar (buff is fast-only)');
+console.log('Fast-tempo cheese-floored bar: passed.');
+
 console.log('Phrase engine tests passed.');
