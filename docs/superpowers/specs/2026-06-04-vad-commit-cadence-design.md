@@ -74,14 +74,15 @@ mic → getUserMedia (EC/NS/AGC on, unchanged; one shared _whisperStream)
 
 1. **Automated:** all `.cjs` + pytest suites green, plus new golden tests:
    - `commit-helpers`: speech-end fires a commit; cap fires on continuous speech; no commit without speech since last commit (empty-buffer guard); no double-commit; tempo cap values. (MicVAD owns VAD hysteresis — covered by the library, not re-tested here.)
-2. **Replay corpus:** re-run the 5 real Expert telemetry runs through the harness — assert `whisper` finals arrive as **coherent multi-word phrases** (fragment rate down) and **`summary.honesty.suspectedCheeseInflation` stays clean** (no cheese regression).
-3. **Live sing-test (the flag-flip gate — only a human can):** cheese probes — silence-on-headphones, humming, "yeah yeah", mumbling, **finger-taps/noise** (the new gate should *improve* this) — must NOT build points or lift the multiplier; honest-but-sloppy scores fair; **latency visibly improves on a dense rap**. Set `benchmarkIntent` and scan the saved JSON.
+2. **Replay corpus:** re-run the 5 real Expert telemetry runs — assert (a) `whisper` finals are **coherent multi-word phrases** (fragment rate down), (b) **per-song interim-reconciled honest-% does NOT regress** (Silero endpoint lag vs. the strict `hasInWindowFlow` window — mitigation: raise `RECONCILE_FLOW_GRACE_MS` above 0; **potentially blocking**, see §5), and (c) **`summary.honesty.suspectedCheeseInflation` stays clean**.
+3. **Live sing-test (the flag-flip gate — only a human can):** cheese probes — silence-on-headphones, humming, "yeah yeah", mumbling, **finger-taps/noise** (the new gate should *improve* this) — must NOT build points or lift the multiplier; honest-but-sloppy scores fair. **Judge the win by recognition *coherence* (fragment-rate down / whisper clear-rate up), not raw latency** — the cap commits less often than the old 700 ms, so honest-% is expected near-flat (flat + cleaner anti-cheese = success). Set `benchmarkIntent` and scan the saved JSON.
 
 **Do not flip `karaokee_v2` default-on until the live sing-test passes** (standing, non-negotiable gate).
 
 ## 5. Risks / unknowns
 - **ort-web WASM hosting** — known `@ricky0123/vad-web` 404/path friction (issues #230/#234); an integration cost, not a blocker.
-- **Silero endpoint lag** (~few-hundred-ms reported) could blunt the latency win → TEN VAD is the fallback A/B (smaller, claims faster transitions).
+- **Silero endpoint lag vs. the anti-cheese window (the load-bearing risk).** Silero confirms speech-start/end a few frames late (~100-300 ms redemption). The interim-reconciliation path (~55% of the honest score) is gated by `hasInWindowFlow` at `RECONCILE_FLOW_GRACE_MS = 0` (strict, from `06dfde5`), so a late `isSpeaking` flow event can fall outside the window and under-credit honest singing. **Mitigation:** raise `RECONCILE_FLOW_GRACE_MS` above 0; validate on the replay corpus (§4.2) — **potentially blocking before flag-flip.**
+- **Silero endpoint lag may also blunt commit timing** → TEN VAD is the fallback A/B (smaller, claims faster transitions).
 - **First on-device model** — adds onnxruntime-web to the page weight; runs on the main thread (frame-rate inference must stay cheap; Silero RTF ≪ 1, fine).
 - **Tempo-cap tuning** — starting values are guesses; tune against the replay corpus + sing-test.
 

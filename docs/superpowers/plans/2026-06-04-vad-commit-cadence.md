@@ -54,16 +54,16 @@ check('capMsForTempo maps tempo classes', () => {
 check('speech-end fires a commit after speech', () => {
   const s = H.createCommitState();
   H.noteSpeechStart(s, 1000);
-  assert.strictEqual(H.noteSpeechEnd(s).commit, true);
+  assert.strictEqual(H.noteSpeechEnd(s, 1500).commit, true);
 });
 
 // empty-buffer guard: no speech since last commit -> no commit
 check('speech-end without speech-since-commit does not commit', () => {
   const s = H.createCommitState();
   H.noteSpeechStart(s, 1000);
-  H.noteSpeechEnd(s);            // commits (speech happened)
-  H.noteCommitted(s, 1100);     // speaking=false -> speechSinceCommit cleared
-  assert.strictEqual(H.noteSpeechEnd(s).commit, false); // no new speech
+  H.noteSpeechEnd(s, 1500);     // commits (speech happened)
+  H.noteCommitted(s, 1500);     // speaking=false -> speechSinceCommit cleared
+  assert.strictEqual(H.noteSpeechEnd(s, 2000).commit, false); // no new speech
 });
 
 // cap fires on continuous speech past the cap, not before
@@ -78,7 +78,7 @@ check('cap fires only after the tempo cap elapses', () => {
 check('cap does not fire when silent', () => {
   const s = H.createCommitState();
   H.noteSpeechStart(s, 1000);
-  H.noteSpeechEnd(s);
+  H.noteSpeechEnd(s, 1500);
   assert.strictEqual(H.checkCap(s, 9000, 'fast').commit, false);
 });
 
@@ -86,20 +86,31 @@ check('cap does not fire when silent', () => {
 check('no double-commit after speech-end', () => {
   const s = H.createCommitState();
   H.noteSpeechStart(s, 1000);
-  H.noteSpeechEnd(s);
-  H.noteCommitted(s, 1100);
+  H.noteSpeechEnd(s, 1500);
+  H.noteCommitted(s, 1500);
   assert.strictEqual(H.checkCap(s, 5000, 'fast').commit, false);
 });
 
-// mid-speech cap commit is periodic; end commit clears the flag
-check('mid-speech cap commit keeps firing periodically', () => {
+// min inter-commit guard: a cap commit immediately followed by speech-end must NOT
+// emit a tiny fragment — the guard defers it (the advisor's #3 fix).
+check('min inter-commit guard defers a too-soon speech-end', () => {
+  const s = H.createCommitState(); // minInterCommitMs = 350
+  H.noteSpeechStart(s, 1000);
+  assert.strictEqual(H.checkCap(s, 2600, 'fast').commit, true); // cap commit
+  H.noteCommitted(s, 2600);
+  assert.strictEqual(H.noteSpeechEnd(s, 2700).commit, false);   // 100ms later -> deferred
+});
+
+// mid-speech cap commit is periodic; a later end (past the guard) still commits
+check('mid-speech cap commit is periodic; later end still commits', () => {
   const s = H.createCommitState();
   H.noteSpeechStart(s, 1000);
   assert.strictEqual(H.checkCap(s, 2600, 'fast').commit, true); // first cap
   H.noteCommitted(s, 2600);                                     // still speaking
   assert.strictEqual(H.checkCap(s, 2700, 'fast').commit, false);// too soon
   assert.strictEqual(H.checkCap(s, 4200, 'fast').commit, true); // next window
-  assert.strictEqual(H.noteSpeechEnd(s).commit, true);          // end still commits
+  H.noteCommitted(s, 4200);
+  assert.strictEqual(H.noteSpeechEnd(s, 4600).commit, true);    // 400ms later -> commits
 });
 
 console.log('commit-helpers: ' + passed + ' checks passed');
@@ -135,11 +146,18 @@ Create `static/commit-helpers.js`:
         }
     }
 
-    function createCommitState() {
+    var DEFAULT_MIN_INTER_COMMIT_MS = 350;
+
+    function createCommitState(opts) {
+        opts = opts || {};
         return {
             speaking: false,          // mirror of MicVAD speech state
             speechSinceCommit: false, // was there speech since the last commit?
-            capAnchorMs: 0            // when the current cap window started
+            capAnchorMs: 0,           // when the current cap window started
+            lastCommitMs: 0,          // when we last actually committed (min-gap guard)
+            // smallest gap between commits — stops a tiny fragment when a cap commit is
+            // immediately followed by speech-end (the exact thing we are eliminating).
+            minInterCommitMs: opts.minInterCommitMs != null ? opts.minInterCommitMs : DEFAULT_MIN_INTER_COMMIT_MS
         };
     }
 
@@ -149,18 +167,22 @@ Create `static/commit-helpers.js`:
         state.capAnchorMs = nowMs;
     }
 
-    function noteSpeechEnd(state) {
+    function noteSpeechEnd(state, nowMs) {
         state.speaking = false;
-        return { commit: state.speechSinceCommit };
+        var commit = state.speechSinceCommit &&
+            (nowMs - state.lastCommitMs >= state.minInterCommitMs);
+        return { commit: commit };
     }
 
     function checkCap(state, nowMs, tempoClass) {
         if (!state.speaking || !state.speechSinceCommit) return { commit: false };
+        if (nowMs - state.lastCommitMs < state.minInterCommitMs) return { commit: false };
         if (nowMs - state.capAnchorMs >= capMsForTempo(tempoClass)) return { commit: true };
         return { commit: false };
     }
 
     function noteCommitted(state, nowMs) {
+        state.lastCommitMs = nowMs;
         state.capAnchorMs = nowMs;
         // keep the flag set if still mid-speech (so the cap keeps firing periodically);
         // clear it if speech already ended (no empty commit until the next speech-start).
@@ -186,7 +208,7 @@ Create `static/commit-helpers.js`:
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `node tests/test_commit_helpers.cjs`
-Expected: PASS — `commit-helpers: 7 checks passed`.
+Expected: PASS — `commit-helpers: 8 checks passed`.
 
 - [ ] **Step 5: Run the full JS suite to confirm no regressions**
 
@@ -344,7 +366,7 @@ Immediately **after** the `_stopRealtimeWhisperCommitTimer()` method (ends ~[sta
                 },
                 onSpeechEnd: function () {
                     self.isSpeaking = false;
-                    var r = KaraokeeCommitHelpers.noteSpeechEnd(self._commitState);
+                    var r = KaraokeeCommitHelpers.noteSpeechEnd(self._commitState, performance.now());
                     if (r.commit) self._commitRealtimeBuffer();
                 }
             });
@@ -511,6 +533,8 @@ gameMode._whisperRealtimeCommitsSent // increments on speech-end / cap, NOT ~eve
 ```
 Confirm **no 404s** for `/static/vendor/vad/*` (the known vad-web asset-path friction). Confirm whisper finals in the HUD/telemetry arrive as multi-word phrases, not 1-2-word fragments. If `_neuralVadActive` is false, read `_vadInitError` and fix asset paths/filenames (Task 2) before proceeding.
 
+Also verify the **shared-stream lifecycle**: end the run and start another (Play Again). The second run must still get mic audio — i.e. `MicVAD.destroy()` must not have stopped the shared `_whisperStream` tracks (our `pauseStream`/`resumeStream` no-ops + teardown order should prevent it; `_stopWhisperTrack` owns track-stop). If the second run is silent / `track.readyState === 'ended'`, MicVAD is stopping the borrowed stream — switch `destroy()` to its non-stream-stopping teardown (or recreate the stream in `_startWhisperTrack`).
+
 - [ ] **Step 4: Confirm V1 still works (A/B intact)**
 
 Reload, do **not** press `V` (flag off). Start a run; confirm the legacy path still scores (V1 uses the one-shot energy gate + 700 ms timer, untouched). The blind timer should commit (since `_neuralVadActive` is false / flag off).
@@ -536,19 +560,22 @@ git commit -m "feat(vad): VAD-driven commit cap + isSpeaking relay in updateHotW
 
 **Files:** none (validation only)
 
-- [ ] **Step 1: Replay-corpus check (recognition + no cheese regression)**
+- [ ] **Step 1: Replay-corpus check (recognition coherence + NO honest regression + no cheese regression)**
 
-Re-run / replay the saved Expert telemetry runs (the 5 used for interim-snapshot validation) with the flag on. Confirm:
-- `whisper`-sourced finals are coherent multi-word phrases (fragment rate down vs. the recorded baseline).
-- `summary.honesty.suspectedCheeseInflation` stays clean on the cheese-labelled runs (no regression).
-Record findings in this plan's PR / a short note under `output_telemetry/`.
+Re-run / replay the saved Expert telemetry runs (the 5 used for interim-snapshot validation) with the flag on. Confirm all three:
+1. **Coherence:** `whisper`-sourced finals are coherent multi-word phrases (fragment rate down vs. the recorded baseline).
+2. **No honest regression (the load-bearing check):** the **per-song interim-reconciled honest-%** does **not** drop. ⚠️ Risk: interim reconciliation is gated by `hasInWindowFlow` with `RECONCILE_FLOW_GRACE_MS = 0` (strict window, from the skip-leak fix `06dfde5`), and it carries ~55% of the honest score. Silero confirms speech-start/end a few frames **late** (redemption frames, ~100-300 ms), so an `isSpeaking` flow event can now land just **outside** the strict window and fail the gate → under-credit honest singing. **If any song's interim-reconciled honest-% regresses, the mitigation is to raise `RECONCILE_FLOW_GRACE_MS` above 0** (in `phrase-engine.js`) to absorb Silero's endpoint lag, then re-replay. **This is potentially blocking** — do not proceed to the live sing-test as "passing" until honest-% is flat-or-up on the corpus.
+3. **No cheese regression:** `summary.honesty.suspectedCheeseInflation` stays clean on the cheese-labelled runs.
+
+Record all three findings (and any `RECONCILE_FLOW_GRACE_MS` retune) in the PR / a short note under `output_telemetry/`.
 
 - [ ] **Step 2: Live sing-test (the flag-flip gate — human only)**
 
 With `karaokee_v2` on, headphones, run the cheese probes and honest probes from the spec §4:
 - Cheese (must NOT build points / lift multiplier): silence, humming, "yeah yeah yeah", mumbling, **finger-taps / desk noise** (the new neural gate should reject these where RMS did not).
 - Honest (must score fair): clean rap, sloppy-but-real, quiet singing.
-- Latency: on a dense rap, words should green noticeably sooner than the 700 ms-fragmented baseline.
+- **The win is recognition *coherence*, not raw latency.** The cap (1.5–2.5 s) commits *less* often than the old blind 700 ms, so time-to-first-transcription on continuous rap may go *up*. Judge by **fragment-rate down / `whisper`-sourced clear-rate up** (coherent phrases the engine can match), NOT "words green sooner." **Do not shorten the cap toward 700 ms to chase latency** — that reintroduces fragmentation.
+- **Expect the honest-% delta to be near-flat** (the interim path already carries the honest score; this increment's honest wins are the cleaner anti-cheese gate + fewer dropped phrases). Flat honest-% + no cheese + lower fragment-rate = **success**, not "it didn't work."
 Set the end-screen `benchmarkIntent`, download the telemetry (`D`), and scan for any cheese run that inflated.
 
 - [ ] **Step 3: Decision gate**
