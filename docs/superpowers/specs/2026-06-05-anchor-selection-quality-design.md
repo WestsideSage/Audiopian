@@ -28,6 +28,7 @@ This is the "ASR coverage is the ceiling, not the threshold" finding (see [[core
 - 1B: a line big enough to spare one anchor should not *require literally all* of them, so one ASR-impossible word can't sink a correctly-sung line.
 - Preserve the cheese gate (silence/humming/"Ah" → 0 anchor hits → never clears).
 - Keep pure, `.cjs`-testable functions.
+- **Observability (additive):** expose per-anchor detail in phrase traces so anchor analysis — and validating these very fixes — is a direct read, not reverse-engineered from line-text-minus-hits. Backward-compatible; no schema bump.
 
 **Non-goals (explicitly out of scope)**
 - **C-precise (per-word flow-gated exemption)** — rejected. (a) Flow = "voiced sound," not "right word," so it's bypassable by humming the unknown word's slot, and the *gate* already forces genuine singing of the rest → ~zero marginal cheese-resistance. (b) The per-word window comes from `estimateSyllables` interpolation, which mistimes rap/polysyllabic words (windows 1.8–3 s) — unreliable on exactly the dense tracks where greaze/velour live. Machinery + fragile signal for no gain.
@@ -61,17 +62,28 @@ if (N >= 4 && anchorsRequired >= N) anchorsRequired = N - 1   // NEW: force-all 
 ### Cheese-safety argument
 Both changes only ever *remove* an anchor (A) or *lower a near-N requirement by one* (B). Neither credits anything. Silence / humming / "Ah" on cadence produce **zero anchor hits**, and you cannot reach a positive requirement from zero by dropping one — so the cheese probes that pass today still fail. The change strictly converts "sang all-but-one, where the one is ASR-impossible" from partial → clear.
 
+### 3C. Observability: per-anchor trace detail (additive)
+`getPhraseTrace` already holds `phrase.anchors` (each `word`/`wordClass`/`weight`) and `state.anchorHits`. Add a per-phrase array to the trace:
+
+    anchors: [{ word, wordClass, weight, hit, bestScore }]
+
+- `hit` = `anchorIdx` present in `anchorHits`.
+- `bestScore` = best `wordsMatchScore` any candidate token reached against this anchor (0 if never meaningfully attempted). This is the **only** field needing a hot-path touch — a per-anchor running max in `addEvidence`/`candidateFor`; **drop it if not worth it** (the other four fully answer "which anchor blocked the line, and was it wrongly an adlib").
+- **Purely additive — no schema bump.** Existing v2 corpus files still parse; new files just carry the extra array (debug-gated, like the other raw traces).
+- **Why:** turns the by-hand analysis from this session (line-text-minus-hits to find "greaze") into a direct read, and makes validating Fix A/B at-a-glance — the array shows whether parenthetical content was correctly excluded (no `wordClass:'adlib'` anchors left in) and exactly which anchors cleared vs. blocked each line.
+
 ## 4. Module boundaries (testability)
 All logic stays in pure, DOM-free, `.cjs`-tested functions in `phrase-engine.js` (+ the `splitLyricWords` helper):
 - `splitLyricWords(text)` — golden tests: parens tracked across multi-word spans; nested/again; normalization.
 - `selectAnchors(wordObjs, profile)` — golden tests: parenthetical content excluded; non-paren content retained.
 - the `anchorsRequired` formula — golden tests: N=4 Expert → 3; N=2/3 unchanged; N=5 unchanged; Easy/Medium never capped; composition with the fast floor.
 - cheese-safety unit test: 0 hits → 0 cleared regardless of the cap.
+- `getPhraseTrace` per-anchor `anchors[]` — golden test: lists each anchor with correct `word`/`wordClass`/`hit`; reflects Fix A (no adlib-class anchors arising from parentheses).
 
 ## 5. Validation (the changes compound — validate together)
 Fix A *reduces N* (strips phantom anchors); Fix B *reduces required-from-N*. A line at 4 anchors → 3 (A) → require 2 (B) could over-loosen, so:
 1. **Automated:** all `.cjs` + pytest green, including the new golden tests above.
-2. **Replay corpus (together):** re-run the 6 Praise The Lord partials + the Uproar/Vibe runs. Expect the greaze/velour-class partials to **clear**, `suspectedCheeseInflation` to stay clean, and short lines not to over-clear. Tune the exact thresholds (`N≥4`, whether to also help `N=3`) against this data + the per-line anchor counts in telemetry — not in the abstract.
+2. **Replay corpus (together):** re-run the 6 Praise The Lord partials + the Uproar/Vibe runs. Expect the greaze/velour-class partials to **clear**, `suspectedCheeseInflation` to stay clean, and short lines not to over-clear. Tune the exact thresholds (`N≥4`, whether to also help `N=3`) against this data + the per-line anchor counts in telemetry — not in the abstract. The new per-anchor `anchors[]` makes this a direct read (which anchors cleared/blocked, and whether parenthetical content was excluded).
 3. **Live sing-test:** the standing cheese probes (silence/humming/"Ah"/finger-taps) must still score ~0; a correctly-sung greaze/velour line should now clear.
 
 **Gate:** as with all V2 scoring changes, the human sing-test before any `karaokee_v2` flag-flip is the non-negotiable gate.
@@ -84,4 +96,4 @@ Fix A *reduces N* (strips phantom anchors); Fix B *reduces required-from-N*. A l
 ## 7. Rollout
 - Branch `feat/anchor-selection-quality`.
 - No new flag — rides the existing `karaokee_v2` phrase-engine path; V1 unaffected.
-- Sequence: pure helpers + golden tests → wire into `buildPhrasePlan`/`selectAnchors` → replay-corpus validation (A+B together) → user live sing-test → (later) part of the V2 flag-flip decision.
+- Sequence: pure helpers + golden tests → wire into `buildPhrasePlan`/`selectAnchors` → add per-anchor trace detail (so the validation is legible) → replay-corpus validation (A+B together) → user live sing-test → (later) part of the V2 flag-flip decision.
