@@ -1,89 +1,78 @@
 # Karaokee
 
-Karaokee is a Flask-served karaoke scoring app. It loads audio from YouTube metadata/download flow, fetches synced lyrics from lrclib, and scores live singing with browser speech recognition plus optional server-side Whisper support.
+**Sing the songs you actually love — and find out how well you really know them.**
 
-## How It Works
+Karaokee is a karaoke game built around one frustration: every karaoke bar has thousands of songs, but never *the* song you can truly perform — the one you know cold and can pour yourself into. So Karaokee lets you bring **any** song. Paste a YouTube link, and it turns the lyrics into a live game: sing along, and it listens through your mic, follows the words in real time, and scores how well you nailed them — combos, grades, and all.
 
-1. Search or paste a YouTube URL.
-2. The backend downloads audio and fetches synced lyrics.
-3. The browser plays the track and runs game mode against the lyric timeline.
-4. Matching uses exact, contraction, slang, phonetic, and edit-distance strategies.
-5. Scoring uses weighted lyric words and adaptive timing windows by tempo.
+## How it works (the short version)
 
-## Tech Stack
+1. You search for, or paste, a YouTube song.
+2. Karaokee grabs the audio and finds time-synced lyrics (the kind that scroll in time with the music).
+3. The song plays, the lyrics light up line by line, and your microphone listens.
+4. As you sing, it turns your voice into words and matches them to the lyrics — forgiving near-misses along the way (it knows "night" and "knight" sound identical).
+5. You get a live score: an honest "how much did you actually sing" percentage, plus an arcade layer of combos, points, and a letter grade.
 
-- Backend: Python, Flask, faster-whisper, yt-dlp
-- Frontend: plain HTML, CSS, and JavaScript served from `static/`
-- ASR: browser Web Speech API plus optional server-side Whisper
-- Audio: Web Audio API with an AudioWorklet for mic sampling and VAD
+## Two ways it listens
 
-## Setup
+- **Free (default):** your browser's built-in speech recognition. Works in **desktop Chrome or Edge**, costs nothing, needs no setup.
+- **Sharper (optional):** set an OpenAI API key to switch on `gpt-realtime-whisper`, a more accurate live transcriber. (When Karaokee goes online, players will be able to bring their *own* key — kept in their browser — while everyone else uses the free option. The reasoning is in [the decision records](docs/adr/).)
 
-### Prerequisites
+## What's under the hood
 
-- Python 3.10+
-- `yt-dlp` via `pip install -r requirements.txt`
+- **Backend:** Python + Flask (a small web server), plus `yt-dlp` for YouTube and `faster-whisper` for on-device transcription.
+- **Frontend:** plain HTML / CSS / JavaScript — no framework, no build step.
+- **Hearing you:** a neural voice-activity detector (it knows when you're singing vs. silent) and two speech recognizers working together.
+- **Want the full picture?** [`docs/architecture.md`](docs/architecture.md) explains every piece in plain English.
 
-Optional:
+## Run it locally
 
-- NVIDIA GPU with a working CUDA runtime if you want to opt Whisper into `cuda`
-
-### Install
+You'll need **Python 3.10+**.
 
 ```bash
 pip install -r requirements.txt
-```
-
-### Run
-
-```bash
 python app.py
 ```
 
-Then open `http://localhost:5000`.
+Then open **http://localhost:5000** in Chrome or Edge. On Windows, `start.bat` does both steps for you.
 
-On Windows, `start.bat` launches the server and opens the browser.
+> You need a microphone, and the free speech recognition needs **desktop Chrome or Edge** — the supported, tested targets. (Firefox has no speech-recognition support; other browsers are untested.)
 
-## Environment Variables
+### Settings (environment variables)
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `FLASK_DEBUG` | `0` | Set to `1` for Flask debug mode |
-| `WHISPER_MODEL` | `large-v3-turbo` | Whisper model name |
-| `WHISPER_DEVICE` | `cpu` | Default runtime on this machine |
-| `WHISPER_COMPUTE` | `int8` | Compute type for the configured device |
-| `WHISPER_COMPUTE_CPU` | `int8` | CPU fallback compute type |
+You don't need any of these to run it — they only tune transcription. The ones that matter most:
 
-Note: older docs and plans may mention CUDA defaults. The current shipped runtime is CPU-first on this machine unless you explicitly override it.
+| Variable | What it does |
+|---|---|
+| `WHISPER_PROVIDER` | Which transcriber to use: `auto` (default — runs Whisper locally), `openai`, or `openai_realtime` (live OpenAI). |
+| `OPENAI_API_KEY` | Required for the `openai` / `openai_realtime` options. |
+| `OPENAI_TRANSCRIBE_MODEL` | The OpenAI model to use (default `gpt-realtime-whisper`). |
+| `WHISPER_MODEL` | Which local Whisper model (default `large-v3-turbo`). |
+| `WHISPER_DEVICE` | `cuda` by default; **automatically falls back to `cpu`** if there's no working GPU (the case on the dev machine). |
 
-## Project Structure
+Full transcription and config details: [`docs/operations/whisper.md`](docs/operations/whisper.md).
+
+## Where the project is headed
+
+The current focus is **getting Karaokee online so other people can try it** — it only runs locally today. The plan, the blockers, and the decisions behind it are written up in [`docs/operations/deployment.md`](docs/operations/deployment.md) and the [decision records](docs/adr/).
+
+## Project layout
 
 ```text
-app.py                 Flask server and Whisper lifecycle
-downloader.py          YouTube metadata extraction and audio download
-lyrics.py              lrclib fetch and candidate ranking
-static/                Production frontend served by Flask
-tests/                 Pytest and Node regression suites
-docs/                  Audits, plans, retrospectives, architecture, operations
-output_telemetry/      Exported gameplay telemetry for offline analysis
+app.py            The web server + transcription lifecycle
+downloader.py     YouTube audio + search
+lyrics.py         Finding and parsing time-synced lyrics
+static/           The actual game (HTML/JS/CSS) — see docs/architecture.md
+tests/            Automated tests (Python + JavaScript)
+docs/             Architecture, how-to guides, decisions, and design history
 ```
 
 ## Documentation
 
-- `docs/architecture.md`: runtime overview and main data flow
-- `docs/algorithms/scoring.md`: scoring rules and line arithmetic
-- `docs/algorithms/matching.md`: word-level matching strategies
-- `docs/algorithms/sync.md`: tempo classes and timing windows
-- `docs/operations/whisper.md`: Whisper config, fallback behavior, and failure modes
-- `docs/operations/telemetry.md`: telemetry schema and replay notes
-- `docs/plans/README.md`: historical plan timeline
-- `docs/audits/`: audit history
-
-## Notes
-
-- `static/` is the shipped frontend. The old `src/` tree was an abandoned rewrite and is not part of the runtime.
-- Browser speech recognition drives the real-time path. Whisper is supplemental and can be slower on CPU.
-- VAD-only hints are visual only until ASR confirms them.
+- [Architecture](docs/architecture.md) — how it all fits together, in plain English
+- [Whisper / transcription](docs/operations/whisper.md) — recognizer setup and behavior
+- [Scoring](docs/algorithms/scoring.md) · [Matching](docs/algorithms/matching.md) · [Sync](docs/algorithms/sync.md) — how the game judges your singing
+- [Deployment](docs/operations/deployment.md) — the plan to put it online
+- [Decisions (ADRs)](docs/adr/) · [Design history](docs/plans/README.md)
 
 ## License
 

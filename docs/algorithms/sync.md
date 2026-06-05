@@ -1,50 +1,44 @@
-# Sync
+# Sync (keeping the lyrics lined up with the music)
 
-Sync behavior is tempo-aware.
+Karaokee needs to know *when* each lyric word is expected, so it can check whether you sang it at the right time. It works this out per line, and adapts to how fast the line is.
 
-## Tempo Classes
+## Fast vs. slow lines
 
-`static/sync-helpers.js` classifies line tempo by words per second:
+`classifyTempo` (`sync-helpers.js:11`) measures a line's speed in **words per second (wps)** and buckets it:
 
-- `slow`
-- `normal`
-- `fast`
+- **fast** — more than 5 words/second (rapid-fire rap verses)
+- **normal** — 2 to 5 words/second
+- **slow** — under 2 words/second (ballads)
 
-The helper module also computes song-relative tempo classes for VAD behavior:
+There's also a *song-relative* version (`classifyLineTempoRelative`) that compares each line to the rest of *this* song (using its median and 80th-percentile speeds), so a "fast" line inside a slow song is judged in context.
 
-- `slow`
-- `medium`
-- `fast`
+## How wide is the "in time?" window
 
-## Window Controls
+`getWindowParams` (`sync-helpers.js:22`) sets, per tempo, how early or late a word can be sung and still count — plus how much the window may drift to track the timing. Faster lines get a more forgiving window:
 
-`getWindowParams()` defines:
+| Tempo | Window (seconds around the expected time) |
+|---|---|
+| slow | −0.3 → +1.5 |
+| normal | −0.3 → +1.5 |
+| fast | −0.5 → +2.5 |
 
-- `windowStart`
-- `windowEnd`
-- `driftTrack1`
-- `driftTrack2`
+Other sync helpers handle: how long two lines overlap at a boundary, a short-line adjustment, the delay before a line is scored (to let late text arrive), the audio chunk size sent to local Whisper, and how far back to search the transcript for a word.
 
-Other sync helpers define:
+## Guessing each word's timing
 
-- overlap duration
-- short-line overlap adjustment
-- late-score delay
-- Whisper chunk sizing
-- spoken search window size
+The lyrics file (LRC) timestamps each *line*, not each *word*. `interpolateWordTimings` (`scoring.js`) fills in the gaps:
 
-## Timing Interpolation
+1. splits the line into words,
+2. estimates each word's syllable count,
+3. spreads the line's total time across the words by syllables (longer words get more time),
+4. tags each word with its expected start/end time, its kind (core / function / ad-lib), and its weight,
+5. pre-computes the word's sound-alike code so matching stays fast.
 
-`interpolateWordTimings()` in `static/scoring.js`:
+## Design notes
 
-1. splits each LRC line into words
-2. estimates syllable counts
-3. spreads line duration across the words
-4. assigns `windowStart`, `windowEnd`, `wordClass`, and `weight`
-5. caches the target-side phonetic code
+- Keep the simple "one LRC line = one line" model.
+- Prefer small, testable timing tweaks over re-architecting how lines are grouped.
 
-## Current Direction
+## Tests
 
-- Keep the raw-line identity model.
-- Prefer narrow, testable sync changes over grouped-line architecture changes.
-- Treat short-line handling and SR backlog as separate problems.
+`tests/test_sync_helpers.cjs` covers tempo classification and the window parameters.

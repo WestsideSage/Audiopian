@@ -1,45 +1,35 @@
-# Matching
+# Matching (is this word a match?)
 
-The matching pipeline is intentionally layered from strict to loose.
+When you sing a word, Karaokee has to decide: does it match the lyric? It runs a series of tests, strictest to loosest, and stops at the first one that passes. This lives in `wordsMatchScore` (`scoring.js:311`). Each test gives a confidence score (1.0 = certain):
 
-## Word Normalization
+| # | Test | What it catches | Score |
+|---|---|---|---|
+| 1 | **Exact** | the same word | 1.0 |
+| 2 | **`-in` / `-ing`** | "singin'" = "singing" | 1.0 |
+| 3 | **Contraction** | "gonna" = "going to" | 1.0 |
+| 4 | **Slang** | known slang swaps | 0.9 |
+| 5 | **Sound-alike** — *Double Metaphone*, a code for how a word *sounds* | "night" = "knight" | 0.8 |
+| 6 | **Almost-spelled-right** — *edit distance*, how many letter changes apart | 1 letter off | 0.75 |
+| 7 | same, but 2 letters off, only when it's a clipped prefix | "remember" → "remem" | 0.4 |
+| — | **No match** | | 0.0 |
 
-- Lowercase all words.
-- Strip punctuation.
-- Split transcripts on whitespace.
+(Order and scores: `scoring.js:311-347`.)
 
-## Match Order
+## Where the rules live
 
-`wordsMatchScore()` evaluates in this order:
+- `match-helpers.js` — the contraction list, the slang list, multi-word phrase equivalences, filler-word skipping, and the word-importance weights (see [`scoring.md`](scoring.md)).
+- `scoring.js` — `doubleMetaphone` (the sound-alike codes), `wordsMatch` (a yes/no), and `wordsMatchScore` (the scored version above).
 
-1. Exact match
-2. `-in` / `-ing` normalization
-3. Contraction match
-4. Slang normalization
-5. Phonetic match via Double Metaphone
-6. Edit-distance match
-7. No match
+## Rules that keep it honest
 
-## Helper Sources
+- Words are matched **in order** — Karaokee walks forward through what you sang; it can't jump backward to grab a word.
+- **One spoken word can't be reused** for two different lyric slots — important when a lyric repeats the same word.
+- A word picked up only by the **voice detector** (not yet confirmed as text) shows on screen but doesn't count until the recognizer confirms it.
 
-- `static/match-helpers.js`
-  - contraction maps
-  - slang maps
-  - phrase equivalence
-  - filler-word skipping
-  - word classification and weights
-- `static/scoring.js`
-  - `doubleMetaphone()`
-  - `wordsMatch()`
-  - `wordsMatchScore()`
+## Before matching: cleanup
 
-## Important Invariants
+Words are lowercased, stripped of punctuation, and the transcript is split on spaces — so "Night," and "night" compare equal.
 
-- Spoken token use is monotonic during sequential matching.
-- Repeated target words must not reuse a single spoken token across multiple lyric slots.
-- VAD-only provisional hits are visual until ASR confirms them.
-- Phrase and contraction helpers may consume multiple spoken tokens, but single-word scoring still operates slot-by-slot.
+## Tests
 
-## Regression Coverage
-
-`tests/test_scoring.cjs` now carries the main word-match regression matrix.
+`tests/test_scoring.cjs` carries the main word-match regression matrix.

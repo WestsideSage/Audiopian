@@ -2,6 +2,8 @@
 
 This directory contains the surviving plan record for each major feature iteration. Former design and implementation pairs have been consolidated into one document per feature so the history stays readable without duplicating context.
 
+> **Newer work lives elsewhere.** Plans and specs from **May 2026 onward** — the arcade-scoring, realtime-whisper, and scoring-session era — are kept as spec + plan pairs under [`docs/superpowers/`](../superpowers/README.md). The timeline below covers the **February–April 2026** foundation, matching, telemetry, and hardening work.
+
 ## Timeline
 
 ### February 2026 - Foundation

@@ -1,68 +1,48 @@
 # Scoring
 
-Scoring happens at the line level on top of per-word match states.
+How your singing becomes a score, start to finish. (The word-by-word matching has its own page — [`matching.md`](matching.md) — and the shared vocabulary is in [`CONTEXT.md`](../../CONTEXT.md).)
 
-## Inputs
+Karaokee scores in layers, each building on the last.
 
-Each line score is computed from:
+## 1. Is this word a match?
 
-- `lineWords`
-- interpolated `wordTimings`
-- `matchedSet`
-- `vadMatchedSet`
-- `asrConfirmedSet`
+`scoring.js` decides whether a word you sang matches a lyric word — exactly, by sound (so "night" = "knight"), or by a close-enough spelling. The how is in [`matching.md`](matching.md). Each lyric word also carries a **weight**, by how much it matters (`match-helpers.js`, `classifyWord`):
 
-## Word Weights
+| Kind of word | Weight | Example |
+|---|---|---|
+| **core** | 1.0 | the words that carry the line |
+| **function** | 0.5 | small connective words ("the", "and", "of") |
+| **ad-lib** | 0 | throwaways and anything in parentheses ("ooh", "(yeah)") — they don't count for *or* against you |
 
-Word weights come from `classifyWord()` in `static/match-helpers.js`:
+## 2. Line-level math
 
-- `core`: `1.0`
-- `function`: `0.5`
-- `adlib`: `0.25`
+When a line is sung, `computeLineScore` (`scoring.js`) adds up the weight of the words you hit versus the total weight available. A line counts as **perfect** when you hit at least **90%** of the available weight (`scoring.js:503`). These per-line totals add up across the whole run.
 
-## Effective Match Score
+## 3. Phrases and "anchors" (key words)
 
-- ASR-confirmed match uses the stored slot score.
-- VAD-only provisional match contributes capped partial flow credit up to `0.25`.
-- Unmatched words contribute `0`.
+Rather than judging every word equally, the **phrase engine** (`phrase-engine.js`) groups the lyrics into phrases and picks the **anchors** — the key words that prove you actually sang that phrase. How many anchors you must hit (`anchorsRequired`) scales with difficulty, with two fairness adjustments:
 
-This means VAD-only hits remain useful for UI feedback and avoid hard red misses when the performer is audibly in the pocket, but they still cannot produce a perfect line without ASR confirmation.
+- on long lines (4+ anchors) you never need *all* of them — at most all-but-one (`phrase-engine.js:199`);
+- on fast, word-dense passages the bar drops further, because nobody hits every word in a rapid-fire verse (`phrase-engine.js:206`).
 
-## Line Arithmetic
+A phrase is credited once you hit its required anchors (`phrase-engine.js:315`).
 
-`computeLineScore()` in `static/scoring.js` returns:
+## 4. The Honest % (the headline number)
 
-- `totalWords`
-- `matchedWords`
-- `weightedTotal`
-- `weightedMatched`
-- `missedWords`
-- `missedWordIndices`
-- `perfect`
+The **Honest %** answers "how much of this song did I *actually* sing?" It's simply: of the anchors in all the phrases that have *already gone by*, how many did you hit? Computed by `getHonestPct` (`scoring-session.js:779`) and refreshed as you play.
 
-`perfect` currently means:
+## 5. Late credit ("reconciliation")
 
-- `weightedTotal > 0`
-- `weightedMatched >= weightedTotal * 0.9`
+The accurate recognizer sometimes confirms a word *after* its line has passed. Karaokee credits that word to the line you actually sang it on, which **raises your Honest %** — but it does **not** go back and boost the arcade combo you'd already locked in. (This split is nicknamed "blessed divergence"; `scoring-session.js:905`.)
 
-## Runtime Usage
+## 6. The arcade layer
 
-- `_scoreLine()` uses `computeLineScore()` when a line closes.
-- `_lateScoreLine()` can still add late ASR matches before final scoring.
-- Running totals are stored on `GameMode`.
+`scoring-arcade.js` turns phrase credits into the game-y score: combos for consecutive hits, points, and a final letter grade. This is the **default experience** (the `karaokee_v2` mode) — see [ADR-0003](../adr/0003-arcade-default-lyric-axis-frozen.md).
 
-## Shadow Phrase Engine
+## Where it all comes together
 
-The phrase engine is the next scoring architecture and currently runs in shadow mode. It does not replace line-level score totals until benchmark evidence shows it is fairer and more stable.
+`scoring-session.js` runs the sequence for each phrase as it ends — settle → reconcile → commit → refresh the Honest % (`scoring-session.js:724`) — and hands the screen "draw this" messages; `player.js` just paints them.
 
-The phrase engine treats each song as timed phrases rather than closed lines. Each phrase has selected anchors, a difficulty profile, a settlement window, and source-specific evidence. Browser SR can provide provisional and final near-live evidence. Whisper can rescue or confirm recent phrases, but it should not control live timing. VAD can prove vocal presence and flow, but it cannot prove lyric correctness by itself.
+## Tests
 
-The target behavior is lyric-flow scoring: presence unlocks scoring, flow determines timing quality, and lyric anchors determine whether the flow counts.
-
-## Regression Coverage
-
-`tests/test_scoring.cjs` includes:
-
-- a word-match method matrix
-- line-arithmetic cases
-- repeated-target regression coverage
+`tests/test_scoring.cjs` covers the word-match methods and line math; `tests/test_phrase_engine.cjs` and `test_phrase_score.cjs` cover anchors and phrase settling; `tests/test_scoring_session.cjs` covers the end-to-end sequence.

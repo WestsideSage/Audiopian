@@ -43,7 +43,7 @@ The provenance tag of a matched word — `vad`, `browser_sr`, or `whisper`.
 _Avoid_: origin, channel.
 
 **Energy gate (VAD)**:
-The voice-activity condition that must hold for optimistic (edit-distance-only) matches to count.
+The voice-activity condition that must hold for optimistic (edit-distance-only) matches to count. Voice activity is detected primarily by a neural VAD; a simpler microphone-energy gate is the fallback.
 _Avoid_: silence detection.
 
 **Hot word**:

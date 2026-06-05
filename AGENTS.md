@@ -14,8 +14,7 @@
   - Install: `pip install -r requirements.txt`
   - Run locally: `python app.py`
   - Backend tests: `python -m pytest tests/test_app.py tests/test_downloader.py tests/test_lyrics.py -v`
-  - JS helper tests: `node tests/test_match_helpers.cjs`
-  - JS helper tests: `node tests/test_sync_helpers.cjs`
+  - JS helper tests: `node tests/test_match_helpers.cjs` (and the other `tests/*.cjs` — scoring, sync-helpers, scoring-session, phrase-engine, phrase-score, scoring-arcade, commit-helpers, vad-helpers, anchor-selection, telemetry-helpers, lyric-paint-helpers, realtime-whisper, telemetry-replay)
 
   ## Editing Rules
   - Keep backend route/process orchestration in `app.py`.

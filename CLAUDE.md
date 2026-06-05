@@ -24,8 +24,10 @@ python -m pytest tests/test_app.py::test_transcribe_returns_transcript -v
 ```bash
 node tests/test_match_helpers.cjs
 node tests/test_sync_helpers.cjs
-node tests/test_telemetry.cjs
 node tests/test_scoring_session.cjs
+node tests/test_telemetry_helpers.cjs
+# ...and the rest under tests/*.cjs (scoring, phrase-engine, phrase-score, scoring-arcade,
+# commit-helpers, vad-helpers, anchor-selection, lyric-paint-helpers, realtime-whisper, telemetry-replay)
 ```
 
 ### Whisper / transcription configuration (environment variables)
@@ -35,9 +37,9 @@ OPENAI_API_KEY=...             # required for the openai / openai_realtime provi
 OPENAI_TRANSCRIBE_MODEL=gpt-realtime-whisper  # model for the openai / openai_realtime paths
 OPENAI_TRANSCRIBE_DELAY=       # gpt-realtime-whisper latency/accuracy: minimal|low|medium|high|xhigh — set low/minimal to cut the recognizer "catching up" lag on fast/dense songs (small accuracy cost)
 WHISPER_MODEL=large-v3-turbo   # default local faster-whisper model
-WHISPER_DEVICE=cpu             # default (cublas64_12.dll unavailable on this machine); set to "cuda" or "auto" to opt in
-WHISPER_COMPUTE=int8           # default; use "float16" when WHISPER_DEVICE=cuda
-WHISPER_COMPUTE_CPU=int8       # for CPU fallback
+WHISPER_DEVICE=cpu             # effective here: code default is "cuda", but cublas64_12.dll is unavailable on this machine so it auto-falls back to cpu; set "cuda"/"auto" to force GPU
+WHISPER_COMPUTE=int8           # effective here on the cpu fallback; code default is "float16" (used when WHISPER_DEVICE=cuda)
+WHISPER_CPU_COMPUTE=int8       # for CPU fallback
 ```
 
 ## Architecture
@@ -75,14 +77,15 @@ No build step; files are served directly by Flask.
 - **`scoring-arcade.js`** (`window.KaraokeeArcade`) — pure arcade scoring state machine (combos, points, grade). Tested in `test_scoring_arcade.cjs`.
 - **`match-helpers.js`** — contraction/slang normalization, filler-word skipping, `MetaphoneLRU`, `maxEditDistance`, `classifyWord`. Loaded before `scoring.js`/`player.js`.
 - **`sync-helpers.js`** — pure adaptive-sync timing: `classifyTempo()`, `getWindowParams()` keyed by tempo class (slow/normal/fast). Tested in `test_sync_helpers.cjs`.
-- **`vad-helpers.js`** — adaptive, debounced voice-activity gate (EMA noise floor, dual-threshold hysteresis). Tested in `test_vad_helpers.cjs`.
+- **`vad-helpers.js`** — the RMS energy-gate voice-activity logic (EMA noise floor, dual-threshold hysteresis), used as the **fallback**. Tested in `test_vad_helpers.cjs`. The **primary** VAD is a neural model (Silero, via the vendored `@ricky0123/vad-web` `MicVAD` under `static/vendor/vad/`), wired in `player.js` (`_micVad` / `_neuralVadActive`) with the RMS gate as fallback.
 - **`telemetry-helpers.js`** (`window.KaraokeeTelemetry`) — `summarizeRun` digest builder for the telemetry `summary` block. Tested in `test_telemetry_helpers.cjs`.
 - **`lyric-paint-helpers.js`** (`window.KaraokeeLyricPaint`) — pure anchor→span index mapping for in-game lyric coloring. Tested in `test_lyric_paint_helpers.cjs`.
 - **`realtime-whisper.js`** (`window.KaraokeeRealtimeWhisper`) — browser-side OpenAI Realtime client helpers (Float32→PCM16/base64, session wiring). Tested in `test_realtime_whisper_helpers.cjs`.
+- **`commit-helpers.js`** — pure commit-cadence state machine for the `openai_realtime` path: decides when to flush `input_audio_buffer.commit` (on speech-end + a tempo-aware cap) instead of blind 700 ms slices. Tested in `test_commit_helpers.cjs`.
 - **`audio-processor.js`** — AudioWorklet processor that buffers mic samples, emits chunks to the main thread for whisper, and posts RMS energy for VAD.
 
 ### JS helper isolation pattern
-The helper modules above (`scoring.js`, `phrase-engine.js`, `scoring-arcade.js`, `scoring-session.js`, `match-helpers.js`, `sync-helpers.js`, `vad-helpers.js`, `telemetry-helpers.js`, `lyric-paint-helpers.js`, `realtime-whisper.js`) are pure (no DOM/AudioContext) and use a UMD wrapper, so they can be `require()`d by the `.cjs` test files in `tests/` **and** loaded as `<script>` globals in the browser. `player.js` is the only DOM-bound file. When adding logic, prefer a pure helper module (with a `.cjs` test) over growing `player.js`, and preserve Node.js compatibility.
+The helper modules above (`scoring.js`, `phrase-engine.js`, `scoring-arcade.js`, `scoring-session.js`, `match-helpers.js`, `sync-helpers.js`, `vad-helpers.js`, `telemetry-helpers.js`, `lyric-paint-helpers.js`, `realtime-whisper.js`, `commit-helpers.js`) are pure (no DOM/AudioContext) and use a UMD wrapper, so they can be `require()`d by the `.cjs` test files in `tests/` **and** loaded as `<script>` globals in the browser. `player.js` is the only DOM-bound file. When adding logic, prefer a pure helper module (with a `.cjs` test) over growing `player.js`, and preserve Node.js compatibility.
 
 ### Telemetry
 Each completed run auto-saves a JSON to `output_telemetry/<date>/` via `POST /telemetry` (Flask writes it; the client builds it in `player.js` `_buildTelemetryPayload`, called on song-end and on stop). Schema v2 (`meta.schemaVersion: 2`) adds a `summary` block (final scores, arcade outcome, recognizer attribution, sync drift, and a cheese/honesty correlation) and an `arcade` block (per-phrase commit events + high score). Lean by default; the heavy raw arrays (`asr`/`matches`/`promotions`/`phraseEngine.traces`) are included only when debug is on (press `D`). The `summary` digest is derived by the pure `static/telemetry-helpers.js` (`summarizeRun`, golden-tested in `tests/test_telemetry_helpers.cjs`). For offline analysis of scoring honesty/economy and timing drift — not part of the production serving path.
