@@ -52,7 +52,7 @@ def extract_metadata(url: str) -> dict:
     else:
         artist, title = parse_title_artist(raw_title, uploader)
 
-    return {"title": title, "artist": artist, "duration": info.get("duration") or 0}
+    return {"title": title, "artist": artist, "duration": info.get("duration") or 0, "id": info.get("id") or ""}
 
 
 def download_audio(url: str) -> str:

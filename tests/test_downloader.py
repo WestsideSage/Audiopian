@@ -150,3 +150,18 @@ def test_download_audio_no_cookies_by_default(monkeypatch):
         download_audio("https://youtube.com/watch?v=fake")
     opts = MockYDL.call_args[0][0]
     assert "cookiesfrombrowser" not in opts
+
+
+def test_extract_metadata_returns_video_id():
+    """extract_metadata returns the YouTube video id for client-side IFrame embedding."""
+    mock_info = {
+        "title": "Black Moon - Who Got Da Props",
+        "uploader": "SomeChannel",
+        "id": "abc123XYZ_-",
+        "duration": 200,
+    }
+    with patch("downloader.yt_dlp.YoutubeDL") as MockYDL:
+        instance = MockYDL.return_value.__enter__.return_value
+        instance.extract_info.return_value = mock_info
+        result = extract_metadata("https://youtu.be/abc123XYZ_-")
+    assert result["id"] == "abc123XYZ_-"

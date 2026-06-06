@@ -56,6 +56,21 @@ def test_load_no_lyrics(client):
     assert "lyricsError" in data
 
 
+def test_load_returns_video_id(client):
+    """/load returns the YouTube videoId so the browser can embed via the IFrame player."""
+    with patch("app.extract_metadata") as mock_meta, \
+         patch("app.download_audio") as mock_dl, \
+         patch("app.fetch_lyrics") as mock_lyrics, \
+         patch("threading.Thread"):          # prevent real thread
+        mock_meta.return_value = {"title": "T", "artist": "A", "id": "VID123", "duration": 100}
+        mock_dl.return_value = "/fake/path/audio.webm"
+        mock_lyrics.return_value = [{"time": 0.0, "text": "hi"}]
+        resp = client.post("/load", json={"url": "https://youtu.be/VID123"})
+    assert resp.status_code == 200
+    data = json.loads(resp.data)
+    assert data["videoId"] == "VID123"
+
+
 def test_retry_lyrics_success(client):
     with patch("app.fetch_lyrics") as mock_lyrics:
         mock_lyrics.return_value = [{"time": 1.0, "text": "Line one"}]

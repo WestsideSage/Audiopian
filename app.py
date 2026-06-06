@@ -310,6 +310,7 @@ def load():
     response = {
         "title": title,
         "artist": artist,
+        "videoId": meta.get("id", ""),
         "audioUrl": "/audio",
         "lyrics": lyrics,
     }
