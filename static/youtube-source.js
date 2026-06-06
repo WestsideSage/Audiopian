@@ -28,6 +28,7 @@ function YouTubeIframeSource(videoId, containerId, opts) {
 
     var player = new YT_.Player(containerId, {
         videoId: videoId,
+        width: '100%', height: '100%',   // fill #ytplayer-wrap; YT's 640x360 default would overflow + clip
         playerVars: {
             autoplay: 0,            // gesture-initiated play (Task 5); unmuted autoplay is blocked
             controls: 1, playsinline: 1, enablejsapi: 1, rel: 0, modestbranding: 1, fs: 0,
