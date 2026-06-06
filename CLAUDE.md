@@ -47,9 +47,9 @@ WHISPER_CPU_COMPUTE=int8       # for CPU fallback
 ### Backend (Python/Flask — `app.py`)
 Single-file Flask server with these responsibilities:
 - **`/`** / **`/player`** — serve `static/index.html` (search/load UI) and `static/player.html` (the karaoke player)
-- **`/load`** — accepts YouTube URL, calls `downloader.py` to fetch audio and `lyrics.py` to fetch synced lyrics, returns JSON with title/artist/audioUrl/lyrics
+- **`/load`** — accepts a YouTube URL; returns JSON with `title`/`artist`/**`videoId`**/`audioUrl`/`lyrics` (lyrics via `lyrics.py`). The browser plays the backing track **client-side via the YouTube IFrame player** (from `videoId`); the server **does not download audio by default** — set `KARAOKEE_SERVER_AUDIO=1` (dev) to re-enable the `yt-dlp` download to `temp/audio.*` for the local `<audio>` path. (See ADR-0002 + `static/youtube-source.js`.)
 - **`/load-local`** — multipart upload of a local audio file + lyrics by title/artist (saved to `temp/audio.<ext>`); lets the app run/test without YouTube
-- **`/audio`** — streams the most-recent `temp/audio.*` (YouTube `.webm` or an uploaded file), mimetype guessed
+- **`/audio`** — streams the most-recent `temp/audio.*`, mimetype guessed. Now used **only by the local `<audio>` path** (uploaded files via `/load-local`, or the dev `KARAOKEE_SERVER_AUDIO` download) — the deployed YouTube path streams from the IFrame, not here
 - **`/transcribe`** — accepts raw WAV bytes and transcribes via the resolved provider (`local` faster-whisper, or `openai` file API), returning `{transcript, words}` with word-level timestamps; 503 if model not ready, 409 when the active provider is `openai_realtime` (streaming runs browser-side — see `/realtime-transcription-session`), 500 on error
 - **`/realtime-transcription-session`** — mints an ephemeral OpenAI Realtime transcription session so the browser streams mic audio straight to `gpt-realtime-whisper`; 404 if realtime isn't enabled, 503 if not configured/ready
 - **`/whisper-status`** — polling endpoint for model load state (`idle | loading | ready | error`)
@@ -65,13 +65,16 @@ Single-file Flask server with these responsibilities:
 Fetches time-synced LRC lyrics from lrclib.net. Scores candidates by title/artist token overlap + duration proximity + synced-lyrics bonus. `parse_lrc()` converts LRC format to `[{time: float, text: str}]` list.
 
 ### Downloader (`downloader.py`)
-Wraps yt-dlp: `extract_metadata()` (no download), `download_audio()` (saves to `temp/audio.webm`), `search_youtube()`. Artist/title are parsed from YouTube title using ` - ` split or explicit `artist` tag.
+Wraps yt-dlp: `extract_metadata()` (no download — returns `title`/`artist`/`duration`/**`id`**), `download_audio()` (saves to `temp/audio.webm` — **dev-only now**: `/load` calls it only when `KARAOKEE_SERVER_AUDIO=1`), `search_youtube()`. Artist/title are parsed from the YouTube title using ` - ` split or explicit `artist` tag.
 
 ### Frontend (plain HTML/JS — `static/`)
 No build step; files are served directly by Flask.
 
-- **`player.js`** — main karaoke controller (DOM, audio playback, lyric scrolling, mic capture, game mode, HUD). Orchestration and rendering only: it feeds events into `KaraokeeScoringSession` (see `scoring-session.js`) and renders the session's emitted events via `_renderEvents`. The scoring state machine itself (match→reconcile→score→commit) lives in `scoring-session.js`.
+- **`player.js`** — main karaoke controller (DOM, playback, lyric scrolling, mic capture, game mode, HUD). Playback goes through a **source-agnostic `playback` adapter** (`playback-source.js`): a YouTube IFrame source when `songData.videoId` is present, else an `<audio>` source for uploaded local files. Orchestration and rendering only: it feeds events into `KaraokeeScoringSession` (see `scoring-session.js`) and renders the session's emitted events via `_renderEvents`. The scoring state machine itself (match→reconcile→score→commit) lives in `scoring-session.js`.
 - **`scoring-session.js`** (`window.KaraokeeScoringSession`) — the per-run scoring state machine (match→reconcile→score→commit) extracted from `player.js`; DOM-free, clock-injected, emits render-intent events that `player.js` `_renderEvents` paints. Tested in `tests/test_scoring_session.cjs`.
+- **`playback-source.js`** (`AudioElementSource`) — the playback-source contract + its `<audio>` implementation; lets `player.js` drive `<audio>` or the YouTube IFrame behind one interface (`play/pause/seek/currentTime/duration/setVolume` + `onReady/onEnded/onState`). Tested in `tests/test_playback_source.cjs`.
+- **`youtube-source.js`** (`YouTubeIframeSource`, `ytStateToString`, `isEmbedDisabledError`, `ensureYouTubeApi`) — the YouTube IFrame implementation of that contract. Clock = `getCurrentTime()` (frame-grained; **no** `performance.now()` interpolation — see ADR-0002 + the `spikes/youtube-clock/` spike). Tested in `tests/test_youtube_source.cjs`.
+- **`playback-gate.js`** (`playbackGateDecision`) — pure helper: scoring is credited only while `playing`; buffering/ads freeze the clock; embed-disabled (101/150) → fallback UI. Tested in `tests/test_playback_gate.cjs`.
 - **`scoring.js`** (`window.KaraokeeScoring`) — phonetic/fuzzy matching + line scoring engine: `doubleMetaphone`, `editDistance`, `wordsMatch`/`wordsMatchScore`, word normalization, syllable-weighted `interpolateWordTimings`, `computeLineScore`, `findMatchInWindow`, `mergeConfirmedMatches`. **Single source of truth** for these — `player.js` binds them. Tested in `test_scoring.cjs`.
 - **`phrase-engine.js`** (`window.KaraokeePhraseEngine`) — phrase-level scoring built on `scoring.js`: anchor matching, line settle/commit, late-evidence reconciliation. Tested in `test_phrase_engine.cjs` / `test_phrase_score.cjs`.
 - **`scoring-arcade.js`** (`window.KaraokeeArcade`) — pure arcade scoring state machine (combos, points, grade). Tested in `test_scoring_arcade.cjs`.
@@ -85,14 +88,14 @@ No build step; files are served directly by Flask.
 - **`audio-processor.js`** — AudioWorklet processor that buffers mic samples, emits chunks to the main thread for whisper, and posts RMS energy for VAD.
 
 ### JS helper isolation pattern
-The helper modules above (`scoring.js`, `phrase-engine.js`, `scoring-arcade.js`, `scoring-session.js`, `match-helpers.js`, `sync-helpers.js`, `vad-helpers.js`, `telemetry-helpers.js`, `lyric-paint-helpers.js`, `realtime-whisper.js`, `commit-helpers.js`) are pure (no DOM/AudioContext) and use a UMD wrapper, so they can be `require()`d by the `.cjs` test files in `tests/` **and** loaded as `<script>` globals in the browser. `player.js` is the only DOM-bound file. When adding logic, prefer a pure helper module (with a `.cjs` test) over growing `player.js`, and preserve Node.js compatibility.
+The helper modules above (`scoring.js`, `phrase-engine.js`, `scoring-arcade.js`, `scoring-session.js`, `match-helpers.js`, `sync-helpers.js`, `vad-helpers.js`, `telemetry-helpers.js`, `lyric-paint-helpers.js`, `realtime-whisper.js`, `commit-helpers.js`, `playback-gate.js`, `playback-source.js`, `youtube-source.js`) use a UMD wrapper, so they can be `require()`d by the `.cjs` test files in `tests/` **and** loaded as `<script>` globals in the browser. Most are pure (no DOM/AudioContext); the playback sources are thin adapters tested via dependency injection (a fake `<audio>` element / a fake `YT` API). `player.js` is the only DOM-bound file. When adding logic, prefer a pure helper module (with a `.cjs` test) over growing `player.js`, and preserve Node.js compatibility.
 
 ### Telemetry
 Each completed run auto-saves a JSON to `output_telemetry/<date>/` via `POST /telemetry` (Flask writes it; the client builds it in `player.js` `_buildTelemetryPayload`, called on song-end and on stop). Schema v2 (`meta.schemaVersion: 2`) adds a `summary` block (final scores, arcade outcome, recognizer attribution, sync drift, and a cheese/honesty correlation) and an `arcade` block (per-phrase commit events + high score). Lean by default; the heavy raw arrays (`asr`/`matches`/`promotions`/`phraseEngine.traces`) are included only when debug is on (press `D`). The `summary` digest is derived by the pure `static/telemetry-helpers.js` (`summarizeRun`, golden-tested in `tests/test_telemetry_helpers.cjs`). For offline analysis of scoring honesty/economy and timing drift — not part of the production serving path.
 
 ## Key constraints
 
-- `temp/audio.webm` holds only one song at a time (overwritten on each `/load`).
+- `temp/audio.*` holds only one song at a time (overwritten on each `/load-local` upload, or each `/load` when `KARAOKEE_SERVER_AUDIO=1`). The deployed YouTube path doesn't use it — playback is the client-side IFrame.
 - The JS helper files use `var` / plain functions (not ES modules) so they work in both browser `<script>` context and Node.js `require()`.
 - When writing JS files with backtick template literals on Windows, use the Edit or Write tools directly — do not delegate to Bash subagents (backtick expressions get stripped).
 

@@ -2,7 +2,7 @@
 
 Karaokee runs locally today (`python app.py` on your own machine). This is the plan for putting it **online so other people can play it in their browser** — the current top priority. It's written to be read by anyone; the decisions behind it live in [`docs/adr/`](../adr/).
 
-> **Status:** planning. Nothing here is built yet — this page is the map.
+> **Status:** in progress. **Build item #1 — client-side YouTube IFrame playback — is DONE & merged (2026-06-06)**; the remaining items below are still the map.
 
 ## The goal, in one line
 
@@ -34,7 +34,7 @@ That leaves the server doing just two things: hand over the web page, and look u
 
 Build items, roughly by size/risk:
 
-1. **Play the backing track from YouTube in the browser (the big one).** Today playback is a normal `<audio>` element fed by the server (`player.js:1`), and the *entire scoring clock* reads its `currentTime`. Switching to the YouTube embed player means reading time from the embed instead — which is **coarser and only updates a few times a second.** On fast rap (tight timing) that can make scoring feel off. It's fixable (smooth between updates using the browser's own clock), but it's delicate surgery in `player.js`. **→ Prove it out with a throwaway test before committing.** ([ADR-0002](../adr/0002-any-song-client-side-youtube-iframe.md))
+1. ✅ **DONE (merged 2026-06-06) — play the backing track from YouTube in the browser.** `player.js` now drives a source-agnostic `playback` adapter (`static/playback-source.js`): a YouTube IFrame source by `videoId`, or an `<audio>` source for uploaded local files. The feared "coarse clock" was **refuted by a throwaway spike** (`spikes/youtube-clock/`) — real-Chrome `getCurrentTime()` is frame-grained (~60 Hz) and *smoother* than the old `<audio>` clock, so no interpolation was needed. Validated end-to-end (a full *Uproar* run scored honest 97% / S; deliberate wrong-lyrics 0% / D — the content-gate holds). YouTube-embed reliability limits (per-video embeddability 101/150, account-concurrency, incognito/3p-cookies, ads) are documented in [ADR-0002](../adr/0002-any-song-client-side-youtube-iframe.md); a typical normal-browser, single-session visitor is unaffected.
 2. **Turn arcade mode on by default.** Right now it's off unless you've pressed **V** — `player.js:2121` reads it from browser storage, defaulting *off*, so a fresh visitor gets the non-arcade view. This default must flip. ([ADR-0003](../adr/0003-arcade-default-lyric-axis-frozen.md))
 3. **The "bring your own key" flow.** Today the *server* holds the OpenAI key; online, the player supplies their own (kept in their browser). Open question: can the browser set up the live session directly with OpenAI, or does it still need the server to broker it? A quick compatibility check (CORS / the session-mint call) settles it. ([ADR-0001](../adr/0001-tiered-recognizer-byo-key-deploy.md))
 4. **The "desktop Chrome only" page** for mobile/other-browser visitors. Your marketing (Shorts + Reddit) is opened mostly on phones, so this protects the funnel instead of showing them a broken page.
@@ -50,7 +50,7 @@ Because the server is so thin (serve the page + look up lyrics), hosting is chea
 
 ## Smaller things to sort before launch
 
-- Local YouTube download (`/load`) and local Whisper become **developer-only** tools — they don't run online.
+- ✅ Local YouTube download via `/load` is now **developer-only** (gated behind `KARAOKEE_SERVER_AUDIO=1`); local Whisper stays a dev tool too. Neither runs online.
 - Lyrics still come from lrclib.net at play time; confirm that's reliable from a cloud server.
 - A friendly first run (mic-permission prompt, a suggested song or two to try).
 - A short "what we collect" note (nothing, in v1) for trust.

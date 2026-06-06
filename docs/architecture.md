@@ -4,16 +4,16 @@ How Karaokee works under the hood — written so anyone can follow it, with code
 
 **The one-sentence version:** Karaokee is a small web server (Python + Flask) that sends a web page to your browser; from there, almost everything happens *in your browser* — the music plays, your microphone listens, your singing is turned into text, that text is matched against the song's lyrics, and you get a score.
 
-> **How it runs today vs. where it's headed.** Right now Karaokee runs on one computer (your own): you start it with `python app.py`, and the song's audio is downloaded onto that computer. The plan for putting it online (so others can play) is a **"near-stateless" version** — the song plays straight from YouTube inside the browser, your voice is handled in the browser, and the server barely has to do anything. The full reasoning is in [`docs/operations/deployment.md`](operations/deployment.md) and the decision records in [`docs/adr/`](adr/).
+> **How it runs.** You start it with `python app.py`. The backing track now **plays straight from YouTube inside the browser** — the client-side YouTube IFrame player (merged 2026-06-06) — with a plain `<audio>` element as the fallback for uploaded local files. That's the first and biggest piece of the **"near-stateless" online version** (the server just serves the page + looks up lyrics; your voice is handled in the browser). The remaining online pieces (hosting, arcade-on-by-default, bring-your-own-key, etc.) are tracked in [`docs/operations/deployment.md`](operations/deployment.md), with the decisions in [`docs/adr/`](adr/).
 
 ## The server side (`app.py`)
 
 `app.py` is the Python program that answers web requests. Each "route" below is just a URL the browser can call:
 
 - `/` and `/player` — hand over the two web pages (the search page and the game page).
-- `/load` — takes a YouTube link, downloads the audio, and finds matching time-synced lyrics.
+- `/load` — takes a YouTube link, finds matching time-synced lyrics, and returns the song's `videoId` so the **browser plays it via the YouTube IFrame** (no server download by default; set `KARAOKEE_SERVER_AUDIO=1` to re-enable the old dev download).
 - `/load-local` — lets you upload your own audio file + lyrics instead of using YouTube (handy for testing).
-- `/audio` — streams the downloaded song to the browser.
+- `/audio` — streams a downloaded/uploaded song to the browser. Used **only by the local `<audio>` path** now (uploaded files, or the dev download); the YouTube path streams from the IFrame instead.
 - `/transcribe` — turns a chunk of recorded audio into text using a speech-recognition model on the server.
 - `/realtime-transcription-session` — sets up a secure, short-lived connection so the browser can stream your voice straight to OpenAI's live transcription.
 - `/whisper-status`, `/retry-lyrics`, `/search`, `/telemetry` — transcriber-loading status, re-fetching lyrics, YouTube search, and saving a game's stats for later analysis.
@@ -71,6 +71,6 @@ When the slow-but-accurate recognizer confirms a word *after* a line has already
 
 ## Things to keep in mind
 
-- Only one downloaded song exists at a time (`temp/audio.webm` is overwritten on each load). That's fine for one person on one computer, but it's a big reason the online version will play audio straight from YouTube instead.
+- The YouTube path plays **client-side via the IFrame** (no server-side audio file). The local `<audio>` path still keeps a single `temp/audio.*` (overwritten per `/load-local` upload, or per `/load` when `KARAOKEE_SERVER_AUDIO=1`) — fine for one person on one computer, and the reason the deployed version uses the IFrame instead.
 - The local Whisper model is slow on a computer without a graphics card (GPU); it automatically downshifts to the slower-but-works CPU mode when needed.
 - The real app lives in `static/`. An old, abandoned version (`src/`) was deleted during the April cleanup.
