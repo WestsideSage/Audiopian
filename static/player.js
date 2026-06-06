@@ -185,7 +185,7 @@ class GameMode {
         if (window.KaraokeePhraseEngine) {
             this._phrasePlan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
                 difficulty: this._phraseDifficulty,
-                audioDuration: audio && isFinite(audio.duration) ? audio.duration : null
+                audioDuration: playback ? (playback.duration() || null) : null
             });
             // The scoring session owns the per-run state machine (match -> reconcile ->
             // score -> commit). It builds its own phraseSession/arcadeState from the plan;
@@ -478,7 +478,7 @@ class GameMode {
 
         // Watchdog: detect when recognition silently dies and force restart
         this._watchdogInterval = setInterval(() => {
-            if (!this.active || audio.paused) return;
+            if (!this.active || !playback || playback.isPaused()) return;
             if (Date.now() - this._lastResultTime > 5000) {
                 console.warn('[GAME] Recognition watchdog: no results for 5s, restarting');
                 this._lastResultTime = Date.now();
@@ -1010,7 +1010,7 @@ class GameMode {
     // clock; every advance call passes _now() so behavior is identical to the old
     // audio.currentTime reads but testable.
     _now() {
-        return (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
+        return playback ? playback.currentTime() : 0;
     }
 
     // Trigger point: the 100ms updateLyrics loop calls this on every line change.
@@ -1248,9 +1248,10 @@ class GameMode {
 
             // Baseline calibration during first 2s of playback
             if (!this._vadBaselineReady) {
-                if (audio.currentTime > 0 && audio.currentTime < 2.0) {
+                var _ct = this._now();
+                if (_ct > 0 && _ct < 2.0) {
                     this._vadBaselineSamples.push(vadRms);
-                } else if (audio.currentTime >= 2.0) {
+                } else if (_ct >= 2.0) {
                     if (this._vadBaselineSamples.length > 0) {
                         var bSum = this._vadBaselineSamples.reduce(function(a, b) { return a + b; }, 0);
                         this._vadBaseline = bSum / this._vadBaselineSamples.length;
@@ -1354,7 +1355,7 @@ class GameMode {
         this._telemetry = {
             meta: {
                 songTitle:        title,
-                songDurationMs:   (audio && isFinite(audio.duration)) ? Math.round(audio.duration * 1000) : null,
+                songDurationMs:   playback && playback.duration() ? Math.round(playback.duration() * 1000) : null,
                 lrcLines:         lyrics.length,
                 whisperAvailable: null,   // updated at download time when Whisper state is known
                 browserLang:      navigator.language || 'unknown',
@@ -1504,7 +1505,7 @@ class GameMode {
             if (fromIdx >= 0 && this.allWordTimings[fromIdx]) {
                 tempoClass = this.allWordTimings[fromIdx].vadTempoClass || 'medium';
             }
-            var nowAudio   = (audio && isFinite(audio.currentTime)) ? audio.currentTime : 0;
+            var nowAudio   = this._now();
             var timeSpentMs = lineStartAudioTime != null
                 ? Math.round((nowAudio - lineStartAudioTime) * 1000)
                 : null;
@@ -1552,8 +1553,8 @@ class GameMode {
     _buildTelemetryPayload(endReason) {
         if (!this._telemetry) return null;
         var meta = this._telemetry.meta;
-        if (!meta.songDurationMs && audio && isFinite(audio.duration)) {
-            meta.songDurationMs = Math.round(audio.duration * 1000);
+        if (!meta.songDurationMs && playback && playback.duration()) {
+            meta.songDurationMs = Math.round(playback.duration() * 1000);
         }
         if (meta.whisperAvailable === null) meta.whisperAvailable = !!(this._whisperStream);
         meta.whisperStatusAtStart  = this._whisperServerStatus ? Object.assign({}, this._whisperServerStatus) : null;
@@ -1595,7 +1596,8 @@ class GameMode {
         meta.vadInitError    = this._vadInitError || null;    // why not, if it didn't
         meta.endedAt       = new Date().toISOString();
         meta.endReason     = endReason || 'manual';
-        meta.completed     = !!(audio && isFinite(audio.duration) && audio.currentTime >= audio.duration - 0.5);
+        var _cDur = playback ? playback.duration() : 0;
+        meta.completed     = !!(_cDur && this._now() >= _cDur - 0.5);
 
         var intentEl = document.getElementById('benchmarkIntent');
         var fairnessEl = document.getElementById('benchmarkFairness');
@@ -1867,7 +1869,7 @@ class GameMode {
         // for the continuously-sung last line (the 06dfde5/5028f1f catch-up). endRun then
         // scores the active line; its commit-once guard prevents double-commit.
         if (this._session) {
-            var _endNow = (audio && isFinite(audio.duration)) ? audio.duration + 5 : 1e9;
+            var _endNow = (playback && playback.duration()) ? playback.duration() + 5 : 1e9;
             this._renderEvents(KaraokeeScoringSession.tick(this._session, _endNow));
             this._renderEvents(KaraokeeScoringSession.endRun(this._session, _endNow));
         }
@@ -1932,9 +1934,22 @@ if (!songData) {
     window.location.href = '/';
 }
 
-// Cache-bust audio src so the browser re-fetches on every page load
-audio.src = '/audio?t=' + Date.now();
-audio.load();
+// Playback source. YouTube songs (songData.videoId) play client-side via the IFrame
+// player; uploaded local files (no videoId, dev) keep the <audio> element. Both implement
+// the same playback-source contract, so the scoring/UI code is source-agnostic.
+var playback = null;          // null until the source exists (IFrame is async); callers null-guard.
+var _playbackReady = false;   // true once the source fires onReady (gates gesture-initiated play)
+if (songData.videoId) {
+    ensureYouTubeApi().then(function (YT) {
+        playback = YouTubeIframeSource(songData.videoId, 'ytplayer', { YT: YT });
+        _wirePlaybackCallbacks();
+    });
+} else {
+    audio.src = '/audio?t=' + Date.now();   // cache-bust so the browser re-fetches each load
+    audio.load();
+    playback = AudioElementSource(audio);
+    _wirePlaybackCallbacks();
+}
 
 document.getElementById('song-title').textContent =
     `${songData.artist} — ${songData.title}`;
@@ -2008,7 +2023,7 @@ function _tagAnchorSpans() {
 function updateLyrics() {
     if (lyrics.length === 0) return;
 
-    const t = audio.currentTime - (gameMode ? gameMode.lrcOffset : 0);
+    const t = (playback ? playback.currentTime() : 0) - (gameMode ? gameMode.lrcOffset : 0);
     let idx = -1;
     for (let i = 0; i < lyrics.length; i++) {
         if (lyrics[i].time <= t) idx = i;
@@ -2056,12 +2071,13 @@ setInterval(updateLyrics, 100);
 
 // Play/pause
 function togglePlay() {
-    if (audio.paused) {
-        audio.play();
+    if (!playback) return;
+    if (playback.isPaused()) {
+        playback.play();
         playBtn.textContent = '⏸';
         if (gameMode.active) gameMode.resume();
     } else {
-        audio.pause();
+        playback.pause();
         playBtn.textContent = '▶';
         if (gameMode.active) gameMode.suspend();
     }
@@ -2069,30 +2085,37 @@ function togglePlay() {
 
 // Skip ±10s
 function skipBack() {
-    audio.currentTime = Math.max(0, audio.currentTime - 10);
+    if (!playback) return;
+    playback.seek(Math.max(0, playback.currentTime() - 10));
     if (gameMode.active) gameMode.onSeek();
 }
 function skipFwd() {
-    audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 10);
+    if (!playback) return;
+    playback.seek(Math.min(playback.duration() || 0, playback.currentTime() + 10));
     if (gameMode.active) gameMode.onSeek();
 }
 
-// Seek bar
-audio.addEventListener('timeupdate', () => {
-    if (!audio.duration) return;
-    seekBar.value = (audio.currentTime / audio.duration) * 100;
-    timeDisplay.textContent = `${fmt(audio.currentTime)} / ${fmt(audio.duration)}`;
-});
+// Seek bar / time display — polled (works for both <audio> and the IFrame, which has no 'timeupdate').
+setInterval(function () {
+    if (!playback) return;            // null on the IFrame path until ensureYouTubeApi() resolves (Task 5)
+    var dur = playback.duration();
+    if (!dur) return;
+    var t = playback.currentTime();
+    seekBar.value = (t / dur) * 100;
+    timeDisplay.textContent = `${fmt(t)} / ${fmt(dur)}`;
+}, 100);
 
 seekBar.addEventListener('input', () => {
-    if (audio.duration) {
-        audio.currentTime = (seekBar.value / 100) * audio.duration;
+    if (!playback) return;
+    var dur = playback.duration();
+    if (dur) {
+        playback.seek((seekBar.value / 100) * dur);
         if (gameMode.active) gameMode.onSeek();
     }
 });
 
 // Volume
-volumeBar.addEventListener('input', () => { audio.volume = volumeBar.value; });
+volumeBar.addEventListener('input', () => { if (playback) playback.setVolume(parseFloat(volumeBar.value)); });
 
 // LRC offset buttons
 function _updateOffsetDisplay() {
@@ -2150,28 +2173,48 @@ function fmt(s) {
 let overlayDismissed = false;
 let prepTimer = null;
 
-// Auto-play when audio is ready (only after overlay dismisses)
-audio.addEventListener('canplay', () => {
-    if (overlayDismissed) {
-        audio.play().then(() => { playBtn.textContent = '⏸'; }).catch(() => {});
+// Wire the source's lifecycle callbacks once the source exists (called from both load
+// paths). gameMode.suspend()/resume() are guarded no-ops (idempotent + side-effect-light),
+// so gating scoring on buffering/ad transitions via onState is safe (no flicker/thrash).
+function _wirePlaybackCallbacks() {
+    _playbackReady = false;
+    playback.onReady(function () {
+        _playbackReady = true;
+        var ps = document.getElementById('prepStatus');
+        if (ps) ps.textContent = 'Ready — pick a difficulty';
+        if (overlayDismissed) {
+            Promise.resolve(playback.play()).then(function () { playBtn.textContent = '⏸'; }).catch(function () {});
+        }
+    });
+    playback.onEnded(function () {
+        // showEndModal -> endRun does the final collect + score + settle/commit; the 1500ms
+        // delay lets late-arriving SR/whisper finals land first (each queues a dirty collect).
+        if (gameMode.active) setTimeout(function () { gameMode.showEndModal(); }, 1500);
+    });
+    playback.onState(function (state) {
+        // Freeze scoring whenever the song clock is frozen (buffering/ad/unstarted/paused) —
+        // the mic keeps advancing, so crediting then would mis-score. suspend()/resume() are
+        // guarded no-ops, so flapping states don't thrash recognition/UI.
+        var dec = playbackGateDecision(state, { embedDisabled: false });
+        if (gameMode && gameMode.active) {
+            if (dec.scoringActive) gameMode.resume(); else gameMode.suspend();
+        }
+    });
+    if (playback.onEmbedError) {
+        playback.onEmbedError(function (code) {
+            if (isEmbedDisabledError(code)) _showEmbedFallback();
+        });
     }
-});
+}
 
-audio.addEventListener('ended', function() {
-    if (gameMode.active) {
-        // The trailing prevLine and final-line scoring are now owned by the session:
-        // tick()'s finalizePrevLineIfDue finalizes the overlay (its overlapEnd is in media
-        // seconds, already passed at song end), and showEndModal -> endRun does the final
-        // collect + scoreLine + settle/commit. The old 500ms _finalizePrevLine and 800ms
-        // _lateScoreLine setTimeouts are REMOVED — running them would double-score (a
-        // duplicate .line-score-flash + double tally) on top of endRun.
-        //
-        // Keep the 1500ms delay before showEndModal so late-arriving SR/whisper finals
-        // land (each ingestFinal queues a dirty collect) and are captured by endRun's
-        // final collect pass over transcript+latestInterim.
-        setTimeout(function() { gameMode.showEndModal(); }, 1500);
-    }
-});
+// ADR-0002 graceful degradation: a video the owner blocks from embedding (error 101/150)
+// shows a friendly "pick another version" message instead of a broken page.
+function _showEmbedFallback() {
+    var ps = document.getElementById('prepStatus');
+    if (ps) ps.textContent = "This video can't be embedded — go back and try another version (a Topic-style upload usually works).";
+    var gate = document.getElementById('diffGateCards');
+    if (gate) gate.style.display = 'none';
+}
 
 // --- Difficulty gate / loading overlay ---
 
@@ -2201,7 +2244,7 @@ function renderDifficultyPreview(d) {
     try {
         plan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
             difficulty: d,
-            audioDuration: (audio && isFinite(audio.duration)) ? audio.duration : null
+            audioDuration: playback ? (playback.duration() || null) : null
         });
     } catch (e) { box.style.display = 'none'; return; }
 
@@ -2246,7 +2289,7 @@ function openDifficultyGate() {
     var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
     if (sd) document.getElementById('prepSongTitle').textContent = sd.artist + ' \u2014 ' + sd.title;
     _markSelectedCard(localStorage.getItem('arcadeDifficulty') || 'medium');
-    try { audio.pause(); playBtn.textContent = '\u25B6'; } catch (e) {}
+    try { if (playback) playback.pause(); playBtn.textContent = '\u25B6'; } catch (e) {}
     renderDifficultyPreview(localStorage.getItem('arcadeDifficulty') || 'medium');
     overlayDismissed = false;
     overlay.style.display = 'flex';
@@ -2254,23 +2297,25 @@ function openDifficultyGate() {
 
 // Begin a scored run on the chosen difficulty.
 function startRunWithDifficulty(d) {
+    if (!playback || !_playbackReady) return;   // wait for onReady so the click is the play() gesture
     localStorage.setItem('arcadeDifficulty', d);
     if (gameMode) gameMode._phraseDifficulty = d;
     _paintDiffPill(d);
     overlayDismissed = true;
     document.getElementById('prepOverlay').style.display = 'none';
     if (gameMode.active) gameMode.stop();
-    audio.currentTime = 0;
-    audio.play().then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+    playback.seek(0);
+    Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
     gameMode.start();
 }
 
 // Escape hatch \u2014 passive karaoke, no scoring.
 function justListen() {
+    if (!playback || !_playbackReady) return;   // wait for onReady (gesture-initiated play)
     clearInterval(prepTimer);
     overlayDismissed = true;
     document.getElementById('prepOverlay').style.display = 'none';
-    audio.play().then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+    Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
 }
 
 // Back-compat shim (existing callers): behaves like "just listen".

@@ -297,10 +297,13 @@ def load():
     title = (data.get("title") or meta["title"]).strip()
     artist = (data.get("artist") or meta["artist"]).strip()
 
-    try:
-        download_audio(url)
-    except Exception as e:
-        return jsonify({"error": f"Could not download audio: {str(e)}"}), 400
+    # Server-side audio download is dev-only now (online plays via the YouTube IFrame).
+    # Opt in with KARAOKEE_SERVER_AUDIO=1 to test the <audio>/temp path locally.
+    if os.environ.get("KARAOKEE_SERVER_AUDIO") == "1":
+        try:
+            download_audio(url)
+        except Exception as e:
+            return jsonify({"error": f"Could not download audio: {str(e)}"}), 400
 
     global _last_duration
     with _duration_lock:
@@ -310,6 +313,7 @@ def load():
     response = {
         "title": title,
         "artist": artist,
+        "videoId": meta.get("id", ""),
         "audioUrl": "/audio",
         "lyrics": lyrics,
     }

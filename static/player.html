@@ -394,6 +394,10 @@
         .dbg-ev-line  { color: #e040fb; }
         .dbg-ev-res   { color: #999; }
         .dbg-ev-match { color: #5af; }
+
+        /* The YouTube iframe must fill its wrap exactly — never overflow/clip — or YouTube
+           treats the player as off-screen and pauses playback after a few seconds. */
+        #ytplayer-wrap iframe { width: 100%; height: 100%; border: 0; display: block; }
     </style>
 </head>
 <body>
@@ -463,6 +467,12 @@
     </div>
 
     <audio id="audio"></audio>
+    <!-- YouTube IFrame mount. MUST stay visible AND mostly on-screen: YouTube auto-pauses
+         players that are hidden/clipped/mostly-off-screen after a few seconds. The iframe is
+         forced to FILL this box (see #ytplayer-wrap iframe rule), so it never overflows/clips. -->
+    <div id="ytplayer-wrap" style="position:fixed; right:12px; bottom:72px; width:320px; height:180px; z-index:80; border-radius:8px; overflow:hidden; background:#000;">
+        <div id="ytplayer"></div>
+    </div>
 
     <!-- Debug HUD — toggle with D key while Game Mode is active -->
     <div id="debug-hud" style="display:none"></div>
@@ -532,6 +542,9 @@
     <script src="/static/lyric-paint-helpers.js"></script>
     <script src="/static/scoring-session.js"></script>
     <script src="/static/commit-helpers.js"></script>
+    <script src="/static/playback-source.js"></script>
+    <script src="/static/youtube-source.js"></script>
+    <script src="/static/playback-gate.js"></script>
     <script src="/static/vendor/vad/ort.wasm.min.js"></script>
     <script src="/static/vendor/vad/bundle.min.js"></script>
     <script src="/static/player.js"></script>

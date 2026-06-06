@@ -138,6 +138,11 @@
             }
 
             if (data.lyricsError) {
+                // Persist this song (videoId/title/artist) BEFORE the lyrics retry. Otherwise
+                // retryLyrics() merges the new lyrics into leftover sessionStorage and keeps the
+                // PREVIOUS song's videoId — embedding the wrong (stale) video. (The old server-
+                // download arch masked this; videoId-driven IFrame playback exposes it.)
+                sessionStorage.setItem('songData', JSON.stringify(data));
                 setStatus(data.lyricsError, 'error');
                 document.getElementById('retryBtn').style.display = 'block';
                 loadBtn.disabled = false;
@@ -199,6 +204,9 @@
             if (!document.getElementById('title').value) document.getElementById('title').value = data.title;
 
             if (data.lyricsError) {
+                // Persist NOW so retryLyrics() merges lyrics into THIS upload (and clears any
+                // stale videoId from a prior YouTube load) instead of a leftover song.
+                sessionStorage.setItem('songData', JSON.stringify(data));
                 setStatus(data.lyricsError, 'error');
                 document.getElementById('retryBtn').style.display = 'block';
                 localBtn.disabled = false;
