@@ -21,3 +21,4 @@ output_telemetry/
 node_modules/
 .superpowers/
 .serena/
+.playwright-mcp/
