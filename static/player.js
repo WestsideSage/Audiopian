@@ -323,6 +323,7 @@ class GameMode {
     }
 
     _resetSessionCounters() {
+        this._reachedEnd = false;   // set true when playback fires onEnded; feeds meta.completed
         this.activeLineIdx = -1;
         this.lineWords = [];
         this._resetLineState(0, true);
@@ -1597,7 +1598,9 @@ class GameMode {
         meta.endedAt       = new Date().toISOString();
         meta.endReason     = endReason || 'manual';
         var _cDur = playback ? playback.duration() : 0;
-        meta.completed     = !!(_cDur && this._now() >= _cDur - 0.5);
+        // On the IFrame path getCurrentTime() may not quite reach duration at the ENDED event,
+        // so also honor the onEnded-set flag — a full playthrough is "completed" either way.
+        meta.completed     = !!(this._reachedEnd || (_cDur && this._now() >= _cDur - 0.5));
 
         var intentEl = document.getElementById('benchmarkIntent');
         var fairnessEl = document.getElementById('benchmarkFairness');
@@ -2187,6 +2190,7 @@ function _wirePlaybackCallbacks() {
         }
     });
     playback.onEnded(function () {
+        gameMode._reachedEnd = true;   // playback reached the end (IFrame ENDED / <audio> 'ended') -> completed
         // showEndModal -> endRun does the final collect + score + settle/commit; the 1500ms
         // delay lets late-arriving SR/whisper finals land first (each queues a dirty collect).
         if (gameMode.active) setTimeout(function () { gameMode.showEndModal(); }, 1500);
