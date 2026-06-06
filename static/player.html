@@ -463,6 +463,11 @@
     </div>
 
     <audio id="audio"></audio>
+    <!-- YouTube IFrame mount. MUST stay visible (not display:none) — YouTube pauses hidden
+         players, its ToS requires the embed be visible, and a pre-roll ad needs to render. -->
+    <div id="ytplayer-wrap" style="position:fixed; right:12px; bottom:64px; width:200px; height:113px; z-index:80; border-radius:8px; overflow:hidden;">
+        <div id="ytplayer"></div>
+    </div>
 
     <!-- Debug HUD — toggle with D key while Game Mode is active -->
     <div id="debug-hud" style="display:none"></div>
@@ -533,6 +538,8 @@
     <script src="/static/scoring-session.js"></script>
     <script src="/static/commit-helpers.js"></script>
     <script src="/static/playback-source.js"></script>
+    <script src="/static/youtube-source.js"></script>
+    <script src="/static/playback-gate.js"></script>
     <script src="/static/vendor/vad/ort.wasm.min.js"></script>
     <script src="/static/vendor/vad/bundle.min.js"></script>
     <script src="/static/player.js"></script>

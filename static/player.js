@@ -1934,12 +1934,22 @@ if (!songData) {
     window.location.href = '/';
 }
 
-// Cache-bust audio src so the browser re-fetches on every page load
-audio.src = '/audio?t=' + Date.now();
-audio.load();
-// Playback adapter. Task 5 swaps this to a YouTube IFrame source when songData.videoId
-// is present; for now (and for uploaded local files) it wraps the <audio> element.
-var playback = AudioElementSource(audio);
+// Playback source. YouTube songs (songData.videoId) play client-side via the IFrame
+// player; uploaded local files (no videoId, dev) keep the <audio> element. Both implement
+// the same playback-source contract, so the scoring/UI code is source-agnostic.
+var playback = null;          // null until the source exists (IFrame is async); callers null-guard.
+var _playbackReady = false;   // true once the source fires onReady (gates gesture-initiated play)
+if (songData.videoId) {
+    ensureYouTubeApi().then(function (YT) {
+        playback = YouTubeIframeSource(songData.videoId, 'ytplayer', { YT: YT });
+        _wirePlaybackCallbacks();
+    });
+} else {
+    audio.src = '/audio?t=' + Date.now();   // cache-bust so the browser re-fetches each load
+    audio.load();
+    playback = AudioElementSource(audio);
+    _wirePlaybackCallbacks();
+}
 
 document.getElementById('song-title').textContent =
     `${songData.artist} — ${songData.title}`;
@@ -2163,28 +2173,48 @@ function fmt(s) {
 let overlayDismissed = false;
 let prepTimer = null;
 
-// Auto-play when ready (only after overlay dismisses)
-playback.onReady(function () {
-    if (overlayDismissed) {
-        Promise.resolve(playback.play()).then(function () { playBtn.textContent = '⏸'; }).catch(function () {});
+// Wire the source's lifecycle callbacks once the source exists (called from both load
+// paths). gameMode.suspend()/resume() are guarded no-ops (idempotent + side-effect-light),
+// so gating scoring on buffering/ad transitions via onState is safe (no flicker/thrash).
+function _wirePlaybackCallbacks() {
+    _playbackReady = false;
+    playback.onReady(function () {
+        _playbackReady = true;
+        var ps = document.getElementById('prepStatus');
+        if (ps) ps.textContent = 'Ready — pick a difficulty';
+        if (overlayDismissed) {
+            Promise.resolve(playback.play()).then(function () { playBtn.textContent = '⏸'; }).catch(function () {});
+        }
+    });
+    playback.onEnded(function () {
+        // showEndModal -> endRun does the final collect + score + settle/commit; the 1500ms
+        // delay lets late-arriving SR/whisper finals land first (each queues a dirty collect).
+        if (gameMode.active) setTimeout(function () { gameMode.showEndModal(); }, 1500);
+    });
+    playback.onState(function (state) {
+        // Freeze scoring whenever the song clock is frozen (buffering/ad/unstarted/paused) —
+        // the mic keeps advancing, so crediting then would mis-score. suspend()/resume() are
+        // guarded no-ops, so flapping states don't thrash recognition/UI.
+        var dec = playbackGateDecision(state, { embedDisabled: false });
+        if (gameMode && gameMode.active) {
+            if (dec.scoringActive) gameMode.resume(); else gameMode.suspend();
+        }
+    });
+    if (playback.onEmbedError) {
+        playback.onEmbedError(function (code) {
+            if (isEmbedDisabledError(code)) _showEmbedFallback();
+        });
     }
-});
+}
 
-playback.onEnded(function() {
-    if (gameMode.active) {
-        // The trailing prevLine and final-line scoring are now owned by the session:
-        // tick()'s finalizePrevLineIfDue finalizes the overlay (its overlapEnd is in media
-        // seconds, already passed at song end), and showEndModal -> endRun does the final
-        // collect + scoreLine + settle/commit. The old 500ms _finalizePrevLine and 800ms
-        // _lateScoreLine setTimeouts are REMOVED — running them would double-score (a
-        // duplicate .line-score-flash + double tally) on top of endRun.
-        //
-        // Keep the 1500ms delay before showEndModal so late-arriving SR/whisper finals
-        // land (each ingestFinal queues a dirty collect) and are captured by endRun's
-        // final collect pass over transcript+latestInterim.
-        setTimeout(function() { gameMode.showEndModal(); }, 1500);
-    }
-});
+// ADR-0002 graceful degradation: a video the owner blocks from embedding (error 101/150)
+// shows a friendly "pick another version" message instead of a broken page.
+function _showEmbedFallback() {
+    var ps = document.getElementById('prepStatus');
+    if (ps) ps.textContent = "This video can't be embedded — go back and try another version (a Topic-style upload usually works).";
+    var gate = document.getElementById('diffGateCards');
+    if (gate) gate.style.display = 'none';
+}
 
 // --- Difficulty gate / loading overlay ---
 
@@ -2267,23 +2297,25 @@ function openDifficultyGate() {
 
 // Begin a scored run on the chosen difficulty.
 function startRunWithDifficulty(d) {
+    if (!playback || !_playbackReady) return;   // wait for onReady so the click is the play() gesture
     localStorage.setItem('arcadeDifficulty', d);
     if (gameMode) gameMode._phraseDifficulty = d;
     _paintDiffPill(d);
     overlayDismissed = true;
     document.getElementById('prepOverlay').style.display = 'none';
     if (gameMode.active) gameMode.stop();
-    if (playback) playback.seek(0);
-    Promise.resolve(playback && playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+    playback.seek(0);
+    Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
     gameMode.start();
 }
 
 // Escape hatch \u2014 passive karaoke, no scoring.
 function justListen() {
+    if (!playback || !_playbackReady) return;   // wait for onReady (gesture-initiated play)
     clearInterval(prepTimer);
     overlayDismissed = true;
     document.getElementById('prepOverlay').style.display = 'none';
-    Promise.resolve(playback && playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+    Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
 }
 
 // Back-compat shim (existing callers): behaves like "just listen".
