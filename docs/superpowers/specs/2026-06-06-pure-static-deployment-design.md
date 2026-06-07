@@ -107,13 +107,13 @@ Current fallback hardcodes `audio.src = '/audio?t=…'` ([player.js:1951](../../
 
 **Design — split the one method into two phases:**
 - **`_startMicAnalysis()` — always-on (free and premium):** `getUserMedia` → `AudioContext` → `_vadAnalyser` (RMS) → `_startNeuralVad()`. This is everything the frozen scoring path needs for voice energy. Runs for every player, $0.
-- **`_startRealtimeWhisper()` — premium only (`keyStore.recognizerMode()==='premium'`):** mint a client-secret directly at `https://api.openai.com/v1/realtime/client_secrets` with the user's key (the session-config payload currently built server-side in [app.py:148](../../../app.py) `_create_openai_realtime_transcription_session` — model `gpt-realtime-whisper`, `language: en`, optional `delay` — moves client-side), then connect via the existing [realtime-whisper.js](../../../static/realtime-whisper.js) path.
+- **`_startRealtimeWhisper()` — premium only (`keyStore.recognizerMode()==='premium'`):** mint a client-secret directly at `https://api.openai.com/v1/realtime/client_secrets` with the user's key (the session-config payload currently built server-side in [app.py:148](../../../app.py) `_create_openai_realtime_transcription_session` — model `gpt-realtime-whisper`, `language: en`, optional `delay` — moves client-side), then connect via the existing [realtime-whisper.js](../../../static/realtime-whisper.js) path. It **reuses the `_whisperStream` that `_startMicAnalysis` created** (the WebRTC connection adds tracks from that stream) — so mic-analysis is a **hard prerequisite**, not a parallel path; the split must order them accordingly.
 
 **Mode source:** `_isRealtimeWhisperProvider()` (and the `sampleRate` choice at [player.js:806](../../../static/player.js)) derive from `key-store`, not `_checkWhisperServerStatus()`. The free lane runs the AudioContext at the existing non-realtime sample rate (16000); premium uses 24000.
 
 **Local faster-whisper path retired from the browser.** The AudioWorklet + `/transcribe` branch ([player.js:818-846](../../../static/player.js)) only ran when the *server* reported provider `local`. Since the browser's mode now comes from `key-store` and is only ever `free` or `premium` (never `local`), that branch is unreachable and is **removed from player.js** — there is one `player.js` for both dev and prod, and it never depends on a server probe. The Python `/transcribe` + faster-whisper code stays in [app.py](../../../app.py) for its existing pytest coverage but is no longer called by the player; local-dev transcription uses browser-SR (free) or a pasted key (premium), exactly like production.
 
-**Invariant:** the inputs to the frozen scoring path (browser-SR finals/interims, RMS energy, neural VAD state) are identical to today on both lanes. Only their *triggering* and *provider source* change.
+**Invariant:** the inputs to the frozen scoring path (browser-SR finals/interims, RMS energy, neural VAD state) are identical to today on both lanes. Only their *triggering* and *provider source* change. Validate this **concretely** — diff the actual `_vadAnalyser` energy signal on one identical recorded input before vs. after the split, not merely by comparing run scores.
 
 ## 9. Deploy — Cloudflare Pages
 
@@ -147,11 +147,21 @@ Current fallback hardcodes `audio.src = '/audio?t=…'` ([player.js:1951](../../
 
 ## 12. Risks / open implementation notes
 
-- **VAD parity (highest):** §8 must keep the free lane's energy/VAD behavior bit-for-bit. Validate with the manual smoke + a telemetry compare (energy-gate behavior) against a current local run before flag-flip.
+- **Free-lane (browser-SR-only) scoring quality — THE make-or-break, validate FIRST.** Every honest-run validation to date (93–97% / S) used the **premium `gpt-realtime-whisper`** path; the **free** lane (~99% of demo visitors: browser-SR + VAD, no key) has **not** been validated for scoring honesty/feel. It is uniquely uncertain because (a) [ADR-0001](../../adr/0001-tiered-recognizer-byo-key-deploy.md) notes browser SR *"rarely fires `final` during continuous singing"* — sustained singing/melisma is its worst case — and (b) the frozen scoring thresholds were tuned against whisper-quality ASR, so sparser browser-SR input could make honest singing under-score. **First executable step of the plan:** one honest browser-SR-only run on a real song; confirm it scores honestly and feels good. If it doesn't, free-lane reconciliation/threshold tuning — not the migration — is the real work, and we want to know that *before* writing four modules. (This is the assumption the entire free-demo thesis rests on.)
+- **`_redirects` rewrite — spike on a real Cloudflare preview, day-one.** `/static/* /:splat 200` is the one deploy-critical assumption left (does an existing-asset lookup pre-empt the rewrite? rewrite vs. redirect semantics?). De-risk it with a throwaway preview deploy the way the IFrame clock was spiked. Fallback if it misbehaves: edit the ~16 `/static/` asset refs to root-relative + add one Flask dev route.
+- **VAD parity:** §8 must keep the free lane's energy/VAD behavior bit-for-bit; use the concrete energy-signal diff described in §8 (not just score comparison) before any flag-flip.
 - **oEmbed coverage:** some videos (age-restricted/private) return no oEmbed; the manual-title/artist retry is the safety net.
 - **Realtime mint payload:** confirm the exact client-secret request body for `gpt-realtime-whisper` against current OpenAI docs (Context7) during implementation — endpoint + CORS verified, payload shape to be reconfirmed.
-- **Cloudflare `_redirects` semantics:** verify `/static/* /:splat 200` rewrite (not redirect) behavior on a preview deploy.
 - **Arcade default flip** interacts with the standing sing-test gate ([[arcade-scoring-status]] / [ADR-0003](../../adr/0003-arcade-default-lyric-axis-frozen.md)): the gate is a documented limitation for the demo, not a blocker.
+
+### Implementation sequencing (carry into the plan)
+"Everything" is the *scope*, not one monolithic plan. Order to front-load risk and reach a live checkpoint before polish:
+1. **Day-one de-risk:** validate free-lane scoring (risk #1) + spike `_redirects` on a Cloudflare preview — *before* building modules.
+2. **Core:** the four browser modules + the recognizer mic/VAD split + a **real Cloudflare deploy**.
+3. **Validate live** on the deployed preview (free lane + anti-cheese + local upload).
+4. **Polish:** desktop-Chrome interstitial, score share-image, BYO-key lane.
+
+This front-loads the two riskiest pieces (the player.js surgery and a real deploy) and yields a shareable link to react to before the polish work.
 
 ## 13. External code-review incorporated (2026-06-06)
 
