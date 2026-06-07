@@ -1873,12 +1873,15 @@ class GameMode {
             if (hero) hero.style.display = 'block';
             if (legacy) legacy.style.display = 'none';
         } else {
-            if (!this.active || this.totalWords === 0) return;
-            var lpct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
+            // Always show the end screen on song-end (was: early-return when nothing scored,
+            // which hid the modal on skipped/instrumental runs). Guard the division for the
+            // zero-scored case so it reads 0% instead of NaN%.
+            var _wt = this.weightedTotal || 0;
+            var lpct = _wt > 0 ? Math.round((this.weightedMatched / _wt) * 100) : 0;
             document.getElementById('modalScore').textContent = lpct + '%';
-            document.getElementById('modalWords').textContent = this.matchedWords + '/' + this.totalWords;
-            document.getElementById('modalLines').textContent = this.perfectLines + '/' + this.linesScored;
-            document.getElementById('modalStreak').textContent = this.bestStreak;
+            document.getElementById('modalWords').textContent = (this.matchedWords || 0) + '/' + (this.totalWords || 0);
+            document.getElementById('modalLines').textContent = (this.perfectLines || 0) + '/' + (this.linesScored || 0);
+            document.getElementById('modalStreak').textContent = (this.bestStreak || 0);
             if (hero) hero.style.display = 'none';
             if (legacy) legacy.style.display = 'block';
         }
