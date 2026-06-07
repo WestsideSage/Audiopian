@@ -314,6 +314,7 @@ class GameMode {
 
     _resetSessionCounters() {
         this._reachedEnd = false;   // set true when playback fires onEnded; feeds meta.completed
+        this._endShown = false;     // idempotency latch for showEndModal (reset per song)
         this.activeLineIdx = -1;
         this.lineWords = [];
         this._resetLineState(0, true);
@@ -1815,6 +1816,8 @@ class GameMode {
     }
 
     showEndModal() {
+        if (this._endShown) return;   // idempotent: onEnded AND the time-based fallback may both call this
+        this._endShown = true;
         var legacy = document.getElementById('legacyEnd');
         var hero = document.getElementById('gradeHero');
         var feedback = document.getElementById('benchmarkFeedback');
@@ -1999,6 +2002,16 @@ function updateLyrics() {
     if (gameMode.active) {
         gameMode.updateHotWord();
         if (gameMode._session) gameMode._renderEvents(KaraokeeScoringSession.tick(gameMode._session, gameMode._now()));
+        // Fallback completion: the YouTube IFrame ENDED event is unreliable near the true end
+        // (playback often stops ~1s short and never fires it), so onEnded may never trigger the
+        // end screen. If playback has effectively reached the end, fire the same path once.
+        if (!gameMode._reachedEnd && playback) {
+            var _dur = playback.duration();
+            if (_dur && playback.currentTime() >= _dur - 1.5) {
+                gameMode._reachedEnd = true;
+                setTimeout(function () { gameMode.showEndModal(); }, 1500);
+            }
+        }
     }
 
     if (idx === currentLineIndex) return;
