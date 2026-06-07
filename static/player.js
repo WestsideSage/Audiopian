@@ -224,25 +224,15 @@ class GameMode {
 
         renderLyricsGameMode();
         this._setupRecognition();
-        this._startWhisperTrack(); // async — Track 2 starts in background
+        this._startMicAnalysis(); // async — mic + VAD always; realtime attaches only with a key
 
-        // Fetch server Whisper state and store for telemetry and HUD
-        fetch('/whisper-status')
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                this._whisperServerStatus = {
-                    state:     data.status || 'unknown',
-                    reason:    data.error  || null,
-                    provider:  data.provider || null,
-                    model:     data.model || null,
-                    checkedAt: Date.now(),
-                };
-                this._renderAsrProviderStatus();
-            }.bind(this))
-            .catch(function() {
-                this._whisperServerStatus = { state: 'error', reason: 'status fetch failed', checkedAt: Date.now(), provider: null, model: null };
-                this._renderAsrProviderStatus();
-            }.bind(this));
+        // Recognizer state is local now (no server): browser SR is the free default; a
+        // stored OpenAI key promotes to realtime whisper. Drives the HUD + downstream gating.
+        var _premium = !!(window.KaraokeeKeyStore && window.KaraokeeKeyStore.recognizerMode() === 'premium');
+        this._whisperServerStatus = _premium
+            ? { state: 'ready', reason: null, provider: 'openai_realtime', model: 'gpt-realtime-whisper', checkedAt: Date.now() }
+            : { state: 'ready', reason: null, provider: 'browser_sr', model: 'Web Speech API', checkedAt: Date.now() };
+        this._renderAsrProviderStatus();
 
         document.getElementById('score-display').style.display = 'flex';
         document.getElementById('score-pct').textContent = '0%';
@@ -509,7 +499,8 @@ class GameMode {
     }
 
     _isRealtimeWhisperProvider() {
-        return !!(this._whisperServerStatus && this._whisperServerStatus.provider === 'openai_realtime');
+        // Static build: recognizer mode is local — a stored OpenAI key promotes to realtime.
+        return !!(window.KaraokeeKeyStore && window.KaraokeeKeyStore.recognizerMode() === 'premium');
     }
 
     _buildRealtimeWhisperPrompt() {
@@ -794,16 +785,16 @@ class GameMode {
         return counts;
     }
 
-    async _startWhisperTrack() {
+    async _startMicAnalysis() {
         this._whisperTrackStatus.startAttempts++;
         try {
             this._whisperTrackStatus.state = 'starting';
-            await this._checkWhisperServerStatus();
-            this._whisperTrackStatus.provider = this._whisperServerStatus.provider || 'local';
+            var premium = this._isRealtimeWhisperProvider();
+            this._whisperTrackStatus.provider = premium ? 'openai_realtime' : 'browser_sr';
             this._whisperStream = await navigator.mediaDevices.getUserMedia({
                 audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
             });
-            var sampleRate = this._isRealtimeWhisperProvider() ? 24000 : 16000;
+            var sampleRate = premium ? 24000 : 16000;
             this._whisperCtx    = new AudioContext({ sampleRate: sampleRate });
             const src  = this._whisperCtx.createMediaStreamSource(this._whisperStream);
             // VAD AnalyserNode — polled every 100ms, decoupled from Whisper chunks
@@ -811,39 +802,12 @@ class GameMode {
             this._vadAnalyser.fftSize = 256;
             this._vadAnalyserBuf = new Float32Array(this._vadAnalyser.fftSize);
             src.connect(this._vadAnalyser);
-            if (this._isRealtimeWhisperProvider()) {
+            // Neural VAD always runs (it self-gates on KARAOKEE_V2) so the free lane keeps
+            // its voice-energy edges feeding the (unchanged) scoring path.
+            await this._startNeuralVad();
+            // Premium only: attach the OpenAI realtime recognizer to the SAME mic stream.
+            if (premium) {
                 await this._openRealtimeWhisperConnection();
-                await this._startNeuralVad();
-            } else {
-                await this._whisperCtx.audioWorklet.addModule('/static/audio-processor.js');
-                this._whisperNode = new AudioWorkletNode(this._whisperCtx, 'chunk-processor');
-                this._whisperNode.port.onmessage = (e) => {
-                    if (!this.active) return;
-                    var msg = e.data;
-                    if (msg && msg.type === 'energy') {
-                        // isSpeaking and baseline calibration are now handled in updateHotWord via AnalyserNode
-                    } else if (msg && msg.type === 'chunk') {
-                        if (this._canDispatchWhisperChunk()) {
-                            this._sendChunkToWhisper(msg.data);
-                        } else {
-                            this._dropWhisperChunkNotReady();
-                        }
-                    } else if (msg && msg.type === 'overlap-chunk') {
-                        if (this._whisperInFlight < 2 && this._canDispatchWhisperChunk()) {
-                            this._sendChunkToWhisper(msg.data);
-                        } else {
-                            this._dropWhisperChunkNotReady();
-                        }
-                    } else if (msg instanceof Float32Array) {
-                        // Backward compat: raw Float32Array (shouldn't happen but safe)
-                        if (this._canDispatchWhisperChunk()) {
-                            this._sendChunkToWhisper(msg);
-                        } else {
-                            this._dropWhisperChunkNotReady();
-                        }
-                    }
-                };
-                src.connect(this._whisperNode);
             }
             this._whisperTrackStatus.state = 'ready';
             this._renderAsrProviderStatus();
@@ -899,18 +863,9 @@ class GameMode {
 
     /** Poll /whisper-status and update _whisperServerStatus. Returns a Promise. */
     _checkWhisperServerStatus() {
-        return fetch('/whisper-status')
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                this._whisperServerStatus = {
-                    state:     data.status || 'unknown',
-                    reason:    data.error  || null,
-                    provider:  data.provider || null,
-                    model:     data.model || null,
-                    checkedAt: Date.now(),
-                };
-            }.bind(this))
-            .catch(function() { /* silent — best effort */ }.bind(this));
+        // Static build: no server to poll. Status is derived from key-store at start();
+        // kept as a resolved no-op so any legacy caller/poller is inert.
+        return Promise.resolve();
     }
 
     _pollWhisperStatusThrottled(intervalMs) {
@@ -1719,13 +1674,16 @@ class GameMode {
         try {
             var payload = this._buildTelemetryPayload(endReason);
             if (!payload) return;
-            fetch('/telemetry', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            }).then(function (r) { return r.json(); })
-              .then(function (d) { console.log('[Telemetry] Saved:', d && d.path); })
-              .catch(function (e) { console.warn('[Telemetry] Save failed:', e); });
+            // Telemetry is OFF online (ADR-0003); only persist to the dev harness on localhost.
+            if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+                fetch('/telemetry', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).then(function (r) { return r.json(); })
+                  .then(function (d) { console.log('[Telemetry] Saved:', d && d.path); })
+                  .catch(function (e) { console.warn('[Telemetry] Save failed:', e); });
+            }
         } catch (e) { console.warn('[Telemetry] finalize error:', e); }
     }
 
@@ -2144,7 +2102,7 @@ document.getElementById('offsetPlus').addEventListener('click', function() {
 
 // Experimental Scoring V2 (adaptive VAD + phrase-engine dual-display panel).
 // Off by default; the current scorer stays the headline. Press V to A/B it.
-window.KARAOKEE_V2 = (localStorage.getItem('karaokee_v2') === '1');
+window.KARAOKEE_V2 = (localStorage.getItem('karaokee_v2') !== '0'); // arcade is the default; press V to opt out
 
 // Debug HUD — press D to toggle (works any time, not just in Game Mode)
 document.addEventListener('keydown', (e) => {
