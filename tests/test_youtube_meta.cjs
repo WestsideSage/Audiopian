@@ -21,6 +21,10 @@ assert.deepStrictEqual(YM.parseTitleArtist('Black Moon - Who Got Da Props', 'Som
     { artist: 'Black Moon', title: 'Who Got Da Props' });
 assert.deepStrictEqual(YM.parseTitleArtist('Just A Title', 'CoolArtistVEVO'),
     { artist: 'CoolArtistVEVO', title: 'Just A Title' });
+// YouTube "Topic" channels: strip the " - Topic" suffix from the channel name.
+assert.deepStrictEqual(YM.parseTitleArtist('Silkk da Shocka', 'Isaiah Rashad - Topic'),
+    { artist: 'Isaiah Rashad', title: 'Silkk da Shocka' });
+assert.deepStrictEqual(YM.parseTitleArtist('Silkk da Shocka', 'Isaiah Rashad - Topic').artist, 'Isaiah Rashad');
 
 // --- fetchMeta ---
 (async function () {

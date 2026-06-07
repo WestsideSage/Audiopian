@@ -18,9 +18,12 @@ function videoIdFromUrl(url) {
 
 function parseTitleArtist(title, author) {
     var t = String(title || '');
+    // YouTube auto-generated "Topic" channels report author as "Artist - Topic";
+    // strip that suffix so the lyrics search gets a clean artist.
+    var cleanAuthor = String(author || '').replace(/\s*-\s*topic\s*$/i, '').trim();
     var idx = t.indexOf(' - ');
     if (idx !== -1) return { artist: t.slice(0, idx).trim(), title: t.slice(idx + 3).trim() };
-    return { artist: String(author || '').trim(), title: t.trim() };
+    return { artist: cleanAuthor, title: t.trim() };
 }
 
 async function fetchMeta(url, deps) {

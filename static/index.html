@@ -82,7 +82,7 @@
 
             setStatus('Ready! Loading player...', 'success');
             sessionStorage.setItem('songData', JSON.stringify(data));
-            window.location.href = 'player.html';
+            window.location.href = '/player';
         }
 
         async function retryLyrics() {
@@ -106,7 +106,7 @@
             existing.artist = artist;
             sessionStorage.setItem('songData', JSON.stringify(existing));
             setStatus('Lyrics found! Loading player...', 'success');
-            window.location.href = 'player.html';
+            window.location.href = '/player';
         }
 
         // --- Load a local audio file (dev-harness only; hidden on the deployed CDN) ---
@@ -145,7 +145,7 @@
 
             setStatus('Ready! Loading player...', 'success');
             sessionStorage.setItem('songData', JSON.stringify(data));
-            window.location.href = 'player.html';
+            window.location.href = '/player';
         }
 
         function setStatus(msg, type) {
