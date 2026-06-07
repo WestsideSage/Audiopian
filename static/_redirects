@@ -1,0 +1,7 @@
+# Cloudflare Pages rewrites (publish root = static/).
+# The HTML references assets as /static/*; rewrite those to the published root so they
+# resolve without editing every <script>/<link>. A genuinely missing file still 404s
+# (the rewrite target won't exist), so this does not mask broken assets.
+/static/* /:splat 200
+# Internal nav + bookmarks to /player serve the player page.
+/player /player.html 200
