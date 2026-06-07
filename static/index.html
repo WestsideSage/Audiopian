@@ -46,6 +46,16 @@
             <input type="file" id="localFile" accept="audio/*" style="margin-bottom:10px" />
             <button id="loadLocalBtn" onclick="loadLocal()">🎵 Load Local File</button>
         </div>
+
+        <details class="byok" style="margin-top:16px">
+          <summary style="cursor:pointer;color:#aaa;font-size:0.85rem">Sharper recognition (optional) — bring your own OpenAI key</summary>
+          <input id="openaiKey" type="password" placeholder="sk-…" autocomplete="off" style="margin-top:8px" />
+          <div style="display:flex;gap:8px">
+            <button id="saveKeyBtn" type="button">Save</button>
+            <button id="clearKeyBtn" type="button" style="background:#334">Clear</button>
+          </div>
+          <p style="font-size:0.75rem;color:#666;margin-top:6px">Stored in this browser and sent only to OpenAI — never to Karaokee.</p>
+        </details>
     </div>
 
     <script src="/static/lyrics-client.js"></script>
@@ -195,6 +205,22 @@
                 var sec = document.getElementById('localUploadSection');
                 if (sec) sec.style.display = 'none';
             }
+        })();
+
+        // BYO-key: persist an OpenAI key locally (premium recognizer lane). The key is
+        // stored in this browser only and sent directly to OpenAI at mint time.
+        (function () {
+            var inp = document.getElementById('openaiKey');
+            if (!inp || !window.KaraokeeKeyStore) return;
+            inp.value = window.KaraokeeKeyStore.getKey();
+            document.getElementById('saveKeyBtn').onclick = function () {
+                window.KaraokeeKeyStore.setKey(inp.value);
+                setStatus('Key saved — premium recognition on.', 'success');
+            };
+            document.getElementById('clearKeyBtn').onclick = function () {
+                window.KaraokeeKeyStore.clearKey(); inp.value = '';
+                setStatus('Key cleared — free recognition.', '');
+            };
         })();
     </script>
 </body>

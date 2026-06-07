@@ -525,10 +525,19 @@ class GameMode {
             return Promise.reject(new Error('Realtime Whisper helper is unavailable'));
         }
         var prompt = this._buildRealtimeWhisperPrompt();
-        return fetch('/realtime-transcription-session', {
+        var key = window.KaraokeeKeyStore && window.KaraokeeKeyStore.getKey();
+        if (!key) return Promise.reject(new Error('No OpenAI key for premium recognition'));
+        // BYO-key: mint the ephemeral client secret DIRECTLY from the browser with the
+        // user's key (no server broker on the static deploy). The key is sent only to
+        // OpenAI; the returned short-lived secret authorizes the /v1/realtime/calls WebRTC
+        // connection below. Body mirrors app.py _create_openai_realtime_transcription_session.
+        var mintBody = KaraokeeRealtimeWhisper.buildClientSecretBody({
+            model: 'gpt-realtime-whisper', language: 'en', prompt: prompt,
+        });
+        return fetch('https://api.openai.com/v1/realtime/client_secrets', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: prompt }),
+            headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+            body: JSON.stringify(mintBody),
         })
             .then(function(resp) {
                 if (!resp.ok) {
