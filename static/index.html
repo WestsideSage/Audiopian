@@ -6,6 +6,17 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <div id="unsupported" style="display:none;position:fixed;inset:0;background:#111;color:#eee;
+         align-items:center;justify-content:center;text-align:center;padding:2rem;z-index:9999">
+      <div>
+        <h2>🎤 Karaokee needs desktop Chrome or Edge</h2>
+        <p style="max-width:32rem;line-height:1.6;color:#bbb;margin:0 auto">
+          The free voice recognition runs only in <strong>desktop Chrome or Edge</strong> with a
+          microphone. Open this link in desktop Chrome or Edge to play.
+        </p>
+      </div>
+    </div>
+
     <div class="card">
         <h1>🎤 Karaokee</h1>
 
@@ -41,7 +52,25 @@
     <script src="/static/youtube-meta.js"></script>
     <script src="/static/key-store.js"></script>
     <script src="/static/song-loader.js"></script>
+    <script src="/static/browser-support.js"></script>
     <script>
+        // Desktop-Chrome-only gate: the free lane needs the Web Speech API (desktop
+        // Chrome/Edge). Show a blocking overlay otherwise. Deep-links to /player bounce
+        // here for lack of song data, so gating index covers both pages. Fails OPEN only
+        // if the helper itself failed to load (don't block everyone on a script error).
+        (function () {
+            var supported = (typeof isSupportedBrowser === 'function')
+                ? isSupportedBrowser({
+                    userAgent: navigator.userAgent,
+                    hasSpeechRecognition: !!(window.SpeechRecognition || window.webkitSpeechRecognition)
+                })
+                : true;
+            if (!supported) {
+                var el = document.getElementById('unsupported');
+                if (el) el.style.display = 'flex';
+            }
+        })();
+
         const statusEl = document.getElementById('status');
         const loadBtn = document.getElementById('loadBtn');
 
