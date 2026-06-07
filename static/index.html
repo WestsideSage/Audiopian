@@ -9,14 +9,10 @@
     <div class="card">
         <h1>🎤 Karaokee</h1>
 
-        <div class="search-row">
-            <input type="text" id="searchQ" placeholder="Search for a song..." />
-            <button onclick="searchSongs()">🔍</button>
-        </div>
-
-        <div class="search-results" id="searchResults"></div>
-
-        <div class="search-divider">or paste a URL directly</div>
+        <p style="font-size:0.85rem;color:#888;margin:4px 0 14px">
+            Paste a YouTube link to sing any song. Don't have the link?
+            <a href="https://www.youtube.com/results" target="_blank" rel="noopener">Search YouTube ↗</a>
+        </p>
 
         <label for="url">YouTube URL</label>
         <input type="text" id="url" placeholder="https://youtube.com/watch?v=..." />
@@ -33,115 +29,50 @@
             Retry with edited title/artist
         </button>
 
-        <div class="search-divider">or load a local audio file</div>
-        <p style="font-size:0.78rem;color:#666;margin:-8px 0 10px">Fill in Artist + Title above for synced lyrics, then choose a file you already own.</p>
-        <input type="file" id="localFile" accept="audio/*" style="margin-bottom:10px" />
-        <button id="loadLocalBtn" onclick="loadLocal()">🎵 Load Local File</button>
+        <div id="localUploadSection">
+            <div class="search-divider">or load a local audio file</div>
+            <p style="font-size:0.78rem;color:#666;margin:-8px 0 10px">Fill in Artist + Title above for synced lyrics, then choose a file you already own.</p>
+            <input type="file" id="localFile" accept="audio/*" style="margin-bottom:10px" />
+            <button id="loadLocalBtn" onclick="loadLocal()">🎵 Load Local File</button>
+        </div>
     </div>
 
+    <script src="/static/lyrics-client.js"></script>
+    <script src="/static/youtube-meta.js"></script>
+    <script src="/static/key-store.js"></script>
+    <script src="/static/song-loader.js"></script>
     <script>
         const statusEl = document.getElementById('status');
         const loadBtn = document.getElementById('loadBtn');
 
-        // --- Search ---
-        async function searchSongs() {
-            const q = document.getElementById('searchQ').value.trim();
-            if (!q) return;
-            setStatus('Searching...', '');
-            const resp = await fetch('/search?q=' + encodeURIComponent(q));
-            if (!resp.ok) { setStatus('Search failed.', 'error'); return; }
-            const results = await resp.json();
-            renderResults(results);
-            setStatus('', '');
-        }
-
-        function renderResults(results) {
-            const container = document.getElementById('searchResults');
-            if (!results.length) {
-                container.style.display = 'block';
-                container.innerHTML = '<div class="search-result-item"><div class="search-result-title" style="color:#666">No results found</div></div>';
-                return;
-            }
-            container.style.display = 'block';
-            container.innerHTML = results.map((r, i) =>
-                `<div class="search-result-item" onclick="selectResult(${i})">
-                    <div class="search-result-title">${escHtml(r.title)}</div>
-                    <div class="search-result-meta">${escHtml(r.uploader)} &middot; ${fmtDuration(r.duration)}</div>
-                </div>`
-            ).join('');
-            container._results = results;
-        }
-
-        function selectResult(i) {
-            const results = document.getElementById('searchResults')._results;
-            const r = results[i];
-            document.getElementById('url').value = r.url;
-            // Parse title/artist using same dash-split logic as backend
-            const [artist, title] = parseTitleArtist(r.title, r.uploader);
-            document.getElementById('artist').value = artist;
-            document.getElementById('title').value = title;
-            document.getElementById('searchResults').style.display = 'none';
-            loadSong();
-        }
-
-        function parseTitleArtist(title, uploader) {
-            if (title.includes(' - ')) {
-                const idx = title.indexOf(' - ');
-                return [title.slice(0, idx).trim(), title.slice(idx + 3).trim()];
-            }
-            return [uploader, title];
-        }
-
-        function escHtml(s) {
-            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-        }
-
-        function fmtDuration(s) {
-            if (!s) return '';
-            const m = Math.floor(s / 60);
-            const sec = Math.floor(s % 60).toString().padStart(2, '0');
-            return `${m}:${sec}`;
-        }
-
-        // --- Load Song ---
+        // --- Load Song (browser-only: oEmbed metadata + lrclib lyrics, no server) ---
         async function loadSong() {
             const url = document.getElementById('url').value.trim();
             if (!url) { setStatus('Please enter a YouTube URL.', 'error'); return; }
 
             loadBtn.disabled = true;
-            setStatus('Fetching metadata...', '');
+            setStatus('Fetching song…', '');
 
-            const metaResp = await fetch('/load', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    url,
-                    artist: document.getElementById('artist').value.trim() || undefined,
-                    title: document.getElementById('title').value.trim() || undefined,
-                })
-            });
-
-            if (!metaResp.ok) {
-                const err = await metaResp.json();
-                setStatus(err.error || 'Failed to load song.', 'error');
+            let data;
+            try {
+                data = await KaraokeeSongLoader.loadFromUrl(url);
+            } catch (e) {
+                setStatus(e.message || 'Could not load that URL.', 'error');
                 loadBtn.disabled = false;
                 return;
             }
 
-            const data = await metaResp.json();
-
-            if (!document.getElementById('artist').value) {
-                document.getElementById('artist').value = data.artist;
-            }
-            if (!document.getElementById('title').value) {
-                document.getElementById('title').value = data.title;
-            }
+            // user-typed title/artist override the oEmbed values
+            const aOv = document.getElementById('artist').value.trim();
+            const tOv = document.getElementById('title').value.trim();
+            if (aOv) data.artist = aOv;
+            if (tOv) data.title = tOv;
+            if (!aOv) document.getElementById('artist').value = data.artist;
+            if (!tOv) document.getElementById('title').value = data.title;
 
             if (data.lyricsError) {
-                // Persist this song (videoId/title/artist) BEFORE the lyrics retry. Otherwise
-                // retryLyrics() merges the new lyrics into leftover sessionStorage and keeps the
-                // PREVIOUS song's videoId — embedding the wrong (stale) video. (The old server-
-                // download arch masked this; videoId-driven IFrame playback exposes it.)
+                // Persist videoId/title/artist BEFORE the lyrics retry so retryLyrics()
+                // merges new lyrics into THIS song (not a leftover one).
                 sessionStorage.setItem('songData', JSON.stringify(data));
                 setStatus(data.lyricsError, 'error');
                 document.getElementById('retryBtn').style.display = 'block';
@@ -151,19 +82,20 @@
 
             setStatus('Ready! Loading player...', 'success');
             sessionStorage.setItem('songData', JSON.stringify(data));
-            window.location.href = '/player';
+            window.location.href = 'player.html';
         }
 
         async function retryLyrics() {
             const title = document.getElementById('title').value.trim();
             const artist = document.getElementById('artist').value.trim();
             setStatus('Searching for lyrics...', '');
-            const resp = await fetch('/retry-lyrics', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, artist })
-            });
-            const data = await resp.json();
+            let data;
+            try {
+                const lyrics = await KaraokeeLyricsClient.fetchLyrics({ title, artist });
+                data = lyrics.length ? { lyrics } : { lyricsError: 'Still no synced lyrics for that title/artist.' };
+            } catch (e) {
+                data = { lyricsError: 'Lyrics lookup failed.' };
+            }
             if (data.lyricsError) {
                 setStatus(data.lyricsError, 'error');
                 return;
@@ -174,10 +106,10 @@
             existing.artist = artist;
             sessionStorage.setItem('songData', JSON.stringify(existing));
             setStatus('Lyrics found! Loading player...', 'success');
-            window.location.href = '/player';
+            window.location.href = 'player.html';
         }
 
-        // --- Load a local audio file (bypasses YouTube entirely) ---
+        // --- Load a local audio file (dev-harness only; hidden on the deployed CDN) ---
         async function loadLocal() {
             const file = document.getElementById('localFile').files[0];
             if (!file) { setStatus('Please choose an audio file.', 'error'); return; }
@@ -204,8 +136,6 @@
             if (!document.getElementById('title').value) document.getElementById('title').value = data.title;
 
             if (data.lyricsError) {
-                // Persist NOW so retryLyrics() merges lyrics into THIS upload (and clears any
-                // stale videoId from a prior YouTube load) instead of a leftover song.
                 sessionStorage.setItem('songData', JSON.stringify(data));
                 setStatus(data.lyricsError, 'error');
                 document.getElementById('retryBtn').style.display = 'block';
@@ -215,7 +145,7 @@
 
             setStatus('Ready! Loading player...', 'success');
             sessionStorage.setItem('songData', JSON.stringify(data));
-            window.location.href = '/player';
+            window.location.href = 'player.html';
         }
 
         function setStatus(msg, type) {
@@ -225,13 +155,18 @@
 
         document.addEventListener('keydown', e => {
             if (e.key === 'Enter') {
-                if (document.activeElement === document.getElementById('searchQ')) {
-                    searchSongs();
-                } else {
-                    loadSong();
-                }
+                loadSong();
             }
         });
+
+        // Local-file upload is a dev-harness feature; hide it on the deployed CDN.
+        (function () {
+            var isDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            if (!isDev) {
+                var sec = document.getElementById('localUploadSection');
+                if (sec) sec.style.display = 'none';
+            }
+        })();
     </script>
 </body>
 </html>
