@@ -3,5 +3,6 @@
 # resolve without editing every <script>/<link>. A genuinely missing file still 404s
 # (the rewrite target won't exist), so this does not mask broken assets.
 /static/* /:splat 200
-# Internal nav + bookmarks to /player serve the player page.
-/player /player.html 200
+# NOTE: /player is intentionally NOT redirected here. Cloudflare serves it natively via
+# clean URLs (/player -> player.html); adding an explicit /player -> /player.html rule
+# collides with that and causes a /player -> /player redirect loop. (Dev: Flask serves /player.)
