@@ -20,9 +20,9 @@ All three external dependencies the browser must call cross-origin return permis
 |---|---|
 | lrclib `GET /api/search` | `access-control-allow-origin: *` |
 | YouTube `GET /oembed` | `Access-Control-Allow-Origin: <origin>` (reflected) |
-| OpenAI `/v1/realtime/sessions`, `/v1/realtime/client_secrets`, `/v1/realtime` | `access-control-allow-origin: *` + `access-control-allow-headers: authorization,content-type` |
+| OpenAI `/v1/realtime/client_secrets` (mint) **and** `/v1/realtime/calls` (WebRTC SDP connect) — the two endpoints this app actually uses ([app.py:38](../../../app.py), [player.js:108](../../../static/player.js)) | both `access-control-allow-origin: *` + `access-control-allow-headers: authorization,content-type` |
 
-The OpenAI result is decisive for BYO-key: the browser may send an `Authorization` header cross-origin, so it can mint a realtime client-secret and connect **with the user's own key, no server broker**.
+The OpenAI result is decisive for BYO-key: the browser may send an `Authorization` header cross-origin to both the mint and the connect endpoint, so it can mint a realtime client-secret and open the session **with the user's own key, no server broker**. **Caveat:** these are CORS *preflight* results — they prove the browser *may* call the endpoints, not that an authenticated mint+connect works end-to-end. BYO-key is not "proven" until a real-key smoke passes (§12).
 
 ## 2. Decisions (locked in brainstorming)
 
@@ -36,7 +36,7 @@ The OpenAI result is decisive for BYO-key: the browser may send an `Authorizatio
 
 **Goals**
 - Deployed artifact is 100% static; the free experience costs us $0 and needs no server.
-- Preserve the exact gameplay/scoring behavior of the current local app on the free lane.
+- Preserve the **browser-SR + VAD inputs** to the frozen scoring path; validate the free lane by **product feel**, not exact parity. (The current local app may also run whisper Track 2 via `_startWhisperTrack` ([player.js:797](../../../static/player.js)); the deployed free lane is browser-SR + VAD only, so "exact parity" is neither expected nor the bar — see §12 risk #1.)
 - BYO-key premium lane works entirely client-side with the user's own key.
 - Every new piece is a pure, `.cjs`-testable UMD helper, matching the existing pattern.
 - Local dev (`python app.py`) and the full pytest/`.cjs` suites stay green.
@@ -89,17 +89,16 @@ Direct port of [lyrics.py](../../../lyrics.py):
 
 ## 6. Changed existing files
 
-- **[index.html](../../../static/index.html):** `fetch('/load')` → `KaraokeeSongLoader.loadFromUrl`; `fetch('/search')` removed (paste-URL + outbound link); `fetch('/retry-lyrics')` → `KaraokeeLyricsClient.fetchLyrics`; `window.location.href='/player'` → `'player.html'`; add BYO-key field; local-file upload reworked (§7). `sessionStorage` handoff itself is unchanged.
+- **[index.html](../../../static/index.html):** `fetch('/load')` → `KaraokeeSongLoader.loadFromUrl`; `fetch('/search')` removed (paste-URL + outbound link); `fetch('/retry-lyrics')` → `KaraokeeLyricsClient.fetchLyrics`; `window.location.href='/player'` → `'player.html'`; add BYO-key field; the local-file upload UI is **hidden in the deployed build** (dev-harness only, §7). `sessionStorage` handoff itself is unchanged.
 - **[player.html](../../../static/player.html):** nav `'/'`/`'/player'` left as-is (handled by `_redirects`, §9); add the interstitial container + share-image affordance.
-- **[player.js](../../../static/player.js):** split mic/VAD from realtime (§8); recognizer mode from `key-store` not server; remove the `/whisper-status` probe, the local-whisper worklet/`/transcribe` branch (§8), and the `/telemetry` POST; `<audio>` src from `songData.audioUrl` (§7); flip arcade default ON at [player.js:2147](../../../static/player.js).
+- **[player.js](../../../static/player.js):** split mic/VAD from realtime (§8); recognizer mode from `key-store` not server; remove the `/whisper-status` probe, the local-whisper worklet/`/transcribe` branch (§8), and the `/telemetry` POST; flip arcade default ON at [player.js:2147](../../../static/player.js). (The `<audio>`/`/audio` fallback path is untouched — dev-harness only, §7.)
 - **New `static/_redirects`** (§9).
 
-## 7. Local-file upload (no server)
+## 7. Local-file upload — dev-harness only (v1)
 
-Current fallback hardcodes `audio.src = '/audio?t=…'` ([player.js:1951](../../../static/player.js)) — a server endpoint that won't exist. Static path:
-- Upload UI reads the chosen file into an **object URL** (`URL.createObjectURL`) client-side and sets `songData.audioUrl` to it; lyrics come from `KaraokeeLyricsClient.fetchLyrics` using the typed title/artist. No `/load-local`.
-- [player.js:1951](../../../static/player.js) becomes `audio.src = songData.audioUrl || ('/audio?t=' + Date.now())` — object URL in prod, `/audio` retained for the dev harness.
-- `AudioElementSource` ([playback-source.js](../../../static/playback-source.js)) is otherwise unchanged.
+The deployed static app is **YouTube-URL-only**; the local-file upload UI is **hidden in the deployed build** and remains available only in the Flask dev harness (`/load-local` → `/audio`, unchanged). [player.js:1951](../../../static/player.js)'s `audio.src = '/audio?t=…'` and the `AudioElementSource` ([playback-source.js](../../../static/playback-source.js)) path stay as-is — only reachable in dev (a deployed `songData` always has a `videoId`, so the IFrame branch always runs).
+
+**Why not client-side upload in prod:** a `blob:`/object URL is revoked when the document that created it unloads, so storing one in `sessionStorage` on index.html and reading it after navigating to player.html yields a **dead URL** — object URLs are not a durable cross-page transport. Correct prod local-upload would store the `File`/`Blob` in **IndexedDB** and recreate the object URL inside player.html. Deferred until prod local-upload is actually wanted; it is not part of the YouTube-centric demo. *(This supersedes the first-round review decision to keep client-side upload via `songData.audioUrl`.)*
 
 ## 8. Recognizer in a serverless world — the mic/VAD split
 
@@ -113,7 +112,7 @@ Current fallback hardcodes `audio.src = '/audio?t=…'` ([player.js:1951](../../
 
 **Local faster-whisper path retired from the browser.** The AudioWorklet + `/transcribe` branch ([player.js:818-846](../../../static/player.js)) only ran when the *server* reported provider `local`. Since the browser's mode now comes from `key-store` and is only ever `free` or `premium` (never `local`), that branch is unreachable and is **removed from player.js** — there is one `player.js` for both dev and prod, and it never depends on a server probe. The Python `/transcribe` + faster-whisper code stays in [app.py](../../../app.py) for its existing pytest coverage but is no longer called by the player; local-dev transcription uses browser-SR (free) or a pasted key (premium), exactly like production.
 
-**Invariant:** the inputs to the frozen scoring path (browser-SR finals/interims, RMS energy, neural VAD state) are identical to today on both lanes. Only their *triggering* and *provider source* change. Validate this **concretely** — diff the actual `_vadAnalyser` energy signal on one identical recorded input before vs. after the split, not merely by comparing run scores.
+**Invariant:** the inputs to the frozen scoring path (browser-SR finals/interims, RMS energy, neural VAD state) are identical to today on both lanes. Only their *triggering* and *provider source* change. Validate this **concretely with a repeatable harness** — run Chrome with `--use-fake-device-for-media-stream --use-file-for-fake-audio-capture=<fixed.wav>` (or a small browser harness feeding a controlled `MediaStream`), record the `_vadAnalyser` RMS sample series on the *same* fixed WAV before vs. after the split, and diff the series — not merely comparing run scores.
 
 ## 9. Deploy — Cloudflare Pages
 
@@ -147,11 +146,11 @@ Current fallback hardcodes `audio.src = '/audio?t=…'` ([player.js:1951](../../
 
 ## 12. Risks / open implementation notes
 
-- **Free-lane (browser-SR-only) scoring quality — THE make-or-break, validate FIRST.** Every honest-run validation to date (93–97% / S) used the **premium `gpt-realtime-whisper`** path; the **free** lane (~99% of demo visitors: browser-SR + VAD, no key) has **not** been validated for scoring honesty/feel. It is uniquely uncertain because (a) [ADR-0001](../../adr/0001-tiered-recognizer-byo-key-deploy.md) notes browser SR *"rarely fires `final` during continuous singing"* — sustained singing/melisma is its worst case — and (b) the frozen scoring thresholds were tuned against whisper-quality ASR, so sparser browser-SR input could make honest singing under-score. **First executable step of the plan:** one honest browser-SR-only run on a real song; confirm it scores honestly and feels good. If it doesn't, free-lane reconciliation/threshold tuning — not the migration — is the real work, and we want to know that *before* writing four modules. (This is the assumption the entire free-demo thesis rests on.)
+- **Free-lane (browser-SR-only) scoring quality — THE make-or-break, validate FIRST.** Every honest-run validation to date (93–97% / S) used the **premium `gpt-realtime-whisper`** path; the **free** lane (~99% of demo visitors: browser-SR + VAD, no key) has **not** been validated for scoring honesty/feel. It is uniquely uncertain because (a) [ADR-0001](../../adr/0001-tiered-recognizer-byo-key-deploy.md) notes browser SR *"rarely fires `final` during continuous singing"* — sustained singing/melisma is its worst case — and (b) the frozen scoring thresholds were tuned against whisper-quality ASR, so sparser browser-SR input could make honest singing under-score. **First executable step of the plan:** a small browser-SR-only validation **matrix**, not a single run — (a) a fast/dense song, (b) a slow song, (c) wrong-lyrics/silence (anti-cheese must still score ~0), and (d) one normal-song replay — confirming honest singing scores honestly and *feels* good across them. If it doesn't, free-lane reconciliation/threshold tuning — not the migration — is the real work, and we want to know that *before* writing four modules. (This is the assumption the entire free-demo thesis rests on.)
 - **`_redirects` rewrite — spike on a real Cloudflare preview, day-one.** `/static/* /:splat 200` is the one deploy-critical assumption left (does an existing-asset lookup pre-empt the rewrite? rewrite vs. redirect semantics?). De-risk it with a throwaway preview deploy the way the IFrame clock was spiked. Fallback if it misbehaves: edit the ~16 `/static/` asset refs to root-relative + add one Flask dev route.
 - **VAD parity:** §8 must keep the free lane's energy/VAD behavior bit-for-bit; use the concrete energy-signal diff described in §8 (not just score comparison) before any flag-flip.
 - **oEmbed coverage:** some videos (age-restricted/private) return no oEmbed; the manual-title/artist retry is the safety net.
-- **Realtime mint payload:** confirm the exact client-secret request body for `gpt-realtime-whisper` against current OpenAI docs (Context7) during implementation — endpoint + CORS verified, payload shape to be reconfirmed.
+- **BYO-key real-key smoke:** CORS is verified for both `/v1/realtime/client_secrets` (mint) and `/v1/realtime/calls` (connect), but BYO-key is **not "proven" until a real-key smoke passes**: with a real user key, mint a client-secret, open a `/v1/realtime/calls` session, and confirm a transcript streams. Also confirm the exact client-secret request body for `gpt-realtime-whisper` against current OpenAI docs (Context7) — the payload moves client-side from [app.py:148](../../../app.py).
 - **Arcade default flip** interacts with the standing sing-test gate ([[arcade-scoring-status]] / [ADR-0003](../../adr/0003-arcade-default-lyric-axis-frozen.md)): the gate is a documented limitation for the demo, not a blocker.
 
 ### Implementation sequencing (carry into the plan)
@@ -165,4 +164,6 @@ This front-loads the two riskiest pieces (the player.js surgery and a real deplo
 
 ## 13. External code-review incorporated (2026-06-06)
 
-Seven critiques (external review) were verified against the code and folded in: (1) `/static/*` asset 404 → `_redirects` rewrite §9; (2) mic/VAD split from premium Track 2 §8; (3) recognizer mode from `key-store`, not server status §5/§8; (4) local upload via `songData.audioUrl` object URL §7; (5) parity claim tightened to algorithm-parity + durationless fixtures §11; (6) BYO-key copy "stored in this browser and sent only to OpenAI — never to Karaokee" §10/UI; (7) targeted redirects only, no catch-all §9.
+**First round** — seven critiques verified against the code and folded in: (1) `/static/*` asset 404 → `_redirects` rewrite §9; (2) mic/VAD split from premium Track 2 §8; (3) recognizer mode from `key-store`, not server status §5/§8; (4) local upload handling §7; (5) parity claim tightened to algorithm-parity + durationless fixtures §11; (6) BYO-key copy "stored in this browser and sent only to OpenAI — never to Karaokee" §10/UI; (7) targeted redirects only, no catch-all §9.
+
+**Second round** — five further findings folded in: [P1] an object URL in `sessionStorage` is not a durable cross-page transport → local upload is **dev-only for v1** (§7), superseding first-round #4; [P1] "exact parity" goal reworded to **browser-SR + VAD inputs + product-feel** validation (§3); [P2] CORS proof now names the **exact** endpoints (`/v1/realtime/client_secrets` + `/v1/realtime/calls`, the latter re-probed green) and adds a **real-key smoke** gate (§1/§12); [P2] concrete **VAD-parity harness** via Chrome fake-audio-capture (§8); [P3] free-lane validation expanded to a small **matrix** (§12).
