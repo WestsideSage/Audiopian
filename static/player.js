@@ -525,10 +525,19 @@ class GameMode {
             return Promise.reject(new Error('Realtime Whisper helper is unavailable'));
         }
         var prompt = this._buildRealtimeWhisperPrompt();
-        return fetch('/realtime-transcription-session', {
+        var key = window.KaraokeeKeyStore && window.KaraokeeKeyStore.getKey();
+        if (!key) return Promise.reject(new Error('No OpenAI key for premium recognition'));
+        // BYO-key: mint the ephemeral client secret DIRECTLY from the browser with the
+        // user's key (no server broker on the static deploy). The key is sent only to
+        // OpenAI; the returned short-lived secret authorizes the /v1/realtime/calls WebRTC
+        // connection below. Body mirrors app.py _create_openai_realtime_transcription_session.
+        var mintBody = KaraokeeRealtimeWhisper.buildClientSecretBody({
+            model: 'gpt-realtime-whisper', language: 'en', prompt: prompt,
+        });
+        return fetch('https://api.openai.com/v1/realtime/client_secrets', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: prompt }),
+            headers: { 'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json' },
+            body: JSON.stringify(mintBody),
         })
             .then(function(resp) {
                 if (!resp.ok) {
@@ -1850,6 +1859,7 @@ class GameMode {
     showEndModal() {
         if (this._endShown) return;   // idempotent: onEnded AND the poll-based fallback may both call this
         this._endShown = true;
+        var self = this;
         var legacy = document.getElementById('legacyEnd');
         var hero = document.getElementById('gradeHero');
         var feedback = document.getElementById('benchmarkFeedback');
@@ -1899,6 +1909,14 @@ class GameMode {
             document.getElementById('gradeHiscore').textContent = String(Math.max(prev, summary.points));
             document.getElementById('nbRibbon').style.display = isBest ? 'block' : 'none';
 
+            // Share-image: wire the end-screen button to render THIS run's card.
+            var _shareBtn = document.getElementById('shareImgBtn');
+            if (_shareBtn) {
+                var _shareSummary = { grade: grade, points: summary.points, percent: pct, difficulty: diff };
+                _shareBtn.style.display = 'inline-block';
+                _shareBtn.onclick = function () { self._downloadShareImage(_shareSummary); };
+            }
+
             if (hero) hero.style.display = 'block';
             if (legacy) legacy.style.display = 'none';
         } else {
@@ -1911,12 +1929,37 @@ class GameMode {
             document.getElementById('modalWords').textContent = (this.matchedWords || 0) + '/' + (this.totalWords || 0);
             document.getElementById('modalLines').textContent = (this.perfectLines || 0) + '/' + (this.linesScored || 0);
             document.getElementById('modalStreak').textContent = (this.bestStreak || 0);
+            var _shareBtnLegacy = document.getElementById('shareImgBtn');
+            if (_shareBtnLegacy) _shareBtnLegacy.style.display = 'none';  // share-image is arcade-only
             if (hero) hero.style.display = 'none';
             if (legacy) legacy.style.display = 'block';
         }
 
         if (feedback) feedback.style.display = window._kDebug ? 'block' : 'none';
         document.getElementById('gameModal').style.display = 'flex';
+    }
+
+    // Render the final grade/score/song to a 1080x1080 PNG and download it. The
+    // pure line-building (truncation, DIFF · pts · % stat) is in share-card.js
+    // (buildShareCardLines); this method only draws + triggers the download.
+    _downloadShareImage(summary) {
+        if (typeof buildShareCardLines !== 'function' || typeof document === 'undefined') return;
+        var sd = (typeof songData !== 'undefined' && songData) ? songData : {};
+        var L = buildShareCardLines(summary, sd);
+        var c = document.createElement('canvas');
+        c.width = 1080; c.height = 1080;
+        var x = c.getContext('2d');
+        if (!x) return;
+        x.fillStyle = '#0b0b12'; x.fillRect(0, 0, 1080, 1080);
+        x.textAlign = 'center';
+        x.fillStyle = '#8b5cf6'; x.font = 'bold 64px sans-serif';  x.fillText(L.brand, 540, 170);
+        x.fillStyle = '#ffffff'; x.font = 'bold 320px sans-serif'; x.fillText(L.grade, 540, 620);
+        x.fillStyle = '#e5e7eb'; x.font = '52px sans-serif';       x.fillText(L.stat, 540, 770);
+        x.fillStyle = '#9ca3af'; x.font = '40px sans-serif';       x.fillText(L.song, 540, 860);
+        var a = document.createElement('a');
+        a.href = c.toDataURL('image/png');
+        a.download = 'karaokee-score.png';
+        document.body.appendChild(a); a.click(); a.remove();
     }
 }
 

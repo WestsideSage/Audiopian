@@ -6,6 +6,17 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <div id="unsupported" style="display:none;position:fixed;inset:0;background:#111;color:#eee;
+         align-items:center;justify-content:center;text-align:center;padding:2rem;z-index:9999">
+      <div>
+        <h2>🎤 Karaokee needs desktop Chrome or Edge</h2>
+        <p style="max-width:32rem;line-height:1.6;color:#bbb;margin:0 auto">
+          The free voice recognition runs only in <strong>desktop Chrome or Edge</strong> with a
+          microphone. Open this link in desktop Chrome or Edge to play.
+        </p>
+      </div>
+    </div>
+
     <div class="card">
         <h1>🎤 Karaokee</h1>
 
@@ -35,13 +46,41 @@
             <input type="file" id="localFile" accept="audio/*" style="margin-bottom:10px" />
             <button id="loadLocalBtn" onclick="loadLocal()">🎵 Load Local File</button>
         </div>
+
+        <details class="byok" style="margin-top:16px">
+          <summary style="cursor:pointer;color:#aaa;font-size:0.85rem">Sharper recognition (optional) — bring your own OpenAI key</summary>
+          <input id="openaiKey" type="password" placeholder="sk-…" autocomplete="off" style="margin-top:8px" />
+          <div style="display:flex;gap:8px">
+            <button id="saveKeyBtn" type="button">Save</button>
+            <button id="clearKeyBtn" type="button" style="background:#334">Clear</button>
+          </div>
+          <p style="font-size:0.75rem;color:#666;margin-top:6px">Stored in this browser and sent only to OpenAI — never to Karaokee.</p>
+        </details>
     </div>
 
     <script src="/static/lyrics-client.js"></script>
     <script src="/static/youtube-meta.js"></script>
     <script src="/static/key-store.js"></script>
     <script src="/static/song-loader.js"></script>
+    <script src="/static/browser-support.js"></script>
     <script>
+        // Desktop-Chrome-only gate: the free lane needs the Web Speech API (desktop
+        // Chrome/Edge). Show a blocking overlay otherwise. Deep-links to /player bounce
+        // here for lack of song data, so gating index covers both pages. Fails OPEN only
+        // if the helper itself failed to load (don't block everyone on a script error).
+        (function () {
+            var supported = (typeof isSupportedBrowser === 'function')
+                ? isSupportedBrowser({
+                    userAgent: navigator.userAgent,
+                    hasSpeechRecognition: !!(window.SpeechRecognition || window.webkitSpeechRecognition)
+                })
+                : true;
+            if (!supported) {
+                var el = document.getElementById('unsupported');
+                if (el) el.style.display = 'flex';
+            }
+        })();
+
         const statusEl = document.getElementById('status');
         const loadBtn = document.getElementById('loadBtn');
 
@@ -166,6 +205,22 @@
                 var sec = document.getElementById('localUploadSection');
                 if (sec) sec.style.display = 'none';
             }
+        })();
+
+        // BYO-key: persist an OpenAI key locally (premium recognizer lane). The key is
+        // stored in this browser only and sent directly to OpenAI at mint time.
+        (function () {
+            var inp = document.getElementById('openaiKey');
+            if (!inp || !window.KaraokeeKeyStore) return;
+            inp.value = window.KaraokeeKeyStore.getKey();
+            document.getElementById('saveKeyBtn').onclick = function () {
+                window.KaraokeeKeyStore.setKey(inp.value);
+                setStatus('Key saved — premium recognition on.', 'success');
+            };
+            document.getElementById('clearKeyBtn').onclick = function () {
+                window.KaraokeeKeyStore.clearKey(); inp.value = '';
+                setStatus('Key cleared — free recognition.', '');
+            };
         })();
     </script>
 </body>

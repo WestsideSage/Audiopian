@@ -77,6 +77,24 @@
         };
     }
 
+    // Body for POST /v1/realtime/client_secrets — the BYO-key browser-side mint of
+    // an ephemeral transcription token. Reuses buildSessionUpdateEvent's session
+    // config (model/prompt/turn_detection rules) and wraps it with expires_after,
+    // mirroring the server payload in app.py _create_openai_realtime_transcription_session.
+    function buildClientSecretBody(options) {
+        options = options || {};
+        var model = options.model || 'gpt-realtime-whisper';
+        var session = buildSessionUpdateEvent(options).session;
+        // gpt-realtime-whisper latency/accuracy knob (app.py adds it on this model only).
+        if (options.delay && model === 'gpt-realtime-whisper') {
+            session.audio.input.transcription.delay = options.delay;
+        }
+        return {
+            expires_after: { anchor: 'created_at', seconds: options.expiresSeconds || 600 },
+            session: session,
+        };
+    }
+
     function extractClientSecret(session) {
         var value = session && (session.value || (session.client_secret && session.client_secret.value));
         if (!value) throw new Error('Realtime transcription session is missing client_secret.value or value');
@@ -88,6 +106,7 @@
         buildAppendAudioEvent: buildAppendAudioEvent,
         buildCommitEvent: buildCommitEvent,
         buildSessionUpdateEvent: buildSessionUpdateEvent,
+        buildClientSecretBody: buildClientSecretBody,
         modelSupportsPrompt: modelSupportsPrompt,
         extractClientSecret: extractClientSecret,
     };
