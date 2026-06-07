@@ -633,7 +633,8 @@ class GameMode {
     // and the commit cadence (commit-helpers) from those edges. Falls back silently
     // to the RMS path if the library/model fails to load.
     async _startNeuralVad() {
-        if (!window.KARAOKEE_V2) return;
+        if (this._neuralVadActive || this._micVad) return; // already running — no double-init on re-sync
+        if (!window.KARAOKEE_V2) { this._vadInitError = 'v2 disabled at init'; return; }
         if (!window.vad || !window.vad.MicVAD || !window.KaraokeeCommitHelpers) {
             this._vadInitError = 'vad-web/commit-helpers not loaded';
             return;
@@ -667,11 +668,40 @@ class GameMode {
             });
             this._micVad.start();
             this._neuralVadActive = true;
+            this._vadInitError = null;   // clear any prior 'v2 disabled at init' / load error on a successful (re-)init
         } catch (err) {
             this._vadInitError = (err && err.message) ? err.message : 'vad init failed';
             this._neuralVadActive = false;
             this._micVad = null;
         }
+    }
+
+    // Tear down ONLY the neural VAD (Silero MicVAD), leaving the mic stream, the
+    // RMS analyser, and any realtime-whisper connection intact. Lets a mid-session
+    // V2 toggle hand scoring back to the RMS gate (updateHotWord self-gates on
+    // _neuralVadActive) without restarting the whole mic pipeline.
+    _stopNeuralVad() {
+        if (this._micVad) {
+            try { this._micVad.destroy(); } catch (e) {}
+            this._micVad = null;
+        }
+        this._neuralVadActive = false;
+        this._commitState = null;
+    }
+
+    // Re-evaluate the neural VAD against the current V2 flag — called when the user
+    // presses V mid-session. Init is otherwise one-shot at song-start, so without
+    // this a flag flip would neither start nor stop it (the bug behind the flaky
+    // neuralVadActive telemetry). Pure start/stop/none decision lives in vad-helpers.
+    _syncNeuralVad() {
+        if (typeof neuralVadToggleAction !== 'function') return;
+        var action = neuralVadToggleAction({
+            v2Enabled: !!window.KARAOKEE_V2,
+            hasMicStream: !!this._whisperStream,
+            active: !!this._neuralVadActive
+        });
+        if (action === 'start') this._startNeuralVad();      // async; fire-and-forget
+        else if (action === 'stop') this._stopNeuralVad();
     }
 
     // Send one input_audio_buffer.commit on the realtime data channel and advance the
@@ -2145,7 +2175,10 @@ document.addEventListener('keydown', (e) => {
     } else if (e.key === 'v' || e.key === 'V') {
         window.KARAOKEE_V2 = !window.KARAOKEE_V2;
         localStorage.setItem('karaokee_v2', window.KARAOKEE_V2 ? '1' : '0');
-        if (gameMode) gameMode._renderV2Panel();
+        if (gameMode) {
+            gameMode._renderV2Panel();
+            gameMode._syncNeuralVad(); // init is one-shot at song-start; re-sync neural VAD to the flipped flag
+        }
         console.log('[SCORING V2]', window.KARAOKEE_V2 ? 'ON — adaptive VAD + phrase-engine panel' : 'OFF');
     }
 });

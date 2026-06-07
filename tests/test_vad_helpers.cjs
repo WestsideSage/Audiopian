@@ -14,6 +14,7 @@ fn(fakeModule, fakeModule.exports);
 var createVadState = fakeModule.exports.createVadState;
 var updateVad = fakeModule.exports.updateVad;
 var calibrate = fakeModule.exports.calibrate;
+var neuralVadToggleAction = fakeModule.exports.neuralVadToggleAction;
 
 function approx(a, b, eps, msg) {
     eps = eps != null ? eps : 1e-9;
@@ -255,6 +256,34 @@ assert.strictEqual(o.closeFrames, 7);
     assert.ok(firstOpenIdx >= 0, '(d) sequence should open at some point');
     var closedAfterOpen = a.slice(firstOpenIdx).some(function (x) { return x[0] === false; });
     assert.ok(closedAfterOpen, '(d) sequence should close again after opening');
+})();
+
+// ---------------------------------------------------------------------------
+// (e) neuralVadToggleAction: pure decision for re-evaluating the Silero neural
+//     VAD when the V2 flag is toggled mid-session. Neural-VAD init is otherwise
+//     one-shot at song-start (gated on the flag at that instant), so a later
+//     flip never started/stopped it. start when V2 turns on with a live mic and
+//     VAD not yet active; stop when V2 turns off but VAD is still active; none
+//     otherwise (already in the desired state, or no mic to attach to).
+// ---------------------------------------------------------------------------
+(function testNeuralVadToggleAction() {
+    var f = neuralVadToggleAction;
+    // START: V2 on, mic live, not yet active — the bug this fixes (toggling V ON now inits).
+    assert.strictEqual(f({ v2Enabled: true, hasMicStream: true, active: false }), 'start', '(e) on+mic+inactive -> start');
+    // NO DOUBLE-INIT: already active -> none.
+    assert.strictEqual(f({ v2Enabled: true, hasMicStream: true, active: true }), 'none', '(e) already active -> none');
+    // NO MIC (no game running): nothing to attach to -> none (will init at next song-start).
+    assert.strictEqual(f({ v2Enabled: true, hasMicStream: false, active: false }), 'none', '(e) on but no mic -> none');
+    // STOP: V2 off while still active -> tear down, hand back to the RMS gate.
+    assert.strictEqual(f({ v2Enabled: false, hasMicStream: true, active: true }), 'stop', '(e) off while active -> stop');
+    // STOP is safe even if the mic stream is already gone (active implies a stale MicVAD).
+    assert.strictEqual(f({ v2Enabled: false, hasMicStream: false, active: true }), 'stop', '(e) off+active+no-mic -> stop');
+    // OFF + already inactive -> none (idempotent).
+    assert.strictEqual(f({ v2Enabled: false, hasMicStream: true, active: false }), 'none', '(e) off+inactive -> none');
+    assert.strictEqual(f({ v2Enabled: false, hasMicStream: false, active: false }), 'none', '(e) off+inactive+no-mic -> none');
+    // Defensive: missing/empty ctx -> none (no throw).
+    assert.strictEqual(f({}), 'none', '(e) empty ctx -> none');
+    assert.strictEqual(f(), 'none', '(e) no ctx -> none');
 })();
 
 console.log('All vad-helpers tests passed.');
