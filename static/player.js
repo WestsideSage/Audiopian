@@ -315,6 +315,8 @@ class GameMode {
     _resetSessionCounters() {
         this._reachedEnd = false;   // set true when playback fires onEnded; feeds meta.completed
         this._endShown = false;     // idempotency latch for showEndModal (reset per song)
+        this._lastEndCheckT = null; // end-of-song stall detector (poll-based completion)
+        this._endStallTicks = 0;
         this.activeLineIdx = -1;
         this.lineWords = [];
         this._resetLineState(0, true);
@@ -1816,8 +1818,9 @@ class GameMode {
     }
 
     showEndModal() {
-        if (this._endShown) return;   // idempotent: onEnded AND the time-based fallback may both call this
+        if (this._endShown) { console.log('[end] showEndModal skipped (already shown)'); return; }
         this._endShown = true;
+        console.log('[end] showEndModal running');
         var legacy = document.getElementById('legacyEnd');
         var hero = document.getElementById('gradeHero');
         var feedback = document.getElementById('benchmarkFeedback');
@@ -2002,14 +2005,26 @@ function updateLyrics() {
     if (gameMode.active) {
         gameMode.updateHotWord();
         if (gameMode._session) gameMode._renderEvents(KaraokeeScoringSession.tick(gameMode._session, gameMode._now()));
-        // Fallback completion: the YouTube IFrame ENDED event is unreliable near the true end
-        // (playback often stops ~1s short and never fires it), so onEnded may never trigger the
-        // end screen. If playback has effectively reached the end, fire the same path once.
+        // Robust end-of-song completion. The YouTube IFrame is unreliable here: its ENDED
+        // event may not reach us, and getCurrentTime() can plateau ~1s+ short of getDuration()
+        // (the "replay arrow shows but the timer is frozen at 2:46/2:47" case). So instead of a
+        // fixed time threshold, detect that the clock has STALLED near the end. Fires once.
         if (!gameMode._reachedEnd && playback) {
             var _dur = playback.duration();
-            if (_dur && playback.currentTime() >= _dur - 1.5) {
-                gameMode._reachedEnd = true;
-                setTimeout(function () { gameMode.showEndModal(); }, 1500);
+            var _ct = playback.currentTime();
+            if (_dur && _ct >= _dur - 2.0) {
+                if (gameMode._lastEndCheckT != null && Math.abs(_ct - gameMode._lastEndCheckT) < 0.05) {
+                    gameMode._endStallTicks = (gameMode._endStallTicks || 0) + 1;
+                } else {
+                    gameMode._endStallTicks = 0;
+                }
+                gameMode._lastEndCheckT = _ct;
+                // clean end (reached duration) OR ~0.8s of a frozen clock near the end
+                if (_ct >= _dur - 0.4 || gameMode._endStallTicks >= 8) {
+                    gameMode._reachedEnd = true;
+                    console.log('[end] completion via poll at', _ct.toFixed(2), '/', _dur.toFixed(2), 'stallTicks=', gameMode._endStallTicks);
+                    setTimeout(function () { gameMode.showEndModal(); }, 1500);
+                }
             }
         }
     }
@@ -2161,6 +2176,7 @@ function _wirePlaybackCallbacks() {
         }
     });
     playback.onEnded(function () {
+        console.log('[end] onEnded fired; active=', gameMode.active);
         gameMode._reachedEnd = true;   // playback reached the end (IFrame ENDED / <audio> 'ended') -> completed
         // showEndModal -> endRun does the final collect + score + settle/commit; the 1500ms
         // delay lets late-arriving SR/whisper finals land first (each queues a dirty collect).
