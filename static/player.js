@@ -1818,9 +1818,8 @@ class GameMode {
     }
 
     showEndModal() {
-        if (this._endShown) { console.log('[end] showEndModal skipped (already shown)'); return; }
+        if (this._endShown) return;   // idempotent: onEnded AND the poll-based fallback may both call this
         this._endShown = true;
-        console.log('[end] showEndModal running');
         var legacy = document.getElementById('legacyEnd');
         var hero = document.getElementById('gradeHero');
         var feedback = document.getElementById('benchmarkFeedback');
@@ -2025,7 +2024,6 @@ function updateLyrics() {
                 // clean end (reached duration) OR ~0.8s of a frozen clock near the end
                 if (_ct >= _dur - 0.4 || gameMode._endStallTicks >= 8) {
                     gameMode._reachedEnd = true;
-                    console.log('[end] completion via poll at', _ct.toFixed(2), '/', _dur.toFixed(2), 'stallTicks=', gameMode._endStallTicks);
                     setTimeout(function () { gameMode.showEndModal(); }, 1500);
                 }
             }
@@ -2179,7 +2177,6 @@ function _wirePlaybackCallbacks() {
         }
     });
     playback.onEnded(function () {
-        console.log('[end] onEnded fired; active=', gameMode.active);
         gameMode._reachedEnd = true;   // playback reached the end (IFrame ENDED / <audio> 'ended') -> completed
         // showEndModal -> endRun does the final collect + score + settle/commit; the 1500ms
         // delay lets late-arriving SR/whisper finals land first (each queues a dirty collect).
