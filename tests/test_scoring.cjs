@@ -16,10 +16,12 @@ function loadBrowserCommonJs(filePath, extraArgs) {
 
 var matchHelpers = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'match-helpers.js'));
 var syncHelpers = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'sync-helpers.js'));
+var profanity = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'profanity.js'));
 var scoring = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'scoring.js'), {
     require: function(specifier) {
         if (specifier === './match-helpers.js') return matchHelpers;
         if (specifier === './sync-helpers.js') return syncHelpers;
+        if (specifier === './profanity.js') return profanity;
         throw new Error('Unexpected require: ' + specifier);
     },
     globalThis: globalThis
@@ -65,7 +67,15 @@ var matchCases = [
     { spoken: 'alpha', target: 'omega', method: 'none', score: 0.0 },
     { spoken: 'going', target: 'gonna', method: 'none', score: 0.0 },
     { spoken: 'tree', target: 'sky', method: 'none', score: 0.0 },
-    { spoken: 'phase', target: 'faze', method: 'none', score: 0.0 }
+    { spoken: 'phase', target: 'faze', method: 'none', score: 0.0 },
+    // Substantial-affix: recognizer transcribed a prefix/suffix of the word (>=5 chars, >=60%)
+    { spoken: 'battle', target: 'battlecry', method: 'affix', score: 1.0 },
+    { spoken: 'tasteful', target: 'distasteful', method: 'affix', score: 1.0 },
+    { spoken: 'reach', target: 'reached', method: 'affix', score: 1.0 },
+    // Affix cheese guards: short common prefixes must NOT match
+    { spoken: 'ever', target: 'everything', method: 'none', score: 0.0 },
+    { spoken: 'over', target: 'overcome', method: 'none', score: 0.0 },
+    { spoken: 'art', target: 'articulate', method: 'none', score: 0.0 }
 ];
 
 matchCases.forEach(function(testCase) {
@@ -77,6 +87,14 @@ matchCases.forEach(function(testCase) {
     assert.strictEqual(result.method, testCase.method, testCase.spoken + ' -> ' + testCase.target + ' method');
     assert.strictEqual(result.score, testCase.score, testCase.spoken + ' -> ' + testCase.target + ' score');
 });
+
+// Substantial-affix wordsMatch (boolean) + hard-R never-score guard.
+var _hardR = 'nigga'.replace(/a$/, 'er');   // derived; avoid the literal slur in source
+assert.strictEqual(scoring.wordsMatch('battle', 'battlecry'), true, 'affix wordsMatch battlecry');
+assert.strictEqual(scoring.wordsMatch('ever', 'everything'), false, 'affix guard ever/everything');
+assert.strictEqual(scoring.wordsMatch('nigga', 'nigga'), true, 'the -a variant still matches itself');
+assert.strictEqual(scoring.wordsMatch(_hardR, _hardR), false, 'hard-R never matches');
+assert.strictEqual(scoring.wordsMatchScore(_hardR, 'signed').score, 0.0, 'hard-R never credits');
 
 // effectiveMatchScore: VAD-only words earn no lyric credit; ASR-confirmed earns full
 assert.strictEqual(scoring.effectiveMatchScore(1.0, 0, new Map([[0, 1.0]]), new Set()), 0, 'vad-only word scores 0');

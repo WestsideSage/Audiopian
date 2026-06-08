@@ -16,6 +16,29 @@
     var classifyTempo = syncHelpers.classifyTempo;
     var getWindowParams = syncHelpers.getWindowParams;
 
+    // Lazy profanity resolver (load-order robust): require() in Node, window global in browser.
+    function _profanity() {
+        if (typeof module !== 'undefined' && module.exports) {
+            try { return require('./profanity.js'); } catch (e) { return null; }
+        }
+        return (root && root.KaraokeeProfanity) || null;
+    }
+    function isNeverScore(w) {
+        var p = _profanity();
+        return !!(p && p.isNeverScore && p.isNeverScore(w));
+    }
+    // Recognizer transcribed a substantial prefix/suffix of the word (e.g. "battle" for
+    // "battlecry"). Guarded so short common prefixes ("ever"/"everything") never match:
+    // the shorter token must be >= 5 chars AND >= 60% of the longer.
+    function isSubstantialAffix(a, b) {
+        if (!a || !b) return false;
+        var shorter = a.length <= b.length ? a : b;
+        var longer  = a.length <= b.length ? b : a;
+        if (shorter.length < 5) return false;
+        if (shorter.length / longer.length < 0.6) return false;
+        return longer.startsWith(shorter) || longer.endsWith(shorter);
+    }
+
     function editDistance(a, b) {
         var m = a.length;
         var n = b.length;
@@ -272,6 +295,7 @@
     }
 
     function wordsMatch(spoken, target, targetPhonetic) {
+        if (isNeverScore(spoken) || isNeverScore(target)) return false;
         if (spoken === target) return true;
 
         if (spoken.length >= 4 && target.length >= 4) {
@@ -305,10 +329,13 @@
             if (edDist === 2 && isEdit2PrefixTruncation(spoken, target)) return true;
         }
 
+        if (isSubstantialAffix(spoken, target)) return true;
+
         return false;
     }
 
     function wordsMatchScore(spoken, target, targetPhonetic) {
+        if (isNeverScore(spoken) || isNeverScore(target)) return { score: 0.0, method: 'none' };
         if (spoken === target) return { score: 1.0, method: 'exact' };
 
         if (spoken.length >= 4 && target.length >= 4) {
@@ -343,6 +370,8 @@
             if (dist === 1) return { score: 0.75, method: 'edit1' };
             if (dist === 2 && isEdit2PrefixTruncation(spoken, target)) return { score: 0.4, method: 'edit2' };
         }
+
+        if (isSubstantialAffix(spoken, target)) return { score: 1.0, method: 'affix' };
 
         return { score: 0.0, method: 'none' };
     }
