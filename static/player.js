@@ -172,10 +172,12 @@ class GameMode {
         this.songTempoProfile = computeSongTempoProfile(this.allWordTimings);
         this._initTelemetry();   // always init so download button works whenever D is pressed
         this._phraseDifficulty = localStorage.getItem('arcadeDifficulty') || 'medium';
+        this._cleanMode = localStorage.getItem('cleanMode') === '1';
         if (window.KaraokeePhraseEngine) {
             this._phrasePlan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
                 difficulty: this._phraseDifficulty,
-                audioDuration: playback ? (playback.duration() || null) : null
+                audioDuration: playback ? (playback.duration() || null) : null,
+                clean: this._cleanMode
             });
             // The scoring session owns the per-run state machine (match -> reconcile ->
             // score -> commit). It builds its own phraseSession/arcadeState from the plan;
@@ -1900,17 +1902,19 @@ if (lyrics.length === 0) {
 }
 
 function renderLyrics() {
+    var clean = localStorage.getItem('cleanMode') === '1';
     lyricsScroll.innerHTML = '';
     lyrics.forEach((line, i) => {
         const el = document.createElement('div');
         el.className = 'lyric-line';
-        el.textContent = line.text;
+        el.textContent = (clean && window.KaraokeeProfanity) ? KaraokeeProfanity.censorLine(line.text) : line.text;
         el.dataset.index = i;
         lyricsScroll.appendChild(el);
     });
 }
 
 function renderLyricsGameMode() {
+    var clean = localStorage.getItem('cleanMode') === '1';
     lyricsScroll.innerHTML = '';
     lyrics.forEach((line, i) => {
         const el = document.createElement('div');
@@ -1922,7 +1926,8 @@ function renderLyricsGameMode() {
             const span = document.createElement('span');
             span.className = 'word-span';
             span.dataset.wordIndex = wi;
-            span.textContent = word;
+            span.textContent = (clean && window.KaraokeeProfanity && KaraokeeProfanity.isProfane(normalizeWord(word)))
+                ? KaraokeeProfanity.censorWord(word) : word;
             el.appendChild(span);
             if (wi < words.length - 1) el.appendChild(document.createTextNode(' '));
         });
@@ -2194,7 +2199,8 @@ function renderDifficultyPreview(d) {
     try {
         plan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
             difficulty: d,
-            audioDuration: playback ? (playback.duration() || null) : null
+            audioDuration: playback ? (playback.duration() || null) : null,
+            clean: localStorage.getItem('cleanMode') === '1'
         });
     } catch (e) { box.style.display = 'none'; return; }
 
@@ -2289,6 +2295,24 @@ function skipPrep() { justListen(); }
     cards.addEventListener('mouseleave', function () {
         renderDifficultyPreview(localStorage.getItem('arcadeDifficulty') || 'medium');
     });
+
+    var cleanBtn = document.getElementById('cleanModeToggle');
+    if (cleanBtn) {
+        var _paintClean = function () {
+            var on = localStorage.getItem('cleanMode') === '1';
+            cleanBtn.textContent = 'Clean mode: ' + (on ? 'On' : 'Off');
+            cleanBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        };
+        _paintClean();
+        cleanBtn.addEventListener('click', function () {
+            var on = localStorage.getItem('cleanMode') === '1';
+            localStorage.setItem('cleanMode', on ? '0' : '1');
+            _paintClean();
+            // Re-render preview + lyrics so masking updates live.
+            try { renderDifficultyPreview(localStorage.getItem('arcadeDifficulty') || 'medium'); } catch (e) {}
+            try { (gameMode && gameMode.active ? renderLyricsGameMode : renderLyrics)(); } catch (e) {}
+        });
+    }
 })();
 
 function initPrepOverlay() {
