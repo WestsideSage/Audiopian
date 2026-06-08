@@ -1486,14 +1486,9 @@ class GameMode {
         // so also honor the onEnded-set flag — a full playthrough is "completed" either way.
         meta.completed     = !!(this._reachedEnd || (_cDur && this._now() >= _cDur - 0.5));
 
-        var intentEl = document.getElementById('benchmarkIntent');
-        var fairnessEl = document.getElementById('benchmarkFairness');
-        var notesEl = document.getElementById('benchmarkNotes');
-        var benchmark = {
-            intent: intentEl ? intentEl.value : '',
-            fairness: fairnessEl ? fairnessEl.value : '',
-            notes: notesEl ? notesEl.value : ''
-        };
+        // (Run-intent / fairness / notes feedback inputs were removed from the end screen;
+        // keep an empty benchmark so the telemetry shape is unchanged.)
+        var benchmark = { intent: '', fairness: '', notes: '' };
 
         var traces = [];
         if (this._phraseSession && window.KaraokeePhraseEngine) {
@@ -1742,7 +1737,6 @@ class GameMode {
         this._endShown = true;
         var self = this;
         var hero = document.getElementById('gradeHero');
-        var feedback = document.getElementById('benchmarkFeedback');
         document.getElementById('lrc-offset-control').style.display = 'none';
 
         // Flush the session at song end, then persist telemetry BEFORE the hi-score write
@@ -1807,7 +1801,6 @@ class GameMode {
             if (_shareBtnNone) _shareBtnNone.style.display = 'none';
         }
 
-        if (feedback) feedback.style.display = window._kDebug ? 'block' : 'none';
         document.getElementById('gameModal').style.display = 'flex';
     }
 

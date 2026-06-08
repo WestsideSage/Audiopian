@@ -216,6 +216,15 @@
             -webkit-text-fill-color: transparent; color: transparent;
             text-shadow: 0 0 18px rgba(255,152,0,.4);
         }
+        /* In Game Mode the active line is per-word spans; keep each word's OWN colour
+           (key-word cyan, matched green, partial amber, missed red) during ON FIRE rather
+           than letting the line's gradient fill mask them — so the scoring stays readable
+           on a streak. A warm glow keeps the fire energy; the key-word cue's own cyan glow
+           still wins via specificity, so key words stay distinct. */
+        body.arcade-onfire .lyric-line.active .word-span {
+            -webkit-text-fill-color: currentColor;
+            text-shadow: 0 0 14px rgba(255,120,40,.45);
+        }
         body.arcade-onfire #lyrics-container::after {
             content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
             box-shadow: inset 0 -120px 120px -90px rgba(255,106,0,.6), inset 0 120px 120px -90px rgba(255,106,0,.38);
@@ -425,12 +434,6 @@
         .dbg-ev-res   { color: #999; }
         .dbg-ev-match { color: #5af; }
 
-        /* End-screen benchmark feedback (debug only) */
-        .benchmark-feedback { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; text-align: left; }
-        .benchmark-feedback label { color: var(--text-dim); font-size: 0.8rem; text-transform: none; letter-spacing: 0; }
-        .benchmark-feedback select,
-        .benchmark-feedback textarea { width: 100%; background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 6px 8px; font-family: inherit; margin-top: 4px; }
-
         #ytplayer-wrap { border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0,0,0,.5); }
         /* The YouTube iframe must fill its wrap exactly — never overflow/clip — or YouTube
            treats the player as off-screen and pauses playback after a few seconds. */
@@ -527,29 +530,6 @@
                     <div>Difficulty <span id="gradeDiff">MEDIUM</span></div>
                     <div>High score <span id="gradeHiscore">0</span></div>
                 </div>
-            </div>
-            <div class="benchmark-feedback" id="benchmarkFeedback" style="display:none">
-                <label>Run intent
-                    <select id="benchmarkIntent">
-                        <option value="">Unlabeled</option>
-                        <option value="good_expert_run">Good expert run</option>
-                        <option value="humming_cheese">Humming cheese</option>
-                        <option value="late_delivery">Late delivery</option>
-                        <option value="partial_memory">Partial memory</option>
-                        <option value="silent_section_test">Silent section test</option>
-                    </select>
-                </label>
-                <label>Fairness
-                    <select id="benchmarkFairness">
-                        <option value="">Unjudged</option>
-                        <option value="fair">Fair</option>
-                        <option value="too_strict">Too strict</option>
-                        <option value="too_forgiving">Too forgiving</option>
-                        <option value="recognizer_lagged">Recognizer lagged</option>
-                        <option value="lyrics_misaligned">Lyrics misaligned</option>
-                    </select>
-                </label>
-                <textarea id="benchmarkNotes" rows="3" placeholder="Short note for AI analysis"></textarea>
             </div>
             <div class="game-modal-actions">
                 <button class="ctrl-btn" onclick="replayGame()">Play Again</button>
