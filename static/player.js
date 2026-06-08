@@ -993,24 +993,7 @@ class GameMode {
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
         const lineEl = lines[this.activeLineIdx];
         if (!lineEl) return;
-
-        if (window.KARAOKEE_V2) { this._paintAnchorSpansLive(lineEl); return; }
-
-        const spans = lineEl.querySelectorAll('.word-span');
-        spans.forEach((span, wi) => {
-            span.classList.remove('matched', 'matched-partial', 'missed');
-            var _wScore = this.matchedSet.get(wi);
-            if (_wScore !== undefined) {
-                span.classList.add(_wScore >= 0.75 ? 'matched' : 'matched-partial');
-                // Only add asr-confirmed if not already present — avoids replaying the animation
-                if (this.asrConfirmedSet.has(wi) && !span.classList.contains('asr-confirmed')) {
-                    span.classList.add('asr-confirmed');
-                }
-            } else {
-                // Word is unmatched — clear any stale asr-confirmed class
-                span.classList.remove('asr-confirmed');
-            }
-        });
+        this._paintAnchorSpansLive(lineEl);
     }
 
     // V2: green a key-word span the moment the engine credits its anchor (anchorHits).
@@ -1037,7 +1020,6 @@ class GameMode {
     // Shared by _commitNewlySettled (settle-time) and late-evidence reconciliation
     // (a missed line flips green a few seconds late when its batched words arrive).
     _paintPhraseCleared(phraseId) {
-        if (!window.KARAOKEE_V2) return;
         var sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(sel).forEach(function (span) {
             span.classList.remove('matched-partial', 'missed');
@@ -1048,7 +1030,6 @@ class GameMode {
     // V2: red the key words of a missed phrase at settle (non-key spans untouched).
     // Extracted verbatim from the old _commitNewlySettled else-branch (1695-1700).
     _paintPhraseMissed(phraseId) {
-        if (!window.KARAOKEE_V2) return;
         var _sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(_sel).forEach(function (span) {
             span.classList.remove('matched', 'matched-partial', 'missed');
@@ -1060,7 +1041,6 @@ class GameMode {
     // not full red. Hit key words keep their green; un-hit key words go amber (.matched-partial)
     // instead of red, so the line reads as "partial credit" rather than "failure".
     _paintPhrasePartial(phraseId) {
-        if (!window.KARAOKEE_V2) return;
         var sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(sel).forEach(function (span) {
             span.classList.remove('missed');
@@ -1070,19 +1050,13 @@ class GameMode {
         });
     }
 
-    // Render a scored line: mark unmatched spans red (V1 only) and flash the per-line
-    // score. Extracted verbatim from the old _scoreLine DOM block (1563-1580); reads the
-    // event payload (e.lineIdx / e.missedWordIndices / e.matched / e.scoredTotal) so it
+    // Render a scored line: flash the per-line score. Extracted from the old _scoreLine
+    // DOM block; reads the event payload (e.lineIdx / e.matched / e.scoredTotal) so it
     // never depends on this.activeLineIdx (which the session, not the controller, owns).
     _renderLineScored(e) {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
         var lineEl = lines[e.lineIdx];
         if (lineEl) {
-            if (!window.KARAOKEE_V2) {
-                lineEl.querySelectorAll('.word-span').forEach(function (span, wi) {
-                    if (e.missedWordIndices.indexOf(wi) >= 0) span.classList.add('missed');
-                });
-            }
             // Flash per-line score
             var flash = document.createElement('div');
             flash.className = 'line-score-flash';
