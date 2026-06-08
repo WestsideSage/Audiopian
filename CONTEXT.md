@@ -57,7 +57,7 @@ _Avoid_: crossfade.
 ### Arcade
 
 **Arcade**:
-The points / combo / grade layer over honest scoring, gated by the `karaokee_v2` flag.
+The points / combo / grade layer over honest scoring — now the only scoring path (the legacy V1 scorer and its `karaokee_v2` flag / `V` toggle were retired 2026-06-08).
 _Avoid_: score mode.
 
 **Commit**:

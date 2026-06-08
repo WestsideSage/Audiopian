@@ -4,6 +4,8 @@
 - **Date:** 2026-06-05
 - **Related:** [ADR-0001](0001-tiered-recognizer-byo-key-deploy.md), [ADR-0002](0002-any-song-client-side-youtube-iframe.md)
 
+> **Update — 2026-06-08: V1 fully retired; arcade is now the *only* scoring path.** The follow-on to this ADR shipped (branch `refactor/retire-v1-scoring`): the legacy V1 scorer, the `karaokee_v2` flag, and the `V` A/B toggle were all deleted. So "promoted from a flagged experiment to the default" below is **superseded** — there is no flag and no V1 alternative, just the single arcade/V2 stack. The standing **anti-cheese sing-test gate was run and PASSED** for this change: user-confirmed cheese scores ~0 with no multiplier lift, and an honest *Uproar* run scored 98% / grade S ≈ the prior 99%/S baseline (scoring behavior unchanged — the V2 logic was untouched). The repeated-hook residual and the global-leaderboard caveat (below) still stand as documented limitations. Deployed live to Cloudflare 2026-06-08.
+
 We are **done improving the scoring algorithm for now.** The lyric-axis scorer (match → reconcile → score) is treated as **frozen at its threshold-bound honesty ceiling** — the [2026-06-04 core-loop research](../research/2026-06-04-core-loop-modernization.md) found lyric-axis anti-cheese is *structurally capped* (no ASR / alignment / GOP paradigm fixes it), so further threshold tuning has diminishing returns. The **arcade scoring layer (`karaokee_v2`) is promoted from a flagged experiment to the default, primary experience** for the v1 demo.
 
 ## Why we're confident enough to ship arcade as the default
