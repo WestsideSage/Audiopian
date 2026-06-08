@@ -237,7 +237,6 @@ class GameMode {
         document.getElementById('score-pct').textContent = '0%';
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
-        this._renderV2Panel();
         if (window.KARAOKEE_V2 && this._arcadeState) this._renderArcadeHud(null);
     }
 
@@ -259,7 +258,6 @@ class GameMode {
         document.getElementById('score-display').style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
-        var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
         this._hideArcadeHud();
         // Flush the session (final collect + score active line + settle/commit) before
@@ -1101,7 +1099,7 @@ class GameMode {
     // moved methods used to do (see the scoring-session-seam plan, Task 4.1).
     //
     // READ-MODEL SYNC (top of render): the kept renderers/loggers
-    // (_updateWordSpans, _logMatch, _logPromotion, _updateRunningScore, telemetry) read
+    // (_updateWordSpans, _logMatch, _logPromotion, telemetry) read
     // controller instance fields the session now owns. Fields the session REASSIGNS
     // (matchedSet = new Map() each line, tallies) must be re-mirrored every render or a
     // one-time alias goes stale. Objects the session only mutates in place
@@ -1135,7 +1133,6 @@ class GameMode {
                 case 'arcade': this._onArcadeEvent(e.evt); break;
                 case 'arcadeRecord': /* already in session.arcadeEvents; telemetry reads it at build time */ break;
                 case 'honestPct': { var el = document.getElementById('score-pct'); if (el && e.pct != null) el.textContent = e.pct + '%'; break; }
-                case 'runningScore': this._updateRunningScore(); break;
                 case 'transition': if (window._kDebug) this._logTransition(e.fromIdx, e.toIdx, e.trigger, e.fromText, e.matchedCount, e.total, e.missedWords, e.lineStartAudioTime, e.sourceCounts); break;
                 case 'resetSpans': this._resetLineSpans(e.lineIdx); break;
                 case 'wordSpans': this._updateWordSpans(); break;
@@ -1250,38 +1247,6 @@ class GameMode {
         var hud = document.getElementById('arcadeHud');
         if (hud) hud.style.display = 'none';
         document.body.classList.remove('arcade-onfire');
-    }
-
-    _updateRunningScore() {
-        this._renderV2Panel();
-        if (window.KARAOKEE_V2) return;          // honest % headline owned by _tickArcade()
-        if (this.weightedTotal === 0) return;
-        const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
-        document.getElementById('score-pct').textContent = pct + '%';
-    }
-
-    /**
-     * Stage 3 dual-display: render the experimental phrase-engine score (lyrics /
-     * timing / stability / composite) beside the headline score, gated by the
-     * karaokee_v2 flag (press V). Pure read of the live phrase session; never
-     * mutates state and never affects the headline #score-pct.
-     */
-    _renderV2Panel() {
-        var el = document.getElementById('v2-panel');
-        if (!el) return;
-        if (!window.KARAOKEE_V2 || !this.active || !this._phraseSession || !window.KaraokeePhraseEngine
-            || typeof KaraokeePhraseEngine.getLiveScore !== 'function') {
-            el.style.display = 'none';
-            return;
-        }
-        try {
-            var s = KaraokeePhraseEngine.getLiveScore(this._phraseSession);
-            el.style.display = 'inline-block';
-            el.textContent = 'V2 ' + Math.round(s.composite * 100) + '%  (lyrics ' + Math.round(s.lyrics * 100)
-                + ' · conviction ' + Math.round(s.conviction * 100) + ')';
-        } catch (e) {
-            el.style.display = 'none';
-        }
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────

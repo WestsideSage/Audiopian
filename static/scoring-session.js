@@ -791,8 +791,9 @@
     // --- Task 2.1: scoreLine (moved from player.js _scoreLine 1539-1597) ---
     // Transform #1 (this.->s.). Transform #3: the DOM block (1563-1580) — the .missed
     // span marking + .line-score-flash creation — becomes a single `lineScored` event;
-    // _updateRunningScore() (1596) becomes a `runningScore` event (the controller
-    // repaints from getScores). All guards preserved verbatim: the zero-ASR fence
+    // the old V1 _updateRunningScore() (1596) becomes a `runningScore` event (still
+    // emitted, but the V1 headline repaint it drove was retired with the V1 path).
+    // All guards preserved verbatim: the zero-ASR fence
     // (lineHadAsrEvent === false -> return) and the weightedTotal===0 early-return.
     // The tally mutations + streak logic are unchanged.
     function scoreLine(s, lineIdx, lineWords, matchedSet, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet, events) {
