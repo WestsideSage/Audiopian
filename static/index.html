@@ -203,16 +203,24 @@
             }
         });
 
-        // Returning to this menu (notably via the browser Back button) restores the
-        // previously-typed Artist/Title through the browser's form restoration. Clear
-        // them whenever the page is shown so a fresh load — especially a local-file
-        // upload — never inherits the previous song's metadata. (Restoration happens
-        // during load, before pageshow, so this reliably wins.)
+        // Returning to this menu — notably via the browser Back button, which can restore
+        // the page from the bfcache exactly as it was left — otherwise leaves it in a stale
+        // state: the Load buttons stuck disabled (set during a load that then navigated to
+        // the player) and the Artist/Title fields pre-filled (form restoration). Both were
+        // reported as bugs: a greyed, unclickable "Load Song", and a local upload inheriting
+        // the previous YouTube song's title/artist. Reset the menu to a clean, usable state
+        // whenever it is shown — pageshow fires on the initial load AND on bfcache restores,
+        // so it reliably wins over the restored state.
         window.addEventListener('pageshow', function () {
+            var loadB = document.getElementById('loadBtn');
+            var localB = document.getElementById('loadLocalBtn');
+            if (loadB) loadB.disabled = false;
+            if (localB) localB.disabled = false;
             var a = document.getElementById('artist');
             var t = document.getElementById('title');
             if (a) a.value = '';
             if (t) t.value = '';
+            setStatus('', '');
         });
 
         // Local-file upload is a dev-harness feature; hide it on the deployed CDN.
