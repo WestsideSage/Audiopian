@@ -406,9 +406,12 @@ class GameMode {
             self._lastResultTime = Date.now();
             var interim = '';
             var finalText = '';
+            var expectedWords = self._expectedWordsForAlt();
             for (var i = e.resultIndex; i < e.results.length; i++) {
                 if (e.results[i].isFinal) {
-                    finalText += e.results[i][0].transcript + ' ';
+                    // Best-matching SR alternative (alt[0] unless an alternative matches
+                    // strictly more of the expected line) instead of blindly alt[0].
+                    finalText += self._chooseAlternative(e.results[i], expectedWords) + ' ';
                 } else {
                     interim += e.results[i][0].transcript + ' ';
                 }
@@ -459,6 +462,33 @@ class GameMode {
                 // onend handler will restart
             }
         }, 2000);
+    }
+
+    // Build the normalized words we're currently hoping to hear (active line + the line
+    // just left, for boundary lag), used to pick the best SR alternative for a final.
+    // Empty => the helper keeps the recognizer's top pick.
+    _expectedWordsForAlt() {
+        var s = this._session;
+        if (!s) return [];
+        var words = (s.lineWords || []).slice();
+        if (s.prevLine && s.prevLine.lineWords) words = words.concat(s.prevLine.lineWords);
+        return words;
+    }
+
+    // Pick the best alternative transcript for one final SR result. Falls back to the top
+    // alternative when the helper/scorer is unavailable, there's only one alternative, or
+    // nothing matches the expected line (so it never credits a word that wasn't sung).
+    // Debug-logs a non-top pick so the recovery rate is measurable in telemetry (press D).
+    _chooseAlternative(result, expectedWords) {
+        var top = result[0] ? result[0].transcript : '';
+        if (!window.KaraokeeAlternatives || !window.KaraokeeScoring || result.length < 2) return top;
+        var alts = [];
+        for (var a = 0; a < result.length; a++) alts.push(result[a].transcript);
+        var chosen = KaraokeeAlternatives.pickBestTranscript(alts, expectedWords, function (sp, tg) {
+            return KaraokeeScoring.wordsMatch(sp, tg);
+        });
+        if (window._kDebug && chosen !== top) this._debugLog('ALT_PICK', { top: top, chosen: chosen });
+        return chosen;
     }
 
     _renderAsrProviderStatus() {
