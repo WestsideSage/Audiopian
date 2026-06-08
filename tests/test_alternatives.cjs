@@ -54,16 +54,18 @@ check('normalizes case/punctuation for scoring; returns original text', () => {
   assert.strictEqual(H.pickBestTranscript(alts, ['distasteful'], exact), 'Distasteful, antics!');
 });
 
-// --- Integration: the REAL scorer must recover the real telemetry symptom ---
-// In the 2026-06-08 batch the recognizer's top guess for "distasteful" was "tasteful";
-// with the real wordsMatch the helper must switch to the alternative that actually has it.
+// --- Integration: the REAL scorer must pick the alt with the genuinely-right word ---
+// alt[0] mishears "levitate" as "hesitate" — a real substitution the matcher does NOT
+// recover (not affix/edit/phonetic), so the helper must switch to alt[1] which has it.
+// (The earlier "distasteful"/"tasteful" example is now recovered directly by the affix
+// rule in scoring.js, so it no longer requires an alternative — hence this example.)
 const scoring = require('../static/scoring.js');
 const realMatch = (sp, tg) => scoring.wordsMatch(sp, tg);
 
-check('[integration] real scorer recovers "distasteful" from alt[1]', () => {
-  const alts = ['tasteful antics is feelin', 'distasteful antics is feelin'];
-  assert.strictEqual(H.pickBestTranscript(alts, ['distasteful', 'antic', 'feelin'], realMatch),
-    'distasteful antics is feelin');
+check('[integration] real scorer picks the alt with the genuinely-right word', () => {
+  const alts = ['i can hesitate now', 'i can levitate now'];
+  assert.strictEqual(H.pickBestTranscript(alts, ['levitate', 'now'], realMatch),
+    'i can levitate now');
 });
 
 check('[integration] real scorer keeps alt[0] when nothing matches the line (no bias)', () => {
