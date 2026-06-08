@@ -227,7 +227,7 @@ class GameMode {
         document.getElementById('score-pct').textContent = '0%';
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
-        if (window.KARAOKEE_V2 && this._arcadeState) this._renderArcadeHud(null);
+        if (this._arcadeState) this._renderArcadeHud(null);
     }
 
     stop() {
@@ -597,7 +597,7 @@ class GameMode {
             // V2 with neural VAD active: commits are VAD-driven (onSpeechEnd) + the tempo
             // cap (updateHotWord). The blind timer stays inert. If neural VAD failed to
             // init (_neuralVadActive false), this 700ms fallback keeps the path alive.
-            if (window.KARAOKEE_V2 && self._neuralVadActive) return;
+            if (self._neuralVadActive) return;
             try {
                 dc.send(JSON.stringify(KaraokeeRealtimeWhisper.buildCommitEvent()));
                 self._whisperRealtimeCommitsSent++;
@@ -794,8 +794,8 @@ class GameMode {
             this._vadAnalyser.fftSize = 256;
             this._vadAnalyserBuf = new Float32Array(this._vadAnalyser.fftSize);
             src.connect(this._vadAnalyser);
-            // Neural VAD always runs (it self-gates on KARAOKEE_V2) so the free lane keeps
-            // its voice-energy edges feeding the (unchanged) scoring path.
+            // Neural VAD always runs so the free lane keeps its voice-energy edges
+            // feeding the (unchanged) scoring path.
             await this._startNeuralVad();
             // Premium only: attach the OpenAI realtime recognizer to the SAME mic stream.
             if (premium) {
@@ -1146,8 +1146,8 @@ class GameMode {
         // V2 neural VAD: isSpeaking is maintained by MicVAD callbacks (not RMS). Run the
         // tempo-aware commit cap here (100ms granularity is fine for a 1.5-2.5s cap),
         // then relay isSpeaking to the session. Falls through to the RMS path if neural
-        // VAD is not active (init failed) or V1.
-        if (window.KARAOKEE_V2 && this._neuralVadActive && this._commitState && window.KaraokeeCommitHelpers) {
+        // VAD is not active (init failed) or the adaptive VAD helper is unavailable.
+        if (this._neuralVadActive && this._commitState && window.KaraokeeCommitHelpers) {
             var _tempoClass = (this.wordTimings && this.wordTimings.vadTempoClass) || 'normal';
             var _capRes = KaraokeeCommitHelpers.checkCap(this._commitState, performance.now(), _tempoClass);
             if (_capRes.commit) this._commitRealtimeBuffer();
@@ -1156,7 +1156,7 @@ class GameMode {
         }
         // Refresh isSpeaking from AnalyserNode — real-time, not tied to Whisper chunk rate
         var vadRms = this._readVadRms();
-        if (window.KARAOKEE_V2 && this._vadState && typeof updateVad === 'function') {
+        if (this._vadState && typeof updateVad === 'function') {
             // Stage 2: adaptive noise floor + hysteresis + debounce. Continuously
             // recalibrates (frozen while speaking); no frozen _energyThreshold,
             // and single-frame spikes/dips can't flip the gate.
@@ -1195,7 +1195,6 @@ class GameMode {
     _renderArcadeHud(evt) {
         var hud = document.getElementById('arcadeHud');
         if (!hud || !this._arcadeState || !window.KaraokeeArcade) return;
-        if (!window.KARAOKEE_V2) { hud.style.display = 'none'; return; }
         hud.style.display = 'flex';
 
         var st = this._arcadeState;
@@ -2074,8 +2073,6 @@ document.getElementById('offsetPlus').addEventListener('click', function() {
     localStorage.setItem('lrcOffset_' + _songKey(), gameMode.lrcOffset);
     _updateOffsetDisplay();
 });
-
-window.KARAOKEE_V2 = true; // V1 retired — single scoring path (flattened away in later tasks)
 
 // Debug HUD — press D to toggle (works any time, not just in Game Mode)
 document.addEventListener('keydown', (e) => {
