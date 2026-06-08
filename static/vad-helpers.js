@@ -104,31 +104,7 @@ function updateVad(state, rms) {
     return { isSpeaking: state.isSpeaking, noiseFloor: state.noiseFloor };
 }
 
-/**
- * Decide what to do with the neural VAD (Silero MicVAD) when the V2 flag is
- * toggled — or otherwise re-evaluated — mid-session. Neural-VAD init is a
- * one-shot at song-start (gated on KARAOKEE_V2 at that instant), so a later
- * flag flip never started or stopped it; this pure decision lets the controller
- * wire toggle -> start/stop without reloading. No DOM, no side effects.
- *
- * @param {Object} ctx
- * @param {boolean} ctx.v2Enabled    window.KARAOKEE_V2 (V2/arcade active).
- * @param {boolean} ctx.hasMicStream a live mic stream exists (game running);
- *                                   neural VAD has nothing to attach to without it.
- * @param {boolean} ctx.active       neural VAD currently initialized (_neuralVadActive).
- * @returns {('start'|'stop'|'none')}
- *   'start' — V2 on, mic live, not yet active (init it now).
- *   'stop'  — V2 off but still active (tear it down; the RMS gate takes over).
- *   'none'  — already in the desired state, or no mic to attach to.
- */
-function neuralVadToggleAction(ctx) {
-    ctx = ctx || {};
-    if (ctx.v2Enabled && ctx.hasMicStream && !ctx.active) return 'start';
-    if (!ctx.v2Enabled && ctx.active) return 'stop';
-    return 'none';
-}
-
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { createVadState, updateVad, calibrate, neuralVadToggleAction };
+    module.exports = { createVadState, updateVad, calibrate };
 }
