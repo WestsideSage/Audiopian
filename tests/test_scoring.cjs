@@ -67,7 +67,18 @@ var matchCases = [
     { spoken: 'alpha', target: 'omega', method: 'none', score: 0.0 },
     { spoken: 'going', target: 'gonna', method: 'none', score: 0.0 },
     { spoken: 'tree', target: 'sky', method: 'none', score: 0.0 },
-    { spoken: 'phase', target: 'faze', method: 'none', score: 0.0 },
+    // Homophones the phonetic path misses (short side and/or different first letter).
+    // The recognizer's spelling differs but the sound is identical -> credit it.
+    { spoken: 'i', target: 'eye', method: 'slang', score: 0.9 },     // the "eye meets no eye" case
+    { spoken: 'eye', target: 'i', method: 'slang', score: 0.9 },
+    { spoken: 'no', target: 'know', method: 'slang', score: 0.9 },
+    { spoken: 'won', target: 'one', method: 'slang', score: 0.9 },
+    { spoken: 'our', target: 'hour', method: 'slang', score: 0.9 },
+    { spoken: 'bye', target: 'by', method: 'slang', score: 0.9 },
+    { spoken: 'buy', target: 'by', method: 'slang', score: 0.9 },
+    { spoken: 'bee', target: 'be', method: 'slang', score: 0.9 },
+    { spoken: 'hi', target: 'high', method: 'slang', score: 0.9 },
+    { spoken: 'phase', target: 'faze', method: 'slang', score: 0.9 }, // moved from 'none' — true homophone
     // Substantial-affix: recognizer transcribed a prefix/suffix of the word (>=5 chars, >=60%)
     { spoken: 'battle', target: 'battlecry', method: 'affix', score: 1.0 },
     { spoken: 'tasteful', target: 'distasteful', method: 'affix', score: 1.0 },

@@ -70,6 +70,22 @@ var CONTRACTION_MAP = {
     'aint':    'is not',
 };
 
+// --- Homophone pairs ---
+// True homophones (acoustically identical) that the metaphone path misses because one
+// side is < 3 chars and/or the first letters differ, so the phonetic block's length gate
+// and its sameFirst/bothLong sub-condition reject them (e.g. eye/I: both metaphone to
+// 'A', but "i" is 1 char and the first letters differ). Registered bidirectionally into
+// SLANG_MAP below. Honesty-safe: the two spellings sound identical, so crediting either
+// for the other is correct, not cheese (the recognizer just picked the other spelling).
+var HOMOPHONE_PAIRS = [
+    ['eye', 'i'], ['eye', 'aye'],
+    ['by', 'bye'], ['by', 'buy'], ['bye', 'buy'],
+    ['be', 'bee'], ['no', 'know'], ['hi', 'high'],
+    ['our', 'hour'], ['one', 'won'], ['oh', 'owe'],
+    ['in', 'inn'], ['or', 'oar'], ['or', 'ore'],
+    ['we', 'wee'], ['ad', 'add'], ['phase', 'faze'],
+];
+
 // --- Slang / ASR-mishearing dictionary ---
 // Bidirectional: if ASR hears key, it can match value, and vice versa.
 // These handle cases where ASR sanitizes, mishears, or normalizes slang.
@@ -116,6 +132,7 @@ var SLANG_MAP = {};
         ['100', 'hundred'], ['911', 'nineoneone'],
         ['to', 'two'], ['too', 'two'], ['for', 'four'],
     ];
+    pairs = pairs.concat(HOMOPHONE_PAIRS);   // homophones share the same bidirectional registration
     for (var i = 0; i < pairs.length; i++) {
         var a = pairs[i][0], b = pairs[i][1];
         if (!SLANG_MAP[a]) SLANG_MAP[a] = new Set();
