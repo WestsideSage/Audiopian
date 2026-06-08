@@ -67,7 +67,7 @@ When the slow-but-accurate recognizer confirms a word *after* a line has already
 ## What gets remembered
 
 - The scoring for one playthrough lives in memory while you play, and is thrown away afterward.
-- A few small things are saved **in your browser** (not on any server): whether arcade mode is on (`karaokee_v2`, toggled with the **V** key — and **off by default** at `player.js:2121`; turning it on by default is a to-do for going live), your difficulty choice, a per-song timing nudge, and your best score per song.
+- A few small things are saved **in your browser** (not on any server): your difficulty choice, a per-song timing nudge, and your best score per song. (Scoring is a single arcade path now — the old `karaokee_v2` / **V**-key A/B toggle to the legacy V1 scorer was retired 2026-06-08.)
 
 ## Things to keep in mind
 

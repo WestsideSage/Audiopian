@@ -37,7 +37,7 @@ The accurate recognizer sometimes confirms a word *after* its line has passed. K
 
 ## 6. The arcade layer
 
-`scoring-arcade.js` turns phrase credits into the game-y score: combos for consecutive hits, points, and a final letter grade. This is the **default experience** (the `karaokee_v2` mode) — see [ADR-0003](../adr/0003-arcade-default-lyric-axis-frozen.md).
+`scoring-arcade.js` turns phrase credits into the game-y score: combos for consecutive hits, points, and a final letter grade. This is the **only scoring path** (the legacy V1 scorer and its `karaokee_v2` / **V**-key A/B toggle were retired 2026-06-08) — see [ADR-0003](../adr/0003-arcade-default-lyric-axis-frozen.md).
 
 ## Where it all comes together
 
