@@ -63,8 +63,7 @@ function buildPhrasePlanFromLyrics(L) {
 function twoLineCfg() {
     var L = [lyric(0, 'first line words'), lyric(2, 'second line words')];
     return { lyrics: L, allWordTimings: buildAllWordTimings(L),
-             phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium',
-             flags: { KARAOKEE_V2: true } };
+             phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium' };
 }
 
 // Three-line fixture: lines spaced so the first two end (and leave the active
@@ -77,7 +76,7 @@ function threeLineCfg() {
                  return wt;
              }),
              phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 12 }),
-             difficulty: 'medium', flags: { KARAOKEE_V2: true } };
+             difficulty: 'medium' };
 }
 // ===========================================================================
 // PER-TASK CHARACTERIZATION TESTS (Phase 1)
@@ -112,8 +111,7 @@ function matchHotWordForTest(s, text, now) {
 (function () {
     var L = [lyric(0, 'candle bright tonight')];
     var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
-                phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium',
-                flags: { KARAOKEE_V2: true } };
+                phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium' };
     // (silent) edit-distance-only match must be rejected by the HOT-WORD VAD path.
     // Note: the collectMatches path (non-energy-gated) may still credit an edit-distance
     // match via transcript+interim — that is correct production behavior (player.js:431).
@@ -309,8 +307,7 @@ function matchHotWordForTest(s, text, now) {
 (function () {
     var L = [lyric(0, 'real words here'), lyric(2, '(la la la)')];
     var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
-                phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium',
-                flags: { KARAOKEE_V2: true } };
+                phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium' };
     var s = session.createSession(cfg);
     // Score a perfect real line first so there is a live streak to (not) break.
     session.setActiveLine(s, 0, 0.0);
@@ -528,20 +525,6 @@ function matchHotWordForTest(s, text, now) {
     assert.ok(iHonest >= 0 && iHonest === out.length - 1, 'honestPct closes the tick');
 })();
 
-// honestPct is only emitted under KARAOKEE_V2 (the headline ownership gate). With the
-// flag off, tick still settles/commits but emits no honestPct.
-(function () {
-    var L = [lyric(0, 'first line words'), lyric(2, 'second line words')];
-    var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
-                phrasePlan: buildPhrasePlanFromLyrics(L), difficulty: 'medium',
-                flags: { KARAOKEE_V2: false } };
-    var s = session.createSession(cfg);
-    session.setActiveLine(s, 0, 0.0);
-    var out = session.tick(s, 3.5);
-    assert.strictEqual(out.filter(function (e) { return e.type === 'honestPct'; }).length, 0,
-        'no honestPct event when KARAOKEE_V2 is off');
-})();
-
 // ===========================================================================
 // PER-TASK CHARACTERIZATION TESTS (Phase 3)
 // ===========================================================================
@@ -741,7 +724,7 @@ function matchHotWordForTest(s, text, now) {
     var cfg = {
         lyrics: [lyric(0, 'hello world')],
         allWordTimings: scoring.interpolateWordTimings([lyric(0, 'hello world')]),
-        phrasePlan: null, difficulty: 'medium', flags: { KARAOKEE_V2: true }
+        phrasePlan: null, difficulty: 'medium'
     };
     var s = session.createSession(cfg);
     session.setActiveLine(s, 0, 0.0);
