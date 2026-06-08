@@ -1498,7 +1498,6 @@ class GameMode {
         // v2 meta additions
         meta.schemaVersion = 2;
         meta.gameVersion   = '2.0';
-        meta.karaokeeV2    = !!window.KARAOKEE_V2;
         meta.neuralVadActive = !!this._neuralVadActive;       // did Silero VAD init this run?
         meta.vadInitError    = this._vadInitError || null;    // why not, if it didn't
         meta.endedAt       = new Date().toISOString();
@@ -1523,11 +1522,6 @@ class GameMode {
         }
 
         // Final scores
-        // V1 % from the session's authoritative tallies (the controller's weightedTotal/
-        // weightedMatched are only a render-time mirror; read getScores directly here).
-        var _ss = this._session ? KaraokeeScoringSession.getScores(this._session)
-                                : { weightedTotal: this.weightedTotal, weightedMatched: this.weightedMatched };
-        var v1Pct = _ss.weightedTotal > 0 ? Math.round((_ss.weightedMatched / _ss.weightedTotal) * 100) : 0;
         var live = (this._phraseSession && window.KaraokeePhraseEngine)
             ? KaraokeePhraseEngine.getLiveScore(this._phraseSession) : { lyrics: 0, composite: 0 };
         var honestLyricPct = Math.round((live.lyrics || 0) * 100);
@@ -1556,8 +1550,7 @@ class GameMode {
 
         var summary = window.KaraokeeTelemetry ? KaraokeeTelemetry.summarizeRun({
             difficulty: difficulty,
-            karaokeeV2: !!window.KARAOKEE_V2,
-            scores: { v1Pct: v1Pct, honestLyricPct: honestLyricPct, composite: composite },
+            scores: { honestLyricPct: honestLyricPct, composite: composite },
             arcadeSummary: arcadeSummary,
             grade: grade,
             phraseTraces: traces,
@@ -1580,7 +1573,7 @@ class GameMode {
             },
             phraseEngine: {
                 version: 2,
-                mode: window.KARAOKEE_V2 ? 'headline' : 'shadow',
+                mode: 'headline',
                 difficulty: difficulty,
                 benchmark: benchmark,
                 plan: this._telemetry.phraseEngine ? this._telemetry.phraseEngine.plan : null

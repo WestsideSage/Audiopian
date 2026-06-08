@@ -72,8 +72,7 @@
 
         return {
             difficulty: inputs.difficulty || 'medium',
-            karaokeeV2: !!inputs.karaokeeV2,
-            scores: inputs.scores || { v1Pct: null, honestLyricPct: null, composite: null },
+            scores: inputs.scores || { honestLyricPct: null, composite: null },
             arcade: {
                 points: arc.points || 0,
                 grade: inputs.grade || null,

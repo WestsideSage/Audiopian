@@ -27,8 +27,8 @@ function trace(lyricStatus, sources) {
 
 // --- phraseOutcomes tally ---
 var base = {
-    difficulty: 'hard', karaokeeV2: true,
-    scores: { v1Pct: 61, honestLyricPct: 68, composite: 72 },
+    difficulty: 'hard',
+    scores: { honestLyricPct: 68, composite: 72 },
     arcadeSummary: { points: 8400, maxMultiplier: 6, longestStreak: 9, perfects: 4, clears: 2 },
     grade: 'B',
     phraseTraces: [
@@ -60,8 +60,10 @@ assert.strictEqual(s.sync.linesEarly, 1, 'one early line');
 assert.strictEqual(s.sync.linesLate, 2, 'two late lines');
 assert.strictEqual(s.sync.medianLineDriftMs, 200, 'median drift of [100,300,200] = 200');
 
-// --- scores / arcade passthrough ---
+// --- scores / arcade passthrough (single path: no v1Pct, no karaokeeV2) ---
 assert.deepStrictEqual(s.scores, base.scores);
+assert.ok(!('karaokeeV2' in s), 'summary no longer carries the V1/V2 distinction');
+assert.ok(!('v1Pct' in s.scores), 'scores no longer carries v1Pct');
 assert.strictEqual(s.arcade.points, 8400);
 assert.strictEqual(s.arcade.grade, 'B');
 assert.strictEqual(s.arcade.maxMultiplier, 6);
@@ -84,11 +86,11 @@ var cc = T.summarizeRun(cleanCheese);
 assert.strictEqual(cc.honesty.pointsBuilt, false);
 assert.strictEqual(cc.honesty.suspectedCheeseInflation, false, 'cheese that built nothing is the PASS case');
 
-// --- V1 run (no arcade state) -> arcade zeros, pointsBuilt false ---
-var v1 = Object.assign({}, base, { karaokeeV2: false, arcadeSummary: null });
-var v1s = T.summarizeRun(v1);
-assert.strictEqual(v1s.arcade.points, 0, 'null arcade summary -> 0 points');
-assert.strictEqual(v1s.honesty.pointsBuilt, false);
-assert.strictEqual(v1s.counts.transitions, 3, 'counts passthrough');
+// --- degenerate run (no arcade state) -> arcade zeros, pointsBuilt false ---
+var noArc = Object.assign({}, base, { arcadeSummary: null });
+var noArcS = T.summarizeRun(noArc);
+assert.strictEqual(noArcS.arcade.points, 0, 'null arcade summary -> 0 points');
+assert.strictEqual(noArcS.honesty.pointsBuilt, false);
+assert.strictEqual(noArcS.counts.transitions, 3, 'counts passthrough');
 
 console.log('test_telemetry_helpers.cjs: all assertions passed');
