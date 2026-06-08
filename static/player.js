@@ -79,16 +79,6 @@ class GameMode {
         this.lineStartTranscriptPos = 0;  // transcript word index when current line started (fence)
         this.latestInterim     = '';      // most recent interim, used to anchor fast-song lines
 
-        // Scoring
-        this.totalWords      = 0;
-        this.matchedWords    = 0;
-        this.weightedTotal   = 0;
-        this.weightedMatched = 0;
-        this.linesScored     = 0;
-        this.perfectLines    = 0;
-        this.currentStreak   = 0;
-        this.bestStreak      = 0;
-
         // ASR activity tracking (zero-ASR line fencing)
         this.lineHadAsrEvent = false;
 
@@ -196,8 +186,7 @@ class GameMode {
                 lyrics: lyrics,
                 allWordTimings: this.allWordTimings,
                 phrasePlan: this._phrasePlan,
-                difficulty: this._phraseDifficulty,
-                flags: { KARAOKEE_V2: !!window.KARAOKEE_V2 }
+                difficulty: this._phraseDifficulty
             });
             this._phraseSession   = this._session.phraseSession;
             this._arcadeState     = this._session.arcadeState;
@@ -238,8 +227,7 @@ class GameMode {
         document.getElementById('score-pct').textContent = '0%';
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
-        this._renderV2Panel();
-        if (window.KARAOKEE_V2 && this._arcadeState) this._renderArcadeHud(null);
+        if (this._arcadeState) this._renderArcadeHud(null);
     }
 
     stop() {
@@ -260,7 +248,6 @@ class GameMode {
         document.getElementById('score-display').style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
-        var _v2 = document.getElementById('v2-panel'); if (_v2) _v2.style.display = 'none';
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
         this._hideArcadeHud();
         // Flush the session (final collect + score active line + settle/commit) before
@@ -325,10 +312,6 @@ class GameMode {
         this.lineStartWordCount = 0;
         this.lineStartTranscriptPos = 0;
         this.latestInterim = '';
-        this.totalWords = 0;
-        this.matchedWords = 0;
-        this.weightedTotal = 0;
-        this.weightedMatched = 0;
         if (window.KaraokeeArcade && this._phraseDifficulty) {
             this._arcadeState = KaraokeeArcade.createArcadeState(this._phraseDifficulty);
         }
@@ -336,10 +319,6 @@ class GameMode {
         this._arcadeEvents = [];
         this._telemetryFinalized = false;
         document.body.classList.remove('arcade-onfire');
-        this.linesScored = 0;
-        this.perfectLines = 0;
-        this.currentStreak = 0;
-        this.bestStreak = 0;
         this._lastResultTime = Date.now();
         this._dbBuf = [];
         this._telemetry = null;
@@ -618,7 +597,7 @@ class GameMode {
             // V2 with neural VAD active: commits are VAD-driven (onSpeechEnd) + the tempo
             // cap (updateHotWord). The blind timer stays inert. If neural VAD failed to
             // init (_neuralVadActive false), this 700ms fallback keeps the path alive.
-            if (window.KARAOKEE_V2 && self._neuralVadActive) return;
+            if (self._neuralVadActive) return;
             try {
                 dc.send(JSON.stringify(KaraokeeRealtimeWhisper.buildCommitEvent()));
                 self._whisperRealtimeCommitsSent++;
@@ -643,7 +622,6 @@ class GameMode {
     // to the RMS path if the library/model fails to load.
     async _startNeuralVad() {
         if (this._neuralVadActive || this._micVad) return; // already running — no double-init on re-sync
-        if (!window.KARAOKEE_V2) { this._vadInitError = 'v2 disabled at init'; return; }
         if (!window.vad || !window.vad.MicVAD || !window.KaraokeeCommitHelpers) {
             this._vadInitError = 'vad-web/commit-helpers not loaded';
             return;
@@ -677,40 +655,12 @@ class GameMode {
             });
             this._micVad.start();
             this._neuralVadActive = true;
-            this._vadInitError = null;   // clear any prior 'v2 disabled at init' / load error on a successful (re-)init
+            this._vadInitError = null;   // clear any prior load error on a successful (re-)init
         } catch (err) {
             this._vadInitError = (err && err.message) ? err.message : 'vad init failed';
             this._neuralVadActive = false;
             this._micVad = null;
         }
-    }
-
-    // Tear down ONLY the neural VAD (Silero MicVAD), leaving the mic stream, the
-    // RMS analyser, and any realtime-whisper connection intact. Lets a mid-session
-    // V2 toggle hand scoring back to the RMS gate (updateHotWord self-gates on
-    // _neuralVadActive) without restarting the whole mic pipeline.
-    _stopNeuralVad() {
-        if (this._micVad) {
-            try { this._micVad.destroy(); } catch (e) {}
-            this._micVad = null;
-        }
-        this._neuralVadActive = false;
-        this._commitState = null;
-    }
-
-    // Re-evaluate the neural VAD against the current V2 flag — called when the user
-    // presses V mid-session. Init is otherwise one-shot at song-start, so without
-    // this a flag flip would neither start nor stop it (the bug behind the flaky
-    // neuralVadActive telemetry). Pure start/stop/none decision lives in vad-helpers.
-    _syncNeuralVad() {
-        if (typeof neuralVadToggleAction !== 'function') return;
-        var action = neuralVadToggleAction({
-            v2Enabled: !!window.KARAOKEE_V2,
-            hasMicStream: !!this._whisperStream,
-            active: !!this._neuralVadActive
-        });
-        if (action === 'start') this._startNeuralVad();      // async; fire-and-forget
-        else if (action === 'stop') this._stopNeuralVad();
     }
 
     // Send one input_audio_buffer.commit on the realtime data channel and advance the
@@ -844,8 +794,8 @@ class GameMode {
             this._vadAnalyser.fftSize = 256;
             this._vadAnalyserBuf = new Float32Array(this._vadAnalyser.fftSize);
             src.connect(this._vadAnalyser);
-            // Neural VAD always runs (it self-gates on KARAOKEE_V2) so the free lane keeps
-            // its voice-energy edges feeding the (unchanged) scoring path.
+            // Neural VAD always runs so the free lane keeps its voice-energy edges
+            // feeding the (unchanged) scoring path.
             await this._startNeuralVad();
             // Premium only: attach the OpenAI realtime recognizer to the SAME mic stream.
             if (premium) {
@@ -1023,24 +973,7 @@ class GameMode {
         const lines = lyricsScroll.querySelectorAll('.lyric-line');
         const lineEl = lines[this.activeLineIdx];
         if (!lineEl) return;
-
-        if (window.KARAOKEE_V2) { this._paintAnchorSpansLive(lineEl); return; }
-
-        const spans = lineEl.querySelectorAll('.word-span');
-        spans.forEach((span, wi) => {
-            span.classList.remove('matched', 'matched-partial', 'missed');
-            var _wScore = this.matchedSet.get(wi);
-            if (_wScore !== undefined) {
-                span.classList.add(_wScore >= 0.75 ? 'matched' : 'matched-partial');
-                // Only add asr-confirmed if not already present — avoids replaying the animation
-                if (this.asrConfirmedSet.has(wi) && !span.classList.contains('asr-confirmed')) {
-                    span.classList.add('asr-confirmed');
-                }
-            } else {
-                // Word is unmatched — clear any stale asr-confirmed class
-                span.classList.remove('asr-confirmed');
-            }
-        });
+        this._paintAnchorSpansLive(lineEl);
     }
 
     // V2: green a key-word span the moment the engine credits its anchor (anchorHits).
@@ -1067,7 +1000,6 @@ class GameMode {
     // Shared by _commitNewlySettled (settle-time) and late-evidence reconciliation
     // (a missed line flips green a few seconds late when its batched words arrive).
     _paintPhraseCleared(phraseId) {
-        if (!window.KARAOKEE_V2) return;
         var sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(sel).forEach(function (span) {
             span.classList.remove('matched-partial', 'missed');
@@ -1078,7 +1010,6 @@ class GameMode {
     // V2: red the key words of a missed phrase at settle (non-key spans untouched).
     // Extracted verbatim from the old _commitNewlySettled else-branch (1695-1700).
     _paintPhraseMissed(phraseId) {
-        if (!window.KARAOKEE_V2) return;
         var _sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(_sel).forEach(function (span) {
             span.classList.remove('matched', 'matched-partial', 'missed');
@@ -1090,7 +1021,6 @@ class GameMode {
     // not full red. Hit key words keep their green; un-hit key words go amber (.matched-partial)
     // instead of red, so the line reads as "partial credit" rather than "failure".
     _paintPhrasePartial(phraseId) {
-        if (!window.KARAOKEE_V2) return;
         var sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(sel).forEach(function (span) {
             span.classList.remove('missed');
@@ -1100,19 +1030,13 @@ class GameMode {
         });
     }
 
-    // Render a scored line: mark unmatched spans red (V1 only) and flash the per-line
-    // score. Extracted verbatim from the old _scoreLine DOM block (1563-1580); reads the
-    // event payload (e.lineIdx / e.missedWordIndices / e.matched / e.scoredTotal) so it
+    // Render a scored line: flash the per-line score. Extracted from the old _scoreLine
+    // DOM block; reads the event payload (e.lineIdx / e.matched / e.scoredTotal) so it
     // never depends on this.activeLineIdx (which the session, not the controller, owns).
     _renderLineScored(e) {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
         var lineEl = lines[e.lineIdx];
         if (lineEl) {
-            if (!window.KARAOKEE_V2) {
-                lineEl.querySelectorAll('.word-span').forEach(function (span, wi) {
-                    if (e.missedWordIndices.indexOf(wi) >= 0) span.classList.add('missed');
-                });
-            }
             // Flash per-line score
             var flash = document.createElement('div');
             flash.className = 'line-score-flash';
@@ -1157,7 +1081,7 @@ class GameMode {
     // moved methods used to do (see the scoring-session-seam plan, Task 4.1).
     //
     // READ-MODEL SYNC (top of render): the kept renderers/loggers
-    // (_updateWordSpans, _logMatch, _logPromotion, _updateRunningScore, telemetry) read
+    // (_updateWordSpans, _logMatch, _logPromotion, telemetry) read
     // controller instance fields the session now owns. Fields the session REASSIGNS
     // (matchedSet = new Map() each line, tallies) must be re-mirrored every render or a
     // one-time alias goes stale. Objects the session only mutates in place
@@ -1174,8 +1098,6 @@ class GameMode {
             this.vadMatchedSet  = s.vadMatchedSet;
             this.asrConfirmedSet = s.asrConfirmedSet;
             this.wordSourceMap  = s.wordSourceMap;
-            this.weightedTotal  = s.weightedTotal;
-            this.weightedMatched = s.weightedMatched;
             this.lineWords      = s.lineWords;
         }
         if (!events) return;
@@ -1191,7 +1113,6 @@ class GameMode {
                 case 'arcade': this._onArcadeEvent(e.evt); break;
                 case 'arcadeRecord': /* already in session.arcadeEvents; telemetry reads it at build time */ break;
                 case 'honestPct': { var el = document.getElementById('score-pct'); if (el && e.pct != null) el.textContent = e.pct + '%'; break; }
-                case 'runningScore': this._updateRunningScore(); break;
                 case 'transition': if (window._kDebug) this._logTransition(e.fromIdx, e.toIdx, e.trigger, e.fromText, e.matchedCount, e.total, e.missedWords, e.lineStartAudioTime, e.sourceCounts); break;
                 case 'resetSpans': this._resetLineSpans(e.lineIdx); break;
                 case 'wordSpans': this._updateWordSpans(); break;
@@ -1225,8 +1146,8 @@ class GameMode {
         // V2 neural VAD: isSpeaking is maintained by MicVAD callbacks (not RMS). Run the
         // tempo-aware commit cap here (100ms granularity is fine for a 1.5-2.5s cap),
         // then relay isSpeaking to the session. Falls through to the RMS path if neural
-        // VAD is not active (init failed) or V1.
-        if (window.KARAOKEE_V2 && this._neuralVadActive && this._commitState && window.KaraokeeCommitHelpers) {
+        // VAD is not active (init failed) or the adaptive VAD helper is unavailable.
+        if (this._neuralVadActive && this._commitState && window.KaraokeeCommitHelpers) {
             var _tempoClass = (this.wordTimings && this.wordTimings.vadTempoClass) || 'normal';
             var _capRes = KaraokeeCommitHelpers.checkCap(this._commitState, performance.now(), _tempoClass);
             if (_capRes.commit) this._commitRealtimeBuffer();
@@ -1235,7 +1156,7 @@ class GameMode {
         }
         // Refresh isSpeaking from AnalyserNode — real-time, not tied to Whisper chunk rate
         var vadRms = this._readVadRms();
-        if (window.KARAOKEE_V2 && this._vadState && typeof updateVad === 'function') {
+        if (this._vadState && typeof updateVad === 'function') {
             // Stage 2: adaptive noise floor + hysteresis + debounce. Continuously
             // recalibrates (frozen while speaking); no frozen _energyThreshold,
             // and single-frame spikes/dips can't flip the gate.
@@ -1274,7 +1195,6 @@ class GameMode {
     _renderArcadeHud(evt) {
         var hud = document.getElementById('arcadeHud');
         if (!hud || !this._arcadeState || !window.KaraokeeArcade) return;
-        if (!window.KARAOKEE_V2) { hud.style.display = 'none'; return; }
         hud.style.display = 'flex';
 
         var st = this._arcadeState;
@@ -1306,38 +1226,6 @@ class GameMode {
         var hud = document.getElementById('arcadeHud');
         if (hud) hud.style.display = 'none';
         document.body.classList.remove('arcade-onfire');
-    }
-
-    _updateRunningScore() {
-        this._renderV2Panel();
-        if (window.KARAOKEE_V2) return;          // honest % headline owned by _tickArcade()
-        if (this.weightedTotal === 0) return;
-        const pct = Math.round((this.weightedMatched / this.weightedTotal) * 100);
-        document.getElementById('score-pct').textContent = pct + '%';
-    }
-
-    /**
-     * Stage 3 dual-display: render the experimental phrase-engine score (lyrics /
-     * timing / stability / composite) beside the headline score, gated by the
-     * karaokee_v2 flag (press V). Pure read of the live phrase session; never
-     * mutates state and never affects the headline #score-pct.
-     */
-    _renderV2Panel() {
-        var el = document.getElementById('v2-panel');
-        if (!el) return;
-        if (!window.KARAOKEE_V2 || !this.active || !this._phraseSession || !window.KaraokeePhraseEngine
-            || typeof KaraokeePhraseEngine.getLiveScore !== 'function') {
-            el.style.display = 'none';
-            return;
-        }
-        try {
-            var s = KaraokeePhraseEngine.getLiveScore(this._phraseSession);
-            el.style.display = 'inline-block';
-            el.textContent = 'V2 ' + Math.round(s.composite * 100) + '%  (lyrics ' + Math.round(s.lyrics * 100)
-                + ' · conviction ' + Math.round(s.conviction * 100) + ')';
-        } catch (e) {
-            el.style.display = 'none';
-        }
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────
@@ -1589,7 +1477,6 @@ class GameMode {
         // v2 meta additions
         meta.schemaVersion = 2;
         meta.gameVersion   = '2.0';
-        meta.karaokeeV2    = !!window.KARAOKEE_V2;
         meta.neuralVadActive = !!this._neuralVadActive;       // did Silero VAD init this run?
         meta.vadInitError    = this._vadInitError || null;    // why not, if it didn't
         meta.endedAt       = new Date().toISOString();
@@ -1614,11 +1501,6 @@ class GameMode {
         }
 
         // Final scores
-        // V1 % from the session's authoritative tallies (the controller's weightedTotal/
-        // weightedMatched are only a render-time mirror; read getScores directly here).
-        var _ss = this._session ? KaraokeeScoringSession.getScores(this._session)
-                                : { weightedTotal: this.weightedTotal, weightedMatched: this.weightedMatched };
-        var v1Pct = _ss.weightedTotal > 0 ? Math.round((_ss.weightedMatched / _ss.weightedTotal) * 100) : 0;
         var live = (this._phraseSession && window.KaraokeePhraseEngine)
             ? KaraokeePhraseEngine.getLiveScore(this._phraseSession) : { lyrics: 0, composite: 0 };
         var honestLyricPct = Math.round((live.lyrics || 0) * 100);
@@ -1647,8 +1529,7 @@ class GameMode {
 
         var summary = window.KaraokeeTelemetry ? KaraokeeTelemetry.summarizeRun({
             difficulty: difficulty,
-            karaokeeV2: !!window.KARAOKEE_V2,
-            scores: { v1Pct: v1Pct, honestLyricPct: honestLyricPct, composite: composite },
+            scores: { honestLyricPct: honestLyricPct, composite: composite },
             arcadeSummary: arcadeSummary,
             grade: grade,
             phraseTraces: traces,
@@ -1671,7 +1552,7 @@ class GameMode {
             },
             phraseEngine: {
                 version: 2,
-                mode: window.KARAOKEE_V2 ? 'headline' : 'shadow',
+                mode: 'headline',
                 difficulty: difficulty,
                 benchmark: benchmark,
                 plan: this._telemetry.phraseEngine ? this._telemetry.phraseEngine.plan : null
@@ -1860,7 +1741,6 @@ class GameMode {
         if (this._endShown) return;   // idempotent: onEnded AND the poll-based fallback may both call this
         this._endShown = true;
         var self = this;
-        var legacy = document.getElementById('legacyEnd');
         var hero = document.getElementById('gradeHero');
         var feedback = document.getElementById('benchmarkFeedback');
         document.getElementById('lrc-offset-control').style.display = 'none';
@@ -1884,7 +1764,7 @@ class GameMode {
         this._hideArcadeHud();
         this._finalizeTelemetry('song_ended');
 
-        var useArcade = window.KARAOKEE_V2 && this._arcadeState && window.KaraokeeArcade
+        var useArcade = this._arcadeState && window.KaraokeeArcade
             && window.KaraokeePhraseEngine && this._phraseSession;
 
         if (useArcade) {
@@ -1918,21 +1798,13 @@ class GameMode {
             }
 
             if (hero) hero.style.display = 'block';
-            if (legacy) legacy.style.display = 'none';
         } else {
-            // Always show the end screen on song-end (was: early-return when nothing scored,
-            // which hid the modal on skipped/instrumental runs). Guard the division for the
-            // zero-scored case so it reads 0% instead of NaN%.
-            var _wt = this.weightedTotal || 0;
-            var lpct = _wt > 0 ? Math.round((this.weightedMatched / _wt) * 100) : 0;
-            document.getElementById('modalScore').textContent = lpct + '%';
-            document.getElementById('modalWords').textContent = (this.matchedWords || 0) + '/' + (this.totalWords || 0);
-            document.getElementById('modalLines').textContent = (this.perfectLines || 0) + '/' + (this.linesScored || 0);
-            document.getElementById('modalStreak').textContent = (this.bestStreak || 0);
-            var _shareBtnLegacy = document.getElementById('shareImgBtn');
-            if (_shareBtnLegacy) _shareBtnLegacy.style.display = 'none';  // share-image is arcade-only
+            // Degenerate run (no phrase plan, or the scoring libs failed to load): there is
+            // no arcade summary to render. Hide the hero + share button; the bare modal
+            // (gameModal, shown below) still appears so song-end isn't a dead click.
             if (hero) hero.style.display = 'none';
-            if (legacy) legacy.style.display = 'block';
+            var _shareBtnNone = document.getElementById('shareImgBtn');
+            if (_shareBtnNone) _shareBtnNone.style.display = 'none';
         }
 
         if (feedback) feedback.style.display = window._kDebug ? 'block' : 'none';
@@ -2202,10 +2074,6 @@ document.getElementById('offsetPlus').addEventListener('click', function() {
     _updateOffsetDisplay();
 });
 
-// Experimental Scoring V2 (adaptive VAD + phrase-engine dual-display panel).
-// Off by default; the current scorer stays the headline. Press V to A/B it.
-window.KARAOKEE_V2 = (localStorage.getItem('karaokee_v2') !== '0'); // arcade is the default; press V to opt out
-
 // Debug HUD — press D to toggle (works any time, not just in Game Mode)
 document.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -2215,14 +2083,6 @@ document.addEventListener('keydown', (e) => {
         if (hud) hud.style.display = window._kDebug ? 'block' : 'none';
         if (window._kDebug) gameMode._renderDebugHud();
         console.log('[DEBUG HUD]', window._kDebug ? 'ON — start Game Mode and rap to see events' : 'OFF');
-    } else if (e.key === 'v' || e.key === 'V') {
-        window.KARAOKEE_V2 = !window.KARAOKEE_V2;
-        localStorage.setItem('karaokee_v2', window.KARAOKEE_V2 ? '1' : '0');
-        if (gameMode) {
-            gameMode._renderV2Panel();
-            gameMode._syncNeuralVad(); // init is one-shot at song-start; re-sync neural VAD to the flipped flag
-        }
-        console.log('[SCORING V2]', window.KARAOKEE_V2 ? 'ON — adaptive VAD + phrase-engine panel' : 'OFF');
     }
 });
 

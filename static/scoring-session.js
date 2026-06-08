@@ -48,7 +48,6 @@
             phraseSession: null,
             arcadeState: null,
             difficulty: config.difficulty || 'medium',
-            flags: config.flags || {},
             activeLineIdx: -1, lineWords: [], matchedSet: new Map(),
             vadMatchedSet: new Map(), asrConfirmedSet: new Set(), wordSourceMap: new Map(),
             transcript: '', transcriptWords: [], latestInterim: '',
@@ -287,7 +286,7 @@
             phraseEngine.settlePhrases(s.phraseSession, nowSec);
             if (evidence.source === 'browser_final' || evidence.source === 'whisper') {
                 var confirmed = phraseEngine.reconcileLateEvidence(s.phraseSession, evidence, nowSec);
-                if (confirmed && confirmed.length && s.flags.KARAOKEE_V2) {
+                if (confirmed && confirmed.length) {
                     for (var ci = 0; ci < confirmed.length; ci++) {
                         ev(events, 'phraseCleared', { phraseId: confirmed[ci] });
                     }
@@ -724,13 +723,9 @@
         // each newly-settled phrase exactly once, then refresh the honest % headline.
         if (s.phraseSession && phraseEngine) {
             try { phraseEngine.settlePhrases(s.phraseSession, nowSec); } catch (e) {}
-            if (s.flags.KARAOKEE_V2) {
-                reconcileInterim(s, nowSec, events);
-            }
+            reconcileInterim(s, nowSec, events);
             commitNewlySettled(s, nowSec, true, events);
-            if (s.flags.KARAOKEE_V2) {
-                ev(events, 'honestPct', { pct: getHonestPct(s) });
-            }
+            ev(events, 'honestPct', { pct: getHonestPct(s) });
         }
         return events;
     }
@@ -796,8 +791,9 @@
     // --- Task 2.1: scoreLine (moved from player.js _scoreLine 1539-1597) ---
     // Transform #1 (this.->s.). Transform #3: the DOM block (1563-1580) — the .missed
     // span marking + .line-score-flash creation — becomes a single `lineScored` event;
-    // _updateRunningScore() (1596) becomes a `runningScore` event (the controller
-    // repaints from getScores). All guards preserved verbatim: the zero-ASR fence
+    // the old V1 _updateRunningScore() (1596) becomes a `runningScore` event (still
+    // emitted, but the V1 headline repaint it drove was retired with the V1 path).
+    // All guards preserved verbatim: the zero-ASR fence
     // (lineHadAsrEvent === false -> return) and the weightedTotal===0 early-return.
     // The tally mutations + streak logic are unchanged.
     function scoreLine(s, lineIdx, lineWords, matchedSet, lineHadAsrEvent, vadMatchedSet, asrConfirmedSet, events) {
@@ -946,21 +942,19 @@
                 s.arcadeEvents.push(record);
                 ev(events, 'arcadeRecord', { record: record });
             }
-            if (evt && routeEvents && s.flags.KARAOKEE_V2) ev(events, 'arcade', { evt: evt });
+            if (evt && routeEvents) ev(events, 'arcade', { evt: evt });
 
             // V2 coloring at settle: a passed line greens the whole phrase; a missed
             // line reds its key words only (non-key words stay neutral).
-            if (s.flags.KARAOKEE_V2) {
-                if (pst.lyricStatus === 'confirmed') {
-                    ev(events, 'phraseCleared', { phraseId: ph.phraseId });
-                } else if (Object.keys(pst.anchorHits).length > 0) {
-                    // Partial: some anchors landed (the lenient streak survives a partial),
-                    // so paint amber, not the full red of a true miss — the visual then
-                    // matches the streak instead of reading as a total failure.
-                    ev(events, 'phrasePartial', { phraseId: ph.phraseId });
-                } else {
-                    ev(events, 'phraseMissed', { phraseId: ph.phraseId });
-                }
+            if (pst.lyricStatus === 'confirmed') {
+                ev(events, 'phraseCleared', { phraseId: ph.phraseId });
+            } else if (Object.keys(pst.anchorHits).length > 0) {
+                // Partial: some anchors landed (the lenient streak survives a partial),
+                // so paint amber, not the full red of a true miss — the visual then
+                // matches the streak instead of reading as a total failure.
+                ev(events, 'phrasePartial', { phraseId: ph.phraseId });
+            } else {
+                ev(events, 'phraseMissed', { phraseId: ph.phraseId });
             }
         }
     }
