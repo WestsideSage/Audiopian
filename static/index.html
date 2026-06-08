@@ -193,7 +193,10 @@
         }
 
         document.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
+            // Enter loads the song — but NOT from inside the BYO-key field, where Enter
+            // saves the key (see the BYO-key wiring below). Without this guard, pressing
+            // Enter after typing a key fires an unintended load and greys the button.
+            if (e.key === 'Enter' && !(e.target && e.target.closest && e.target.closest('.byok'))) {
                 loadSong();
             }
         });
@@ -221,6 +224,11 @@
                 window.KaraokeeKeyStore.clearKey(); inp.value = '';
                 setStatus('Key cleared — free recognition.', '');
             };
+            // Enter inside the key field saves the key (the global Enter-loads-song handler
+            // skips .byok), so the natural "type key, press Enter" gesture does the right thing.
+            inp.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Enter') { ev.preventDefault(); document.getElementById('saveKeyBtn').click(); }
+            });
         })();
     </script>
 </body>
