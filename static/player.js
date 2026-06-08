@@ -1762,7 +1762,6 @@ class GameMode {
         if (this._endShown) return;   // idempotent: onEnded AND the poll-based fallback may both call this
         this._endShown = true;
         var self = this;
-        var legacy = document.getElementById('legacyEnd');
         var hero = document.getElementById('gradeHero');
         var feedback = document.getElementById('benchmarkFeedback');
         document.getElementById('lrc-offset-control').style.display = 'none';
@@ -1786,7 +1785,7 @@ class GameMode {
         this._hideArcadeHud();
         this._finalizeTelemetry('song_ended');
 
-        var useArcade = window.KARAOKEE_V2 && this._arcadeState && window.KaraokeeArcade
+        var useArcade = this._arcadeState && window.KaraokeeArcade
             && window.KaraokeePhraseEngine && this._phraseSession;
 
         if (useArcade) {
@@ -1820,21 +1819,13 @@ class GameMode {
             }
 
             if (hero) hero.style.display = 'block';
-            if (legacy) legacy.style.display = 'none';
         } else {
-            // Always show the end screen on song-end (was: early-return when nothing scored,
-            // which hid the modal on skipped/instrumental runs). Guard the division for the
-            // zero-scored case so it reads 0% instead of NaN%.
-            var _wt = this.weightedTotal || 0;
-            var lpct = _wt > 0 ? Math.round((this.weightedMatched / _wt) * 100) : 0;
-            document.getElementById('modalScore').textContent = lpct + '%';
-            document.getElementById('modalWords').textContent = (this.matchedWords || 0) + '/' + (this.totalWords || 0);
-            document.getElementById('modalLines').textContent = (this.perfectLines || 0) + '/' + (this.linesScored || 0);
-            document.getElementById('modalStreak').textContent = (this.bestStreak || 0);
-            var _shareBtnLegacy = document.getElementById('shareImgBtn');
-            if (_shareBtnLegacy) _shareBtnLegacy.style.display = 'none';  // share-image is arcade-only
+            // Degenerate run (no phrase plan, or the scoring libs failed to load): there is
+            // no arcade summary to render. Hide the hero + share button; the bare modal
+            // (gameModal, shown below) still appears so song-end isn't a dead click.
             if (hero) hero.style.display = 'none';
-            if (legacy) legacy.style.display = 'block';
+            var _shareBtnNone = document.getElementById('shareImgBtn');
+            if (_shareBtnNone) _shareBtnNone.style.display = 'none';
         }
 
         if (feedback) feedback.style.display = window._kDebug ? 'block' : 'none';
