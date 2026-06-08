@@ -173,23 +173,32 @@
             box-shadow: 0 0 12px rgba(45,212,238,.5);
         }
 
-        /* Running score in header */
+        /* Accuracy readout in header (the honest %, distinct from the arcade SCORE) */
         .score-display {
             margin-left: auto;
-            font-size: 1rem;
-            color: var(--matched);
-            font-weight: 700;
+            display: flex;
+            align-items: baseline;
+            gap: 7px;
             font-variant-numeric: tabular-nums;
         }
+        .score-display .sd-label {
+            font-size: 0.58rem; font-weight: 700; letter-spacing: .18em;
+            text-transform: uppercase; color: var(--text-dim);
+        }
+        .score-display #score-pct { font-size: 1rem; color: var(--matched); font-weight: 700; }
 
         /* ── Arcade floating HUD ─────────────────────────────────── */
         .arcade-hud {
-            position: fixed; top: 74px; right: 18px; z-index: 90;
+            position: fixed; top: 70px; right: 18px; z-index: 90;
             display: flex; flex-direction: column; align-items: flex-end; gap: 7px;
             pointer-events: none; font-variant-numeric: tabular-nums;
         }
+        .ah-cap {
+            font-size: 0.62rem; font-weight: 700; letter-spacing: .24em;
+            text-transform: uppercase; color: var(--text-dim); line-height: 1; margin-bottom: -3px;
+        }
         .ah-points {
-            font-size: 2.4rem; font-weight: 700; line-height: 1;
+            font-size: 3.3rem; font-weight: 700; line-height: 1;
             color: transparent; background: linear-gradient(96deg,var(--p),var(--s));
             -webkit-background-clip: text; background-clip: text;
             filter: drop-shadow(0 0 14px rgba(45,212,238,.3));
@@ -468,11 +477,12 @@
     <div class="player-header">
         <button class="back-btn ctrl-btn" onclick="window.location.href='/'">&#8592; Back</button>
         <div class="song-title" id="song-title">Loading...</div>
-        <div class="score-display" id="score-display" style="display:none">Score: <span id="score-pct">0%</span></div>
+        <div class="score-display" id="score-display" style="display:none"><span class="sd-label">Accuracy</span><span id="score-pct">0%</span></div>
         <div class="diff-pill" id="diff-pill" style="display:none">MEDIUM</div>
     </div>
 
     <div class="arcade-hud" id="arcadeHud" style="display:none" aria-hidden="true">
+        <div class="ah-cap">Score</div>
         <div class="ah-points" id="ahPoints">0</div>
         <div class="ah-mult-row">
             <span class="ah-mult" id="ahMult">1&#215;</span>
