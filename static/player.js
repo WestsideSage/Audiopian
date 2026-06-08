@@ -79,16 +79,6 @@ class GameMode {
         this.lineStartTranscriptPos = 0;  // transcript word index when current line started (fence)
         this.latestInterim     = '';      // most recent interim, used to anchor fast-song lines
 
-        // Scoring
-        this.totalWords      = 0;
-        this.matchedWords    = 0;
-        this.weightedTotal   = 0;
-        this.weightedMatched = 0;
-        this.linesScored     = 0;
-        this.perfectLines    = 0;
-        this.currentStreak   = 0;
-        this.bestStreak      = 0;
-
         // ASR activity tracking (zero-ASR line fencing)
         this.lineHadAsrEvent = false;
 
@@ -322,10 +312,6 @@ class GameMode {
         this.lineStartWordCount = 0;
         this.lineStartTranscriptPos = 0;
         this.latestInterim = '';
-        this.totalWords = 0;
-        this.matchedWords = 0;
-        this.weightedTotal = 0;
-        this.weightedMatched = 0;
         if (window.KaraokeeArcade && this._phraseDifficulty) {
             this._arcadeState = KaraokeeArcade.createArcadeState(this._phraseDifficulty);
         }
@@ -333,10 +319,6 @@ class GameMode {
         this._arcadeEvents = [];
         this._telemetryFinalized = false;
         document.body.classList.remove('arcade-onfire');
-        this.linesScored = 0;
-        this.perfectLines = 0;
-        this.currentStreak = 0;
-        this.bestStreak = 0;
         this._lastResultTime = Date.now();
         this._dbBuf = [];
         this._telemetry = null;
@@ -1116,8 +1098,6 @@ class GameMode {
             this.vadMatchedSet  = s.vadMatchedSet;
             this.asrConfirmedSet = s.asrConfirmedSet;
             this.wordSourceMap  = s.wordSourceMap;
-            this.weightedTotal  = s.weightedTotal;
-            this.weightedMatched = s.weightedMatched;
             this.lineWords      = s.lineWords;
         }
         if (!events) return;
