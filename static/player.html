@@ -105,6 +105,9 @@
             font-weight: 600;
         }
         .ctrl-btn:hover { background: var(--surface-3); filter: none; box-shadow: inset 0 0 0 1px var(--line-strong); }
+        /* compact lyric-offset chips (shown in the controls bar during a scored game) */
+        .offset-btn { width: auto; flex-shrink: 0; padding: 4px 9px; font-size: 0.8rem; font-weight: 600; background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-sm); }
+        .offset-btn:hover { background: var(--surface-3); filter: none; box-shadow: none; }
 
         #seek {
             flex: 1;
@@ -493,9 +496,9 @@
         <div id="asr-provider-display" style="font-size:0.78rem;color:#aaa;min-width:190px;text-align:left;">ASR: checking...</div>
         <div id="lrc-offset-control" style="display:none; align-items:center; gap:6px; font-size:13px; color:#aaa;">
           <span>Lyrics offset</span>
-          <button id="offsetMinus" title="Shift lyrics earlier">−0.5s</button>
+          <button id="offsetMinus" class="offset-btn" title="Shift lyrics earlier">−0.5s</button>
           <span id="offsetDisplay">0.0s</span>
-          <button id="offsetPlus"  title="Shift lyrics later">+0.5s</button>
+          <button id="offsetPlus"  class="offset-btn" title="Shift lyrics later">+0.5s</button>
         </div>
     </div>
 
