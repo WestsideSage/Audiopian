@@ -203,6 +203,18 @@
             }
         });
 
+        // Returning to this menu (notably via the browser Back button) restores the
+        // previously-typed Artist/Title through the browser's form restoration. Clear
+        // them whenever the page is shown so a fresh load — especially a local-file
+        // upload — never inherits the previous song's metadata. (Restoration happens
+        // during load, before pageshow, so this reliably wins.)
+        window.addEventListener('pageshow', function () {
+            var a = document.getElementById('artist');
+            var t = document.getElementById('title');
+            if (a) a.value = '';
+            if (t) t.value = '';
+        });
+
         // Local-file upload is a dev-harness feature; hide it on the deployed CDN.
         (function () {
             var isDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
