@@ -1,3 +1,49 @@
+/* ============================================================
+   Karaokee — design tokens + shared (landing) styles
+   "Neon Arcade", cyan × magenta.
+   See docs/superpowers/specs/2026-06-08-ux-refresh-design.md
+   ============================================================ */
+:root {
+    /* surfaces */
+    --bg:           #0a0b14;
+    --bg-deep:      #070710;
+    --surface:      #10121c;
+    --surface-2:    #161a28;
+    --surface-3:    #1c2030;
+    --line:         rgba(255,255,255,.07);
+    --line-strong:  rgba(255,255,255,.12);
+
+    /* text */
+    --text:         #e7e9f2;
+    --text-dim:     #8a8c9e;
+    --text-faint:   #5c5f73;
+
+    /* accents */
+    --p:            #2dd4ee;   /* primary  — cyan    */
+    --s:            #f0468f;   /* secondary — magenta */
+    --p-soft:       rgba(45,212,238,.14);
+    --p-line:       rgba(45,212,238,.40);
+
+    /* status (semantic, constant app-wide) */
+    --matched:      #34e89e;
+    --partial:      #ffcf5c;
+    --missed:       #ff5d73;
+    --key:          var(--p);
+
+    /* fire (warm, fixed — reads as "hot") */
+    --fire-a:       #ff5470;
+    --fire-b:       #ff9f45;
+
+    /* shape & type */
+    --r:            10px;
+    --r-sm:         7px;
+    --r-lg:         18px;
+    --font:         'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+
+    /* gradients */
+    --grad-accent:  linear-gradient(96deg, var(--p), var(--s));
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
@@ -5,141 +51,208 @@
 }
 
 body {
-    background: #0d0d0d;
-    color: #f0f0f0;
-    font-family: 'Segoe UI', sans-serif;
+    background:
+        radial-gradient(120% 80% at 100% 0%, rgba(240,70,143,.13), transparent 56%),
+        radial-gradient(120% 90% at 0% 100%, rgba(45,212,238,.12), transparent 56%),
+        var(--bg);
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: var(--font);
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
 .card {
-    background: #1a1a2e;
-    border-radius: 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
     padding: 40px;
     width: 480px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    box-shadow: 0 24px 60px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.02);
 }
 
-h1 {
-    font-size: 2rem;
-    text-align: center;
-    margin-bottom: 32px;
-    color: #e040fb;
+/* ---- wordmark ---- */
+.wordmark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 13px;
+    font-size: 1.85rem;
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: #f4f5fb;
+    margin-bottom: 10px;
 }
+.wordmark .logo-dot {
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    background: var(--grad-accent);
+    box-shadow: 0 0 16px var(--p);
+    flex-shrink: 0;
+}
+/* fallback for any bare h1 */
+h1 { font-size: 1.85rem; text-align: center; color: #f4f5fb; }
+
+.tagline {
+    text-align: center;
+    font-size: .85rem;
+    color: var(--text-dim);
+    margin: 0 0 22px;
+    line-height: 1.55;
+}
+.tagline a { color: var(--p); text-decoration: none; }
+.tagline a:hover { text-decoration: underline; }
 
 label {
     display: block;
-    font-size: 0.85rem;
-    color: #aaa;
-    margin-bottom: 6px;
+    font-size: .68rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    margin-bottom: 7px;
+}
+label .hint {
+    color: var(--text-faint);
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
 }
 
-input[type="text"] {
+input[type="text"],
+input[type="password"] {
     width: 100%;
-    padding: 10px 14px;
-    background: #0d0d0d;
-    border: 1px solid #333;
-    border-radius: 8px;
-    color: #f0f0f0;
-    font-size: 0.95rem;
+    padding: 12px 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    color: var(--text);
+    font-size: .95rem;
+    font-family: inherit;
     margin-bottom: 18px;
+    transition: border-color .15s, box-shadow .15s;
 }
-
-input[type="text"]:focus {
+input::placeholder { color: var(--text-faint); }
+input[type="text"]:focus,
+input[type="password"]:focus {
     outline: none;
-    border-color: #e040fb;
+    border-color: var(--p);
+    box-shadow: 0 0 0 3px var(--p-soft);
 }
 
 button {
     width: 100%;
-    padding: 12px;
-    background: #e040fb;
-    color: #fff;
+    padding: 13px;
+    background: var(--p);
+    color: #04121a;
     border: none;
-    border-radius: 8px;
+    border-radius: var(--r);
     font-size: 1rem;
     cursor: pointer;
-    font-weight: 600;
-    transition: background 0.2s;
+    font-weight: 700;
+    font-family: inherit;
+    letter-spacing: .01em;
+    transition: filter .15s, transform .08s, box-shadow .15s;
 }
+button:hover { filter: brightness(1.07); box-shadow: 0 6px 22px rgba(45,212,238,.28); }
+button:active { transform: translateY(1px); }
+button:disabled { background: var(--surface-2); color: var(--text-faint); cursor: not-allowed; filter: none; box-shadow: none; }
 
-button:hover { background: #c026d3; }
-button:disabled { background: #555; cursor: not-allowed; }
+.btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
+.btn-secondary:hover { background: var(--surface-3); filter: none; box-shadow: inset 0 0 0 1px var(--line-strong); }
 
 #status {
     margin-top: 16px;
     text-align: center;
-    font-size: 0.9rem;
+    font-size: .9rem;
     min-height: 1.2em;
-    color: #aaa;
+    color: var(--text-dim);
+}
+#status.error { color: var(--missed); }
+#status.success { color: var(--matched); }
+
+/* ---- small helper text (consolidated from inline styles) ---- */
+.hint-text {
+    font-size: .78rem;
+    color: var(--text-faint);
+    margin: -8px 0 10px;
+    line-height: 1.5;
 }
 
-#status.error { color: #f87171; }
-#status.success { color: #4ade80; }
-
-/* Search feature */
-.search-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 18px;
+/* ---- bring-your-own-key disclosure ---- */
+.byok {
+    margin-top: 18px;
+    border-top: 1px solid var(--line);
+    padding-top: 16px;
 }
-
-.search-row input {
-    flex: 1;
-    margin-bottom: 0;
+.byok summary {
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: .85rem;
+    list-style: none;
 }
+.byok summary::-webkit-details-marker { display: none; }
+.byok summary::before { content: '+ '; color: var(--p); font-weight: 700; }
+.byok[open] summary::before { content: '– '; }
+.byok input { margin-top: 10px; }
+.byok-actions { display: flex; gap: 8px; }
+.byok-note { font-size: .75rem; color: var(--text-faint); margin-top: 8px; line-height: 1.5; }
 
-.search-row button {
-    width: auto;
-    padding: 10px 16px;
-    font-size: 0.9rem;
+/* ---- desktop-only interstitial (display toggled inline by script) ---- */
+.unsupported-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-deep);
+    color: var(--text);
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2rem;
+    z-index: 9999;
 }
+.unsupported-overlay h2 { color: #f4f5fb; font-weight: 700; margin-bottom: 12px; }
+.unsupported-overlay p { max-width: 32rem; line-height: 1.6; color: var(--text-dim); margin: 0 auto; }
+.unsupported-overlay strong { color: var(--p); }
+
+/* ============================================================
+   Search feature (kept; tokenised)
+   ============================================================ */
+.search-row { display: flex; gap: 8px; margin-bottom: 18px; }
+.search-row input { flex: 1; margin-bottom: 0; }
+.search-row button { width: auto; padding: 10px 16px; font-size: .9rem; }
 
 .search-results {
-    background: #0d0d0d;
-    border: 1px solid #333;
-    border-radius: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
     margin-bottom: 18px;
     overflow: hidden;
     display: none;
 }
-
 .search-result-item {
     padding: 12px 14px;
     cursor: pointer;
-    border-bottom: 1px solid #1a1a1a;
-    transition: background 0.15s;
+    border-bottom: 1px solid var(--line);
+    transition: background .15s;
 }
-
-.search-result-item:last-child {
-    border-bottom: none;
-}
-
-.search-result-item:hover {
-    background: #1a1a2e;
-}
-
-.search-result-title {
-    font-size: 0.95rem;
-    color: #f0f0f0;
-    margin-bottom: 2px;
-}
-
-.search-result-meta {
-    font-size: 0.78rem;
-    color: #666;
-}
+.search-result-item:last-child { border-bottom: none; }
+.search-result-item:hover { background: var(--surface-3); }
+.search-result-title { font-size: .95rem; color: var(--text); margin-bottom: 2px; }
+.search-result-meta { font-size: .78rem; color: var(--text-faint); }
 
 .search-divider {
     text-align: center;
-    color: #444;
-    font-size: 0.8rem;
+    color: var(--text-faint);
+    font-size: .8rem;
     margin-bottom: 18px;
     position: relative;
 }
-
 .search-divider::before,
 .search-divider::after {
     content: '';
@@ -147,8 +260,7 @@ button:disabled { background: #555; cursor: not-allowed; }
     top: 50%;
     width: 38%;
     height: 1px;
-    background: #333;
+    background: var(--line);
 }
-
 .search-divider::before { left: 0; }
 .search-divider::after { right: 0; }

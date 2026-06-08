@@ -3,14 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <title>Karaokee</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div id="unsupported" style="display:none;position:fixed;inset:0;background:#111;color:#eee;
-         align-items:center;justify-content:center;text-align:center;padding:2rem;z-index:9999">
+    <div id="unsupported" class="unsupported-overlay" style="display:none">
       <div>
-        <h2>🎤 Karaokee needs desktop Chrome or Edge</h2>
-        <p style="max-width:32rem;line-height:1.6;color:#bbb;margin:0 auto">
+        <h2>Karaokee needs desktop Chrome or Edge</h2>
+        <p>
           The free voice recognition runs only in <strong>desktop Chrome or Edge</strong> with a
           microphone. Open this link in desktop Chrome or Edge to play.
         </p>
@@ -18,9 +20,9 @@
     </div>
 
     <div class="card">
-        <h1>🎤 Karaokee</h1>
+        <h1 class="wordmark"><span class="logo-dot"></span>Karaokee</h1>
 
-        <p style="font-size:0.85rem;color:#888;margin:4px 0 14px">
+        <p class="tagline">
             Paste a YouTube link to sing any song. Don't have the link?
             <a href="https://www.youtube.com/results" target="_blank" rel="noopener">Search YouTube ↗</a>
         </p>
@@ -28,33 +30,33 @@
         <label for="url">YouTube URL</label>
         <input type="text" id="url" placeholder="https://youtube.com/watch?v=..." />
 
-        <label for="artist">Artist <span style="color:#666">(auto-filled)</span></label>
+        <label for="artist">Artist <span class="hint">(auto-filled)</span></label>
         <input type="text" id="artist" placeholder="Artist name" />
 
-        <label for="title">Title <span style="color:#666">(auto-filled)</span></label>
+        <label for="title">Title <span class="hint">(auto-filled)</span></label>
         <input type="text" id="title" placeholder="Song title" />
 
         <button id="loadBtn" onclick="loadSong()">Load Song</button>
         <div id="status"></div>
-        <button id="retryBtn" onclick="retryLyrics()" style="display:none;margin-top:10px;background:#334;">
+        <button id="retryBtn" class="btn-secondary" onclick="retryLyrics()" style="display:none;margin-top:10px">
             Retry with edited title/artist
         </button>
 
         <div id="localUploadSection">
             <div class="search-divider">or load a local audio file</div>
-            <p style="font-size:0.78rem;color:#666;margin:-8px 0 10px">Fill in Artist + Title above for synced lyrics, then choose a file you already own.</p>
+            <p class="hint-text">Fill in Artist + Title above for synced lyrics, then choose a file you already own.</p>
             <input type="file" id="localFile" accept="audio/*" style="margin-bottom:10px" />
             <button id="loadLocalBtn" onclick="loadLocal()">🎵 Load Local File</button>
         </div>
 
-        <details class="byok" style="margin-top:16px">
-          <summary style="cursor:pointer;color:#aaa;font-size:0.85rem">Sharper recognition (optional) — bring your own OpenAI key</summary>
-          <input id="openaiKey" type="password" placeholder="sk-…" autocomplete="off" style="margin-top:8px" />
-          <div style="display:flex;gap:8px">
+        <details class="byok">
+          <summary>Sharper recognition (optional) — bring your own OpenAI key</summary>
+          <input id="openaiKey" type="password" placeholder="sk-…" autocomplete="off" />
+          <div class="byok-actions">
             <button id="saveKeyBtn" type="button">Save</button>
-            <button id="clearKeyBtn" type="button" style="background:#334">Clear</button>
+            <button id="clearKeyBtn" class="btn-secondary" type="button">Clear</button>
           </div>
-          <p style="font-size:0.75rem;color:#666;margin-top:6px">Stored in this browser and sent only to OpenAI — never to Karaokee.</p>
+          <p class="byok-note">Stored in this browser and sent only to OpenAI — never to Karaokee.</p>
         </details>
     </div>
 
