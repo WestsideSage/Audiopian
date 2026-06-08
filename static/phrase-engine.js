@@ -9,6 +9,16 @@
     var WORD_WEIGHTS = matchHelpers.WORD_WEIGHTS || root.WORD_WEIGHTS || { core: 1.0, function: 0.5, adlib: 0.25 };
     var ADLIB_WORDS = matchHelpers.ADLIB_WORDS || root.ADLIB_WORDS;
 
+    // Lazy profanity resolver (load-order robust): require() in Node, window global in browser.
+    function _profanity() {
+        if (typeof module !== 'undefined' && module.exports) {
+            try { return require('./profanity.js'); } catch (e) { return null; }
+        }
+        return (root && root.KaraokeeProfanity) || null;
+    }
+    function _isProfane(w)    { var p = _profanity(); return !!(p && p.isProfane && p.isProfane(w)); }
+    function _isNeverScore(w) { var p = _profanity(); return !!(p && p.isNeverScore && p.isNeverScore(w)); }
+
     var DIFFICULTY = {
         easy:   { requiredAnchorRatio: 0.20, timingToleranceMs: 1400, settlementMs: 1800, minFlowCoverage: 0.20 },
         medium: { requiredAnchorRatio: 0.45, timingToleranceMs: 1000, settlementMs: 1400, minFlowCoverage: 0.45 },
@@ -98,7 +108,8 @@
         return out;
     }
 
-    function selectAnchors(words, difficultyProfile) {
+    function selectAnchors(words, difficultyProfile, opts) {
+        var clean = !!(opts && opts.clean);
         var anchors = [];
         for (var i = 0; i < words.length; i++) {
             var word = words[i] ? words[i].word : '';
@@ -107,6 +118,8 @@
             if (!word || word.length < 3) continue;
             if (wordClass === 'function' || wordClass === 'adlib') continue;
             if (REPEATED_FILLER[word] || isAdlibWord(word)) continue;
+            if (_isNeverScore(word)) continue;             // hard-R slur: never an anchor, any mode
+            if (clean && _isProfane(word)) continue;        // clean mode: profanity is not a key word
             var weight = WORD_WEIGHTS[wordClass] || 1.0;
             if (i === words.length - 1 || i === words.length - 2) weight += 0.2;
             if (word.length >= 6) weight += 0.15;
@@ -127,6 +140,8 @@
             for (var fi = 0; fi < words.length; fi++) {
                 var fw = words[fi] ? words[fi].word : '';
                 if (!fw) continue;
+                if (_isNeverScore(fw)) continue;
+                if (clean && _isProfane(fw)) continue;
                 anchors.push({
                     anchorIdx: anchors.length,
                     wordIdx: fi,
@@ -188,7 +203,7 @@
                 : [{ words: words, wordObjs: wordObjs, startSec: startSec, endSec: endSec }];
             for (var c = 0; c < chunks.length; c++) {
                 var chunk = chunks[c];
-                var anchors = selectAnchors(chunk.wordObjs, difficulty);
+                var anchors = selectAnchors(chunk.wordObjs, difficulty, { clean: !!options.clean });
                 var anchorsRequired = anchors.length > 0 ? Math.max(1, Math.ceil(anchors.length * difficulty.requiredAnchorRatio)) : 0;
                 // Force-all relief: a line big enough to spare one anchor shouldn't require
                 // EVERY one of them, so a single ASR-impossible word (e.g. "greaze", "velour")

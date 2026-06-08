@@ -14,10 +14,12 @@ function loadBrowserCommonJs(filePath, extraArgs) {
 
 var matchHelpers = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'match-helpers.js'));
 var syncHelpers = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'sync-helpers.js'));
+var profanity = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'profanity.js'));
 var scoring = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'scoring.js'), {
     require: function(specifier) {
         if (specifier === './match-helpers.js') return matchHelpers;
         if (specifier === './sync-helpers.js') return syncHelpers;
+        if (specifier === './profanity.js') return profanity;
         throw new Error('Unexpected require: ' + specifier);
     },
     globalThis: globalThis
@@ -26,6 +28,7 @@ var phraseEngine = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'phr
     require: function(specifier) {
         if (specifier === './scoring.js') return scoring;
         if (specifier === './match-helpers.js') return matchHelpers;
+        if (specifier === './profanity.js') return profanity;
         throw new Error('Unexpected require: ' + specifier);
     },
     globalThis: globalThis
@@ -50,6 +53,30 @@ assert.ok(plan.phrases[2].anchors.some(function(anchor) { return anchor.word ===
 assert.ok(plan.phrases[2].anchors.every(function(anchor) { return anchor.fillerOnly === true; }), 'fallback anchors are marked fillerOnly');
 assert.ok(plan.phrases[0].anchors.every(function(anchor) { return !anchor.fillerOnly; }), 'normal anchors are not marked fillerOnly');
 assert.ok(plan.difficulty.requiredAnchorRatio > 0.5, 'hard profile requires meaningful anchor coverage');
+
+// ---------------------------------------------------------------------------
+// Clean mode: profanity excluded from key words; hard-R never an anchor
+// ---------------------------------------------------------------------------
+(function () {
+    var lyr = [{ time: 0, text: 'bitch I run this fucking city' }];
+    var exp = phraseEngine.buildPhrasePlan(lyr, { difficulty: 'expert' }).phrases[0];
+    var cln = phraseEngine.buildPhrasePlan(lyr, { difficulty: 'expert', clean: true }).phrases[0];
+    var clnWords = cln.anchors.map(function (a) { return a.word; });
+    assert.ok(clnWords.indexOf('bitch') === -1 && clnWords.indexOf('fucking') === -1, 'clean mode drops profane anchors');
+    assert.ok(clnWords.indexOf('run') !== -1 || clnWords.indexOf('city') !== -1, 'clean mode keeps clean key words');
+    assert.ok(exp.anchors.map(function (a) { return a.word; }).indexOf('bitch') !== -1, 'explicit mode keeps profanity as an anchor');
+})();
+(function () {
+    var hardR = 'nigga'.replace(/a$/, 'er');   // derived; avoid the literal slur in source
+    var lyr = [{ time: 0, text: hardR + ' please listen closely' }];
+    var exp = phraseEngine.buildPhrasePlan(lyr, { difficulty: 'expert' }).phrases[0];
+    assert.ok(exp.anchors.map(function (a) { return a.word; }).indexOf(hardR) === -1, 'hard-R never an anchor even in explicit mode');
+})();
+(function () {
+    var lyr = [{ time: 0, text: 'fuck shit bitch' }];
+    var cln = phraseEngine.buildPhrasePlan(lyr, { difficulty: 'expert', clean: true }).phrases[0];
+    assert.strictEqual(cln.anchorsRequired, 0, 'profanity-only line is non-scoring in clean mode');
+})();
 
 var settlementPlan = phraseEngine.buildPhrasePlan([
     { time: 0, text: 'alpha bravo final' },
