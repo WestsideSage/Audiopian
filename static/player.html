@@ -159,9 +159,17 @@
            (adjacent whitespace collapses, so the key words sit on a clean single-spaced line). */
         body.insanity #lyrics-scroll .word-span:not(.key-word) { display: none; }
         /* ...and show ONE line at a time: hide every line but the active one, so you can't
-           read ahead. visibility (not display:none) keeps each line's box, so the scroll math
-           still centers the active line. */
+           read ahead. visibility (not display:none) keeps each line's box so layout is stable. */
         body.insanity #lyrics-scroll .lyric-line:not(.active) { visibility: hidden; }
+        /* Pin the active line to the middle of the screen, independent of scroll position
+           (fixed = viewport-relative), so it never drifts as the song scrolls. */
+        body.insanity #lyrics-scroll .lyric-line.active {
+            position: fixed;
+            top: 50%;
+            left: 0;
+            right: 0;
+            transform: translateY(-50%);
+        }
 
         @keyframes confirmPulse {
             0%   { text-shadow: 0 0 0px #fff; }
