@@ -54,6 +54,16 @@ assert.ok(plan.phrases[2].anchors.every(function(anchor) { return anchor.fillerO
 assert.ok(plan.phrases[0].anchors.every(function(anchor) { return !anchor.fillerOnly; }), 'normal anchors are not marked fillerOnly');
 assert.ok(plan.difficulty.requiredAnchorRatio > 0.5, 'hard profile requires meaningful anchor coverage');
 
+// Insane difficulty: a 5th tier strictly harder than expert.
+(function () {
+    var ins = phraseEngine.getDifficultyProfile('insane');
+    var exp = phraseEngine.getDifficultyProfile('expert');
+    assert.ok(ins.requiredAnchorRatio > exp.requiredAnchorRatio, 'insane requires more anchors than expert');
+    assert.ok(ins.timingToleranceMs < exp.timingToleranceMs, 'insane timing tighter than expert');
+    assert.ok(ins.settlementMs < exp.settlementMs, 'insane settles faster than expert');
+    console.log('  ok - insane difficulty profile is harder than expert');
+})();
+
 // ---------------------------------------------------------------------------
 // Clean mode: profanity excluded from key words; hard-R never an anchor
 // ---------------------------------------------------------------------------

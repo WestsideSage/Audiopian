@@ -155,6 +155,10 @@
             text-shadow: 0 0 12px rgba(45,212,238,.45);
         }
 
+        /* Insane difficulty — collapse every non-key word; only the scored key words show
+           (adjacent whitespace collapses, so the key words sit on a clean single-spaced line). */
+        body.insanity #lyrics-scroll .word-span:not(.key-word) { display: none; }
+
         @keyframes confirmPulse {
             0%   { text-shadow: 0 0 0px #fff; }
             50%  { text-shadow: 0 0 8px #fff, 0 0 16px var(--matched); }
@@ -460,6 +464,7 @@
                     <button class="diff-card" data-diff="medium"><span class="dc-name">Medium</span><span class="dc-desc">Balanced</span></button>
                     <button class="diff-card" data-diff="hard"><span class="dc-name">Hard</span><span class="dc-desc">Strict words &amp; timing</span></button>
                     <button class="diff-card" data-diff="expert"><span class="dc-name">Expert</span><span class="dc-desc">Nearly every word, tight</span></button>
+                    <button class="diff-card" data-diff="insane"><span class="dc-name">Insane</span><span class="dc-desc">Lyrics hidden — only key words show</span></button>
                 </div>
                 <div class="diff-preview" id="diffPreview" style="display:none">
                     <div class="dp-line" id="dpLine"></div>

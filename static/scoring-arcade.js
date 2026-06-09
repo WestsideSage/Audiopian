@@ -22,7 +22,8 @@
         easy:   { baseScale: 1.0,  maxMultiplier: 4 },
         medium: { baseScale: 1.25, maxMultiplier: 4 },
         hard:   { baseScale: 1.5,  maxMultiplier: 6 },
-        expert: { baseScale: 2.0,  maxMultiplier: 8 }
+        expert: { baseScale: 2.0,  maxMultiplier: 8 },
+        insane: { baseScale: 2.5,  maxMultiplier: 10 }
     };
 
     function tuningFor(difficulty) {
@@ -128,7 +129,8 @@
         easy:   { S: 80, A: 64, B: 48, C: 32 },
         medium: { S: 87, A: 73, B: 59, C: 45 },
         hard:   { S: 92, A: 81, B: 69, C: 56 },
-        expert: { S: 96, A: 88, B: 77, C: 64 }
+        expert: { S: 96, A: 88, B: 77, C: 64 },
+        insane: { S: 98, A: 91, B: 81, C: 69 }
     };
 
     function gradeFor(pct, difficulty) {

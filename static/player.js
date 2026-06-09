@@ -1903,6 +1903,7 @@ if (lyrics.length === 0) {
 
 function renderLyrics() {
     var clean = localStorage.getItem('cleanMode') === '1';
+    document.body.classList.remove('insanity');   // passive view never collapses lyrics
     lyricsScroll.innerHTML = '';
     lyrics.forEach((line, i) => {
         const el = document.createElement('div');
@@ -1915,6 +1916,8 @@ function renderLyrics() {
 
 function renderLyricsGameMode() {
     var clean = localStorage.getItem('cleanMode') === '1';
+    // Insane difficulty collapses every non-key word (display-only; CSS body.insanity rule).
+    document.body.classList.toggle('insanity', (localStorage.getItem('arcadeDifficulty') || 'medium') === 'insane');
     lyricsScroll.innerHTML = '';
     lyrics.forEach((line, i) => {
         const el = document.createElement('div');

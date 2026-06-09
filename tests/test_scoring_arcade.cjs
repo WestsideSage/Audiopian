@@ -140,4 +140,15 @@ for (var q = 0; q < 20; q++) arcade.commitPhrase(fp, clear('qp' + q, 1, 2, 1));
 assert.strictEqual(fp.multiplier, 4, 'reached max multiplier');
 assert.strictEqual(arcade.rampProgress(fp), 1, 'ramp shows full at max multiplier');
 
+// --- 14. Insane tier: harder than expert ---
+assert.ok(arcade.ARCADE_TUNING.insane, 'insane tuning exists');
+assert.ok(totalFor('insane') > totalFor('expert'), 'insane out-pays expert for identical play');
+assert.strictEqual(arcade.gradeFor(97, 'insane'), 'A', 'insane S cutoff is above 97');
+assert.strictEqual(arcade.gradeFor(98, 'insane'), 'S', 'insane reaches S at 98');
+['easy', 'medium', 'hard', 'expert', 'insane'].reduce(function (prev, d) {
+    var rr = gradeRank[arcade.gradeFor(85, d)];
+    assert.ok(rr <= prev, 'grade for 85% is monotonic non-increasing incl. insane');
+    return rr;
+}, 5);
+
 console.log('test_scoring_arcade.cjs: all assertions passed');

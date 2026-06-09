@@ -23,7 +23,10 @@
         easy:   { requiredAnchorRatio: 0.20, timingToleranceMs: 1400, settlementMs: 1800, minFlowCoverage: 0.20 },
         medium: { requiredAnchorRatio: 0.45, timingToleranceMs: 1000, settlementMs: 1400, minFlowCoverage: 0.45 },
         hard:   { requiredAnchorRatio: 0.65, timingToleranceMs: 750,  settlementMs: 1100, minFlowCoverage: 0.65 },
-        expert: { requiredAnchorRatio: 0.80, timingToleranceMs: 500,  settlementMs: 900,  minFlowCoverage: 0.80 }
+        expert: { requiredAnchorRatio: 0.80, timingToleranceMs: 500,  settlementMs: 900,  minFlowCoverage: 0.80 },
+        // Insane: a 5th tier, strictly harder than expert (more required key words, tighter
+        // timing). Paired with the collapsed-lyrics display (player.js gates on 'insane').
+        insane: { requiredAnchorRatio: 0.90, timingToleranceMs: 400,  settlementMs: 800,  minFlowCoverage: 0.90 }
     };
     var REPEATED_FILLER = {
         yeah: true, uh: true, oh: true, ay: true, aye: true, la: true,
