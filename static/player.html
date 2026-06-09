@@ -158,6 +158,10 @@
         /* Insane difficulty — collapse every non-key word; only the scored key words show
            (adjacent whitespace collapses, so the key words sit on a clean single-spaced line). */
         body.insanity #lyrics-scroll .word-span:not(.key-word) { display: none; }
+        /* ...and show ONE line at a time: hide every line but the active one, so you can't
+           read ahead. visibility (not display:none) keeps each line's box, so the scroll math
+           still centers the active line. */
+        body.insanity #lyrics-scroll .lyric-line:not(.active) { visibility: hidden; }
 
         @keyframes confirmPulse {
             0%   { text-shadow: 0 0 0px #fff; }
