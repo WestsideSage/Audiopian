@@ -75,6 +75,44 @@ async function fetchLyrics(opts, deps) {
     return scored[0].parsed;
 }
 
-var KaraokeeLyricsClient = { parseLrc: parseLrc, tokenOverlap: tokenOverlap, scoreCandidate: scoreCandidate, fetchLyrics: fetchLyrics };
+async function searchSongs(query, deps) {
+    var q = String(query || '').trim();
+    if (!q) return [];
+    var doFetch = (deps && deps.fetch) || (typeof fetch !== 'undefined' ? fetch : null);
+    if (!doFetch) throw new Error('searchSongs requires a fetch implementation');
+    var url = LRCLIB_SEARCH_URL + '?q=' + encodeURIComponent(q);
+
+    var results = null;
+    for (var attempt = 1; attempt <= LRCLIB_MAX_ATTEMPTS; attempt++) {
+        try {
+            var resp = await doFetch(url);
+            if (!resp.ok) return [];
+            results = await resp.json();
+            break;
+        } catch (err) {
+            if (attempt >= LRCLIB_MAX_ATTEMPTS) return [];
+        }
+    }
+    if (!Array.isArray(results)) return [];
+
+    var out = [];
+    for (var i = 0; i < results.length; i++) {
+        var row = results[i];
+        if (!row || !row.syncedLyrics) continue;          // synced only — guarantees singable
+        var lyrics = parseLrc(row.syncedLyrics);
+        if (!lyrics.length) continue;
+        out.push({
+            trackName: row.trackName || '',
+            artistName: row.artistName || '',
+            duration: row.duration || 0,
+            _score: scoreCandidate(row, q, q, 0),
+            lyrics: lyrics,
+        });
+    }
+    out.sort(function (a, b) { return b._score - a._score; });
+    return out;
+}
+
+var KaraokeeLyricsClient = { parseLrc: parseLrc, tokenOverlap: tokenOverlap, scoreCandidate: scoreCandidate, fetchLyrics: fetchLyrics, searchSongs: searchSongs };
 if (typeof window !== 'undefined') window.KaraokeeLyricsClient = KaraokeeLyricsClient;
 if (typeof module !== 'undefined' && module.exports) module.exports = KaraokeeLyricsClient;
