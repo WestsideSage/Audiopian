@@ -2253,10 +2253,14 @@ let prepTimer = null;
 // so gating scoring on buffering/ad transitions via onState is safe (no flicker/thrash).
 function _wirePlaybackCallbacks() {
     _playbackReady = false;
+    var _gc0 = document.getElementById('diffGateCards');
+    if (_gc0) _gc0.classList.add('loading');          // disable difficulty cards until the embed is ready
     playback.onReady(function () {
         _playbackReady = true;
         var ps = document.getElementById('prepStatus');
         if (ps) ps.textContent = 'Ready — pick a difficulty';
+        var _gc = document.getElementById('diffGateCards');
+        if (_gc) _gc.classList.remove('loading');
         if (overlayDismissed) {
             Promise.resolve(playback.play()).then(function () { playBtn.textContent = '⏸'; }).catch(function () {});
         }
@@ -2372,7 +2376,8 @@ function openDifficultyGate() {
     overlay.style.display = 'flex';
 }
 
-// Begin a scored run on the chosen difficulty.
+// Begin a scored run on the chosen difficulty \u2014 via a loading + 3\u00B72\u00B71 count-in so the song
+// starts on a predictable beat (and the mic is warmed up first), no matter the song's intro.
 function startRunWithDifficulty(d) {
     if (!playback || !_playbackReady) return;   // wait for onReady so the click is the play() gesture
     localStorage.setItem('arcadeDifficulty', d);
@@ -2382,9 +2387,63 @@ function startRunWithDifficulty(d) {
     gameMode._stopMicCheck();
     document.getElementById('prepOverlay').style.display = 'none';
     if (gameMode.active) gameMode.stop();
-    playback.seek(0);
-    Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+    _runCountIn(d);
+}
+
+// Loading \u2192 "Get ready! 3\u00B72\u00B71" \u2192 song. The difficulty click is the play() gesture, so we "arm"
+// the embed (muted play+pause, held at 0) to satisfy autoplay, warm up the scoring stack while
+// we wait, then unmute + play on "Go". Scoring stays frozen by the playback gate until the song
+// actually plays, so the count-in never eats the first line.
+function _runCountIn(d) {
+    var overlay = document.getElementById('countInOverlay');
+    var numEl   = document.getElementById('countInNum');
+    var labelEl = document.getElementById('countInLabel');
+    var spinEl  = document.getElementById('countInSpinner');
+    var savedVol = volumeBar ? parseFloat(volumeBar.value) : 1;
+    var done = false;
+
+    // Arm the embed on the user gesture (authorize playback + start buffering), held muted at 0.
+    try { playback.setVolume(0); playback.seek(0); playback.play(); playback.pause(); } catch (e) {}
+    // Warm up mic/VAD/recognizer now; the playback gate keeps scoring frozen until the song plays.
     gameMode.start();
+
+    if (overlay) overlay.style.display = 'flex';
+    if (numEl) numEl.textContent = '';
+    if (labelEl) labelEl.textContent = 'Loading\u2026';
+    if (spinEl) spinEl.style.display = 'block';
+
+    function go() {
+        if (done) return; done = true;
+        document.removeEventListener('keydown', onKey);
+        if (overlay) { overlay.removeEventListener('click', go); overlay.style.display = 'none'; }
+        try {
+            playback.seek(0);
+            playback.setVolume(savedVol);
+            Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+        } catch (e) {}
+    }
+    function onKey(e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); go(); } }
+    document.addEventListener('keydown', onKey);
+    if (overlay) overlay.addEventListener('click', go);
+
+    // Phase 1 \u2014 loading: wait until the capture stack reports ready (cap 5s so a slow load can't trap you).
+    var loadStart = Date.now();
+    (function waitReady() {
+        if (done) return;
+        var st = gameMode._whisperTrackStatus && gameMode._whisperTrackStatus.state;
+        if (st === 'ready' || st === 'error' || (Date.now() - loadStart) > 5000) { countdown(3); return; }
+        setTimeout(waitReady, 120);
+    })();
+
+    // Phase 2 \u2014 3 \u00B7 2 \u00B7 1.
+    function countdown(n) {
+        if (done) return;
+        if (n <= 0) { go(); return; }
+        if (spinEl) spinEl.style.display = 'none';
+        if (labelEl) labelEl.textContent = 'Get ready to sing!';
+        if (numEl) { numEl.textContent = String(n); numEl.style.animation = 'none'; void numEl.offsetWidth; numEl.style.animation = ''; }
+        setTimeout(function () { countdown(n - 1); }, 800);
+    }
 }
 
 // Escape hatch \u2014 passive karaoke, no scoring.

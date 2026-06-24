@@ -441,6 +441,31 @@
             to { transform: rotate(360deg); }
         }
 
+        /* Difficulty gate disabled while the video embed is still loading */
+        .diff-gate-cards.loading { opacity: .4; pointer-events: none; filter: grayscale(.4); }
+
+        /* ── Loading + count-in overlay (between difficulty pick and the song) ──── */
+        .countin-overlay {
+            position: fixed; inset: 0; z-index: 250; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            background:
+                radial-gradient(120% 90% at 50% 32%, rgba(45,212,238,.12), transparent 60%),
+                var(--bg-deep);
+        }
+        .countin-box { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+        .countin-spinner {
+            width: 30px; height: 30px; border: 3px solid var(--line-strong);
+            border-top-color: var(--p); border-radius: 50%; animation: spin .8s linear infinite;
+        }
+        .countin-num {
+            font-size: 7rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; color: transparent;
+            background: linear-gradient(135deg, var(--p), var(--s)); -webkit-background-clip: text; background-clip: text;
+            filter: drop-shadow(0 0 26px rgba(45,212,238,.45)); animation: countPop .4s ease-out;
+        }
+        @keyframes countPop { 0% { transform: scale(.5); opacity: .15; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
+        .countin-label { font-size: 1.45rem; font-weight: 700; color: var(--text); }
+        .countin-skip { font-size: .74rem; color: var(--text-dim); margin-top: 4px; letter-spacing: .04em; }
+
         /* ── Debug HUD (toggle with D key) ────────────────────────── */
         #debug-hud {
             position: fixed;
@@ -510,6 +535,15 @@
                     <button class="ctrl-btn" id="micCheckDone" type="button" style="margin-top:10px; width:auto; padding:6px 18px;">Done</button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <div class="countin-overlay" id="countInOverlay" style="display:none">
+        <div class="countin-box">
+            <div class="countin-spinner" id="countInSpinner"></div>
+            <div class="countin-num" id="countInNum"></div>
+            <div class="countin-label" id="countInLabel">Loading…</div>
+            <div class="countin-skip">tap or press space to skip</div>
         </div>
     </div>
 
