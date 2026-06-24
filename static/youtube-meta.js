@@ -17,9 +17,16 @@ function videoIdFromUrl(url) {
 }
 
 function parseTitleArtist(title, author) {
+    // Delegate to the shared cleaner so we handle multiple dash variants
+    // (ASCII " - ", en-dash "–", em-dash "—") and remove title noise like
+    // "(Official Audio)". This fixes the "channel-as-artist" bug on en-dash titles.
+    // (UMD: require in Node, global in browser.)
+    var clean = (typeof require !== 'undefined')
+        ? require('./metadata-clean.js')
+        : (typeof window !== 'undefined' ? window.KaraokeeMetadataClean : null);
+    if (clean && clean.cleanMetadata) return clean.cleanMetadata(title, author);
+    // Fallback (helper missing): original behavior.
     var t = String(title || '');
-    // YouTube auto-generated "Topic" channels report author as "Artist - Topic";
-    // strip that suffix so the lyrics search gets a clean artist.
     var cleanAuthor = String(author || '').replace(/\s*-\s*topic\s*$/i, '').trim();
     var idx = t.indexOf(' - ');
     if (idx !== -1) return { artist: t.slice(0, idx).trim(), title: t.slice(idx + 3).trim() };
