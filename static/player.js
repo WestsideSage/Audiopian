@@ -2416,11 +2416,11 @@ function _runCountIn(d) {
         if (done) return; done = true;
         document.removeEventListener('keydown', onKey);
         if (overlay) { overlay.removeEventListener('click', go); overlay.style.display = 'none'; }
-        try {
-            playback.seek(0);
-            playback.setVolume(savedVol);
-            Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
-        } catch (e) {}
+        // Unmute FIRST, each step guarded independently \u2014 a throw in seek/play must never
+        // strand the song muted (volume 0 from the arm) for the rest of the run.
+        try { playback.setVolume(savedVol); } catch (e) {}
+        try { playback.seek(0); } catch (e) {}
+        try { Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {}); } catch (e) {}
     }
     function onKey(e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); go(); } }
     document.addEventListener('keydown', onKey);
