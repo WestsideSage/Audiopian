@@ -40,6 +40,7 @@ Build items, roughly by size/risk:
 4. ✅ **DONE (2026-06-07) — "desktop Chrome/Edge only" interstitial.** A blocking overlay shows on mobile / no-Web-Speech browsers (pure `static/browser-support.js` `isSupportedBrowser` + an `#unsupported` overlay/guard in `index.html`). Deep-links to `/player` bounce to index for lack of song data, so one gate covers both pages.
 5. ✅ **DONE (2026-06-07) — score share-image.** A "Share image" button on the arcade end screen renders a 1080² PNG (grade / points / honest % / song) for posting (pure `static/share-card.js buildShareCardLines` + `player.js _downloadShareImage`).
 6. ✅ **N/A for the pure-static deploy.** The app ships as static files on **Cloudflare Pages** (no WSGI server to run); HTTPS is provided by Cloudflare. The Flask dev server (`app.py`) remains the local test harness only.
+7. ✅ **DONE (2026-06-23) — in-app search.** A **lyrics-first search box** (via lrclib) replaced paste-a-URL as the front door: every result is guaranteed to have synced lyrics, and picking one resolves a playable video through the **standalone `vocalz-resolve` Cloudflare Worker** (`workers/resolve/`), which holds the YouTube Data API key as a `wrangler secret`. The Worker is deployed **separately** from the site (`npx wrangler deploy` from `workers/resolve/`) so it's independent of whether the site is Pages or Workers. Paste-a-URL is now a fallback shown only on a miss; a curated "Popular picks" starter row seeds first-timers. Plan: `docs/superpowers/plans/2026-06-23-in-app-search.md`.
 
 ## Where to host it
 
