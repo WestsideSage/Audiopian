@@ -239,19 +239,29 @@
         function renderSongResults(songs) {
             var box = document.getElementById('songResults');
             box.innerHTML = '';
-            songs.slice(0, 8).forEach(function (s, i) {
+            if (songs.length > 1) {
+                var head = document.createElement('div');
+                head.className = 'search-result-meta';
+                head.style.padding = '8px 14px 4px';
+                head.textContent = 'Pick the version you want — add the artist to your search to narrow it:';
+                box.appendChild(head);
+            }
+            songs.slice(0, 6).forEach(function (s, i) {
                 var div = document.createElement('div');
                 div.className = 'search-result-item';
                 div.onclick = function () { pickSong(i); };
                 var dur = s.duration || 0;
                 var mins = Math.floor(dur / 60), secs = ('0' + (dur % 60)).slice(-2);
                 var t = document.createElement('div'); t.className = 'search-result-title'; t.textContent = s.trackName;
-                var m = document.createElement('div'); m.className = 'search-result-meta'; m.textContent = s.artistName + ' · ' + mins + ':' + secs;
+                // Lead with the artist — it's the real differentiator between same-titled results.
+                var m = document.createElement('div'); m.className = 'search-result-meta';
+                m.innerHTML = '<strong>' + _esc(s.artistName) + '</strong>' + (dur ? ' · ' + mins + ':' + secs : '');
                 div.appendChild(t); div.appendChild(m);
                 box.appendChild(div);
             });
             box.style.display = 'block';
         }
+        function _esc(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
 
         async function pickSong(i) {
             var song = window._lastSongResults[i];

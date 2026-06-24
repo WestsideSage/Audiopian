@@ -110,9 +110,28 @@ async function searchSongs(query, deps) {
         });
     }
     out.sort(function (a, b) { return b._score - a._score; });
+    return dedupeSongs(out);
+}
+
+// Collapse near-duplicate entries — the same song re-listed under many albums / remasters /
+// re-uploads — so the user sees DISTINCT songs (differentiated by artist), not 8 rows of the
+// same one. Keeps the highest-scored entry per (artist + base-title), preserving rank order.
+function dedupeSongs(list) {
+    var seen = {}, out = [];
+    for (var i = 0; i < list.length; i++) {
+        var s = list[i];
+        var artist = String(s.artistName || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        var title = String(s.trackName || '').toLowerCase()
+            .replace(/[\(\[][^\)\]]*[\)\]]/g, '')   // drop "(Remaster)", "[Live]", "(feat …)" for grouping
+            .replace(/\s+/g, ' ').trim();
+        var key = artist + '|' + title;
+        if (seen[key]) continue;
+        seen[key] = true;
+        out.push(s);
+    }
     return out;
 }
 
-var KaraokeeLyricsClient = { parseLrc: parseLrc, tokenOverlap: tokenOverlap, scoreCandidate: scoreCandidate, fetchLyrics: fetchLyrics, searchSongs: searchSongs };
+var KaraokeeLyricsClient = { parseLrc: parseLrc, tokenOverlap: tokenOverlap, scoreCandidate: scoreCandidate, fetchLyrics: fetchLyrics, searchSongs: searchSongs, dedupeSongs: dedupeSongs };
 if (typeof window !== 'undefined') window.KaraokeeLyricsClient = KaraokeeLyricsClient;
 if (typeof module !== 'undefined' && module.exports) module.exports = KaraokeeLyricsClient;
