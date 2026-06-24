@@ -39,4 +39,20 @@ r = cleanMetadata('Special Ed - I Got It Made (Official Audio)', 'RandomChannel'
 assert.strictEqual(r.artist, 'Special Ed');
 assert.strictEqual(r.title, 'I Got It Made');
 
+// --- regression: feat-stripping must NOT eat real titles, but MUST strip a real credit ---
+assert.strictEqual(stripNoise('Ft. Lauderdale Song'), 'Ft. Lauderdale Song', 'leading "Ft." place preserved');
+assert.strictEqual(stripNoise('Someone feat Song'), 'Someone feat Song', 'bare "feat" (no period) preserved');
+assert.strictEqual(stripNoise('Song Ft. SoAndSo'), 'Song', 'trailing "Ft." credit stripped');
+
+// --- regression: a leading/trailing separator must fall back to channel, never an empty half ---
+// (the key invariant is a non-empty artist; the title of such a degenerate input is left as-is)
+let rr = cleanMetadata(' - Song Title', 'ChannelX');
+assert.strictEqual(rr.artist, 'ChannelX', 'leading separator -> fall back to channel, not empty artist');
+assert.ok(rr.title.indexOf('Song Title') !== -1, 'title retains the song words');
+rr = cleanMetadata('Artist - ', 'ChannelX');
+assert.strictEqual(rr.artist, 'ChannelX', 'trailing separator -> fall back to channel, not empty artist');
+
+// --- (Remaster) without a year is still junk (documents intent) ---
+assert.strictEqual(stripNoise('Song (Remaster)'), 'Song', 'remaster without year is stripped');
+
 console.log('test_metadata_clean: OK');

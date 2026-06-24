@@ -8,7 +8,10 @@
 var SEPARATORS = [' - ', ' – ', ' — ', ' -', '- ', '–', '—', ' | ', ' : '];
 
 var NOISE_PAREN = /[\(\[]\s*(?:official\s*)?(?:music\s*)?(?:audio|video|lyric|lyrics|lyric video|visualizer|visualiser|hd|hq|4k|explicit|clean|remaster(?:ed)?(?:\s*\d{2,4})?|audio only)\s*[\)\]]/gi;
-var NOISE_FEAT = /\s*[\(\[]?\s*(?:ft\.?|feat\.?)\s+[^\)\]]*[\)\]]?\s*$/i;
+// Require a separating space before the marker (so a leading "Ft. Lauderdale ..."
+// is NOT treated as a feature credit) and a literal "." after ft/feat (so a bare
+// word "feat" mid-title is left alone). Anchored to end-of-string.
+var NOISE_FEAT = /\s+[\(\[]?\s*(?:ft|feat)\.\s+[^\)\]]*[\)\]]?\s*$/i;
 
 function stripNoise(title) {
     var t = String(title || '');
@@ -21,9 +24,10 @@ function splitArtistTitle(title) {
     var t = String(title || '');
     for (var i = 0; i < SEPARATORS.length; i++) {
         var idx = t.indexOf(SEPARATORS[i]);
-        if (idx > 0 && idx < t.length - SEPARATORS[i].length) {
-            return { artist: t.slice(0, idx).trim(), title: t.slice(idx + SEPARATORS[i].length).trim() };
-        }
+        if (idx <= 0) continue;                       // no separator, or it's leading
+        var artist = t.slice(0, idx).trim();
+        var rest = t.slice(idx + SEPARATORS[i].length).trim();
+        if (artist && rest) return { artist: artist, title: rest };  // both halves required
     }
     return null;
 }
