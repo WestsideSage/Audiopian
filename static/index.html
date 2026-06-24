@@ -23,24 +23,36 @@
         <h1 class="wordmark"><span class="logo-dot"></span>Karaokee</h1>
 
         <p class="tagline">
-            Paste a YouTube link to sing any song. Don't have the link?
-            <a href="https://www.youtube.com/results" target="_blank" rel="noopener">Search YouTube ↗</a>
+            Search for any song and sing along.
         </p>
 
-        <label for="url">YouTube URL</label>
-        <input type="text" id="url" placeholder="https://youtube.com/watch?v=..." />
+        <label for="songSearch">Search for a song</label>
+        <input type="text" id="songSearch" placeholder="e.g. Special Ed I Got It Made" autofocus autocomplete="off" />
+        <button id="searchBtn" onclick="runSearch()">Search</button>
+        <div id="searchStatus"></div>
+        <div id="songResults" class="search-results" style="display:none"></div>
 
-        <label for="artist">Artist <span class="hint">(auto-filled)</span></label>
-        <input type="text" id="artist" placeholder="Artist name" />
+        <div id="starterRow" style="display:none">
+            <div class="search-divider">Popular picks</div>
+            <div id="starterList" class="search-results"></div>
+        </div>
 
-        <label for="title">Title <span class="hint">(auto-filled)</span></label>
-        <input type="text" id="title" placeholder="Song title" />
+        <div id="pasteFallback" style="display:none">
+            <label for="url">YouTube URL</label>
+            <input type="text" id="url" placeholder="https://youtube.com/watch?v=..." />
 
-        <button id="loadBtn" onclick="loadSong()">Load Song</button>
+            <label for="artist">Artist <span class="hint">(auto-filled)</span></label>
+            <input type="text" id="artist" placeholder="Artist name" />
+
+            <label for="title">Title <span class="hint">(auto-filled)</span></label>
+            <input type="text" id="title" placeholder="Song title" />
+
+            <button id="loadBtn" onclick="loadSong()">Load Song</button>
+            <button id="retryBtn" class="btn-secondary" onclick="retryLyrics()" style="display:none;margin-top:10px">
+                Retry with edited title/artist
+            </button>
+        </div>
         <div id="status"></div>
-        <button id="retryBtn" class="btn-secondary" onclick="retryLyrics()" style="display:none;margin-top:10px">
-            Retry with edited title/artist
-        </button>
 
         <div id="localUploadSection">
             <div class="search-divider">or load a local audio file</div>
@@ -195,13 +207,164 @@
             statusEl.className = type;
         }
 
-        document.addEventListener('keydown', e => {
-            // Enter loads the song — but NOT from inside the BYO-key field, where Enter
-            // saves the key (see the BYO-key wiring below). Without this guard, pressing
-            // Enter after typing a key fires an unintended load and greys the button.
-            if (e.key === 'Enter' && !(e.target && e.target.closest && e.target.closest('.byok'))) {
-                loadSong();
+        // ---------- In-app search (lyrics-first → resolver Worker → smart picker) ----------
+        var RESOLVE_URL = 'https://vocalz-resolve.mlcalloway19.workers.dev/api/resolve';
+
+        function setSearchStatus(msg, type) {
+            var el = document.getElementById('searchStatus');
+            if (el) { el.textContent = msg; el.className = type || ''; }
+        }
+
+        async function runSearch() {
+            var q = document.getElementById('songSearch').value.trim();
+            var box = document.getElementById('songResults');
+            if (!q) { setSearchStatus('Type a song to search.', 'error'); return; }
+            setSearchStatus('Searching…', '');
+            box.style.display = 'none'; box.innerHTML = '';
+
+            var songs = [];
+            try { songs = await KaraokeeLyricsClient.searchSongs(q); }
+            catch (e) { songs = []; }
+
+            if (!songs.length) {
+                setSearchStatus('No songs found for "' + q + '".', 'error');
+                revealPasteFallback();
+                return;
             }
+            setSearchStatus('', '');
+            window._lastSongResults = songs;
+            renderSongResults(songs);
+        }
+
+        function renderSongResults(songs) {
+            var box = document.getElementById('songResults');
+            box.innerHTML = '';
+            songs.slice(0, 8).forEach(function (s, i) {
+                var div = document.createElement('div');
+                div.className = 'search-result-item';
+                div.onclick = function () { pickSong(i); };
+                var dur = s.duration || 0;
+                var mins = Math.floor(dur / 60), secs = ('0' + (dur % 60)).slice(-2);
+                var t = document.createElement('div'); t.className = 'search-result-title'; t.textContent = s.trackName;
+                var m = document.createElement('div'); m.className = 'search-result-meta'; m.textContent = s.artistName + ' · ' + mins + ':' + secs;
+                div.appendChild(t); div.appendChild(m);
+                box.appendChild(div);
+            });
+            box.style.display = 'block';
+        }
+
+        async function pickSong(i) {
+            var song = window._lastSongResults[i];
+            setSearchStatus('Finding the video…', '');
+            document.getElementById('songResults').style.display = 'none';
+
+            var candidates = [];
+            try {
+                var u = RESOLVE_URL + '?artist=' + encodeURIComponent(song.artistName) +
+                        '&title=' + encodeURIComponent(song.trackName) +
+                        '&duration=' + encodeURIComponent(song.duration || 0);
+                var resp = await fetch(u);
+                var data = await resp.json();
+                candidates = (data && data.candidates) || [];
+            } catch (e) { candidates = []; }
+
+            if (!candidates.length) {
+                setSearchStatus('Couldn’t find a playable video for "' + song.trackName + '".', 'error');
+                revealPasteFallback(song);
+                return;
+            }
+            setSearchStatus('', '');
+            renderVideoPicker(candidates, song);
+        }
+
+        function renderVideoPicker(candidates, song) {
+            var box = document.getElementById('songResults');
+            box.innerHTML = '';
+            var head = document.createElement('div');
+            head.className = 'search-result-meta';
+            head.style.padding = '6px 12px';
+            head.textContent = 'Pick the right version:';
+            box.appendChild(head);
+            candidates.forEach(function (c, idx) {
+                var div = document.createElement('div');
+                div.className = 'search-result-item' + (idx === 0 ? ' is-best' : '');
+                div.onclick = function () { pickVideo(c.videoId, song); };
+                var dur = c.durationSec || 0;
+                var mins = Math.floor(dur / 60), secs = ('0' + (dur % 60)).slice(-2);
+                var t = document.createElement('div'); t.className = 'search-result-title';
+                t.textContent = c.title + (idx === 0 ? '  ✓' : '');
+                var m = document.createElement('div'); m.className = 'search-result-meta';
+                m.textContent = (c.channelTitle || '') + ' · ' + mins + ':' + secs;
+                div.appendChild(t); div.appendChild(m);
+                box.appendChild(div);
+            });
+            box.style.display = 'block';
+        }
+
+        function pickVideo(videoId, song) {
+            var data = { videoId: videoId, artist: song.artistName, title: song.trackName, lyrics: song.lyrics };
+            sessionStorage.setItem('songData', JSON.stringify(data));
+            window.location.href = '/player';
+        }
+
+        function revealPasteFallback(song) {
+            var fb = document.getElementById('pasteFallback');
+            if (fb) fb.style.display = 'block';
+            if (song) {
+                var a = document.getElementById('artist'), t = document.getElementById('title');
+                if (a) a.value = song.artistName || '';
+                if (t) t.value = song.trackName || '';
+            }
+            if (fb && !document.getElementById('pasteHint')) {
+                var label = document.createElement('div');
+                label.id = 'pasteHint';
+                label.className = 'search-result-meta';
+                label.style.margin = '8px 0 4px';
+                label.textContent = 'Can’t find it? Paste a YouTube link instead:';
+                fb.insertBefore(label, fb.firstChild);
+            }
+        }
+
+        // ---------- Starter row (curated, hand-verified; populated in Task 9) ----------
+        var STARTER_SONGS = [
+            // { videoId: '...', artist: '...', title: '...' }  — verified picks
+        ];
+        function renderStarterRow() {
+            if (!STARTER_SONGS.length) return;
+            var row = document.getElementById('starterRow');
+            var list = document.getElementById('starterList');
+            list.innerHTML = '';
+            STARTER_SONGS.forEach(function (s, i) {
+                var div = document.createElement('div');
+                div.className = 'search-result-item';
+                div.onclick = function () { playStarter(i); };
+                var t = document.createElement('div'); t.className = 'search-result-title'; t.textContent = s.title;
+                var m = document.createElement('div'); m.className = 'search-result-meta'; m.textContent = s.artist;
+                div.appendChild(t); div.appendChild(m);
+                list.appendChild(div);
+            });
+            list.style.display = 'block';
+            row.style.display = 'block';
+        }
+        async function playStarter(i) {
+            var s = STARTER_SONGS[i];
+            setSearchStatus('Loading ' + s.title + '…', '');
+            var lyrics = [];
+            try { lyrics = await KaraokeeLyricsClient.fetchLyrics({ title: s.title, artist: s.artist }); }
+            catch (e) { lyrics = []; }
+            if (!lyrics.length) { setSearchStatus('Lyrics unavailable right now — try search.', 'error'); return; }
+            sessionStorage.setItem('songData', JSON.stringify({ videoId: s.videoId, artist: s.artist, title: s.title, lyrics: lyrics }));
+            window.location.href = '/player';
+        }
+        renderStarterRow();
+
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Enter') return;
+            // Enter in the BYO-key field saves the key (handled below) — never load.
+            if (e.target && e.target.closest && e.target.closest('.byok')) return;
+            // Enter in the search box searches; Enter in the paste-fallback fields loads.
+            if (e.target && e.target.id === 'songSearch') { runSearch(); return; }
+            if (e.target && (e.target.id === 'url' || e.target.id === 'artist' || e.target.id === 'title')) { loadSong(); return; }
         });
 
         // Returning to this menu — notably via the browser Back button, which can restore
@@ -221,7 +384,14 @@
             var t = document.getElementById('title');
             if (a) a.value = '';
             if (t) t.value = '';
+            var uu = document.getElementById('url'); if (uu) uu.value = '';
             setStatus('', '');
+            // search-first reset: hide the paste fallback + clear results/search box
+            var fb = document.getElementById('pasteFallback'); if (fb) fb.style.display = 'none';
+            var ph = document.getElementById('pasteHint'); if (ph && ph.remove) ph.remove();
+            var sr = document.getElementById('songResults'); if (sr) { sr.style.display = 'none'; sr.innerHTML = ''; }
+            var ss = document.getElementById('songSearch'); if (ss) { ss.value = ''; }
+            setSearchStatus('', '');
         });
 
         // Local-file upload is a dev-harness feature; hide it on the deployed CDN.
