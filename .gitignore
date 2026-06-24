@@ -22,3 +22,5 @@ node_modules/
 .superpowers/
 .serena/
 .playwright-mcp/
+workers/resolve/.dev.vars
+.dev.vars
