@@ -151,6 +151,13 @@ class GameMode {
         this._vadAnalyserBuf = null;     // Float32Array reused each tick
         this._micVad = null;             // @ricky0123/vad-web MicVAD instance (V2 neural VAD)
         this._neuralVadActive = false;   // true once MicVAD inits OK (else fall back to RMS)
+        // Pre-game Mic Check: observes the already-open mic + active recognizer (no new session).
+        this._micCheckActive = false;
+        this._micCheckText = '';
+        this._micCheckInterim = '';
+        this._micCheckPeak = 0;
+        this._micCheckStart = 0;
+        this._micCheckTimer = null;
         this._commitState = null;        // KaraokeeCommitHelpers state machine
         this._vadInitError = null;       // last neural-VAD init error (telemetry/HUD)
         this.currentParams = getWindowParams('normal'); // adaptive window params for active line
@@ -417,6 +424,11 @@ class GameMode {
                 } else {
                     interim += e.results[i][0].transcript + ' ';
                 }
+            }
+            // Mic Check (pre-game): capture what the recognizer hears, without scoring it.
+            if (self._micCheckActive) {
+                if (finalText) self._micCheckText = (self._micCheckText + ' ' + finalText).replace(/\s+/g, ' ').trim();
+                self._micCheckInterim = interim.trim();
             }
             // Feed the session (feed-only — rendering happens on the next tick). A single
             // SR event can carry BOTH a final and an interim: ingest the final first (if
@@ -740,6 +752,8 @@ class GameMode {
                 var current = this._whisperRealtimeTranscript.get(event.item_id) || '';
                 this._whisperRealtimeTranscript.set(event.item_id, current + (event.delta || ''));
             }
+            // Mic Check (pre-game): accumulate the live realtime transcript for the panel.
+            if (this._micCheckActive) this._micCheckText = (this._micCheckText + (event.delta || '')).replace(/\s+/g, ' ');
             return;
         }
         if (event.type === 'conversation.item.input_audio_transcription.completed') {
@@ -807,6 +821,62 @@ class GameMode {
             else counts[source]++;
         });
         return counts;
+    }
+
+    // Pre-game Mic Check — reuses the already-open VAD analyser (level meter) and the
+    // active recognizer's transcript (Web Speech or realtime, via the hooks above). Pure
+    // verdict logic lives in mic-check-helpers.js.
+    _runMicCheck() {
+        var panel = document.getElementById('micCheckPanel');
+        if (panel) panel.style.display = 'block';
+        this._micCheckActive = true;
+        this._micCheckText = '';
+        this._micCheckInterim = '';
+        this._micCheckPeak = 0;
+        this._micCheckStart = Date.now();
+        var self = this;
+        var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        var recognizerAvailable = !!SR || this._isRealtimeWhisperProvider();
+        if (this._micCheckTimer) clearInterval(this._micCheckTimer);
+        this._micCheckTimer = setInterval(function () {
+            var level = 0;
+            if (self._vadAnalyser && self._vadAnalyserBuf) {
+                self._vadAnalyser.getFloatTimeDomainData(self._vadAnalyserBuf);
+                var sum = 0, buf = self._vadAnalyserBuf;
+                for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+                level = Math.sqrt(sum / buf.length);
+            }
+            if (level > self._micCheckPeak) self._micCheckPeak = level;
+            var fill = document.getElementById('micMeterFill');
+            if (fill) fill.style.width = Math.max(2, Math.min(100, Math.round(level / 0.2 * 100))) + '%';
+
+            var heard = (self._micCheckText + ' ' + (self._micCheckInterim || '')).replace(/\s+/g, ' ').trim();
+            var heardEl = document.getElementById('micCheckHeard');
+            if (heardEl) {
+                heardEl.textContent = heard ? '“' + heard + '”' : '';
+                heardEl.className = 'mc-heard' + (heard ? ' has-text' : '');
+            }
+            var v = window.KaraokeeMicCheck.micCheckVerdict({
+                recognizerAvailable: recognizerAvailable,
+                peakLevel: self._micCheckPeak,
+                transcript: heard,
+                elapsedMs: Date.now() - self._micCheckStart
+            });
+            var vEl = document.getElementById('micCheckVerdict');
+            if (vEl) {
+                vEl.textContent = (v.ok ? '✓ ' : '') + v.message;
+                vEl.className = 'mc-verdict' + (v.ok ? ' ok' : ((v.status === 'silent' || v.status === 'no-recognizer') ? ' warn' : ''));
+            }
+        }, 100);
+    }
+
+    _stopMicCheck() {
+        this._micCheckActive = false;
+        if (this._micCheckTimer) { clearInterval(this._micCheckTimer); this._micCheckTimer = null; }
+        var panel = document.getElementById('micCheckPanel');
+        if (panel) panel.style.display = 'none';
+        var fill = document.getElementById('micMeterFill');
+        if (fill) fill.style.width = '0%';
     }
 
     async _startMicAnalysis() {
@@ -2261,6 +2331,7 @@ function startRunWithDifficulty(d) {
     if (gameMode) gameMode._phraseDifficulty = d;
     _paintDiffPill(d);
     overlayDismissed = true;
+    gameMode._stopMicCheck();
     document.getElementById('prepOverlay').style.display = 'none';
     if (gameMode.active) gameMode.stop();
     playback.seek(0);
@@ -2273,6 +2344,7 @@ function justListen() {
     if (!playback || !_playbackReady) return;   // wait for onReady (gesture-initiated play)
     clearInterval(prepTimer);
     overlayDismissed = true;
+    gameMode._stopMicCheck();
     document.getElementById('prepOverlay').style.display = 'none';
     Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
 }
@@ -2298,6 +2370,11 @@ function skipPrep() { justListen(); }
     cards.addEventListener('mouseleave', function () {
         renderDifficultyPreview(localStorage.getItem('arcadeDifficulty') || 'medium');
     });
+
+    var micBtn = document.getElementById('micCheckBtn');
+    if (micBtn) micBtn.addEventListener('click', function () { gameMode._runMicCheck(); });
+    var micDone = document.getElementById('micCheckDone');
+    if (micDone) micDone.addEventListener('click', function () { gameMode._stopMicCheck(); });
 
     var cleanBtn = document.getElementById('cleanModeToggle');
     if (cleanBtn) {
