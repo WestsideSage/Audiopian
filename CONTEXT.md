@@ -1,6 +1,6 @@
-# Karaokee
+# Audiopian
 
-The domain language of Karaokee's game mode — how sung audio becomes a score. Created during the architecture sprint when the **Scoring Session** seam was named; extend it lazily as terms get sharpened (see `docs/agents/domain.md`).
+The domain language of Audiopian's game mode — how sung audio becomes a score. Created during the architecture sprint when the **Scoring Session** seam was named; extend it lazily as terms get sharpened (see `docs/agents/domain.md`).
 
 ## Language
 

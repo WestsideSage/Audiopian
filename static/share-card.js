@@ -25,7 +25,7 @@ function buildShareCardLines(summary, songData) {
     if (diff) stat = diff + ' · ' + stat;
 
     return {
-        brand: 'KARAOKEE',
+        brand: 'AUDIOPIAN',
         grade: grade,
         stat: stat,
         song: _truncateShareSong(song, 48)

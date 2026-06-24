@@ -1,13 +1,13 @@
-# Karaokee
+# Audiopian
 
 **Sing the songs you actually love — and find out how well you really know them.**
 
-Karaokee is a karaoke game built around one frustration: every karaoke bar has thousands of songs, but never *the* song you can truly perform — the one you know cold and can pour yourself into. So Karaokee lets you bring **any** song. Paste a YouTube link, and it turns the lyrics into a live game: sing along, and it listens through your mic, follows the words in real time, and scores how well you nailed them — combos, grades, and all.
+Audiopian is a karaoke game built around one frustration: every karaoke bar has thousands of songs, but never *the* song you can truly perform — the one you know cold and can pour yourself into. So Audiopian lets you bring **any** song. Paste a YouTube link, and it turns the lyrics into a live game: sing along, and it listens through your mic, follows the words in real time, and scores how well you nailed them — combos, grades, and all.
 
 ## How it works (the short version)
 
 1. You search for, or paste, a YouTube song.
-2. Karaokee grabs the audio and finds time-synced lyrics (the kind that scroll in time with the music).
+2. Audiopian grabs the audio and finds time-synced lyrics (the kind that scroll in time with the music).
 3. The song plays, the lyrics light up line by line, and your microphone listens.
 4. As you sing, it turns your voice into words and matches them to the lyrics — forgiving near-misses along the way (it knows "night" and "knight" sound identical).
 5. You get a live score: an honest "how much did you actually sing" percentage, plus an arcade layer of combos, points, and a letter grade.
@@ -15,7 +15,7 @@ Karaokee is a karaoke game built around one frustration: every karaoke bar has t
 ## Two ways it listens
 
 - **Free (default):** your browser's built-in speech recognition. Works in **desktop Chrome or Edge**, costs nothing, needs no setup.
-- **Sharper (optional):** set an OpenAI API key to switch on `gpt-realtime-whisper`, a more accurate live transcriber. (When Karaokee goes online, players will be able to bring their *own* key — kept in their browser — while everyone else uses the free option. The reasoning is in [the decision records](docs/adr/).)
+- **Sharper (optional):** set an OpenAI API key to switch on `gpt-realtime-whisper`, a more accurate live transcriber. (When Audiopian goes online, players will be able to bring their *own* key — kept in their browser — while everyone else uses the free option. The reasoning is in [the decision records](docs/adr/).)
 
 ## What's under the hood
 
@@ -53,7 +53,7 @@ Full transcription and config details: [`docs/operations/whisper.md`](docs/opera
 
 ## Where the project is headed
 
-The current focus is **getting Karaokee online so other people can try it** — it only runs locally today. The plan, the blockers, and the decisions behind it are written up in [`docs/operations/deployment.md`](docs/operations/deployment.md) and the [decision records](docs/adr/).
+The current focus is **getting Audiopian online so other people can try it** — it only runs locally today. The plan, the blockers, and the decisions behind it are written up in [`docs/operations/deployment.md`](docs/operations/deployment.md) and the [decision records](docs/adr/).
 
 ## Project layout
 

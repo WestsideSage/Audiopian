@@ -13,7 +13,7 @@ var full = buildShareCardLines(
     { grade: 'S', points: 1234, percent: 97, difficulty: 'expert' },
     { artist: 'Isaiah Rashad', title: 'Silkk da Shocka' }
 );
-assert.strictEqual(full.brand, 'KARAOKEE', 'brand line');
+assert.strictEqual(full.brand, 'AUDIOPIAN', 'brand line');
 assert.strictEqual(full.grade, 'S', 'grade letter');
 assert.strictEqual(full.stat, 'EXPERT · 1234 pts · 97%', 'stat: DIFF · pts · %');
 assert.strictEqual(full.song, 'Isaiah Rashad — Silkk da Shocka', 'song: artist — title');
@@ -42,7 +42,7 @@ assert.ok(longSong.song.endsWith('…'), 'truncated song ends with an ellipsis')
 
 // Defensive: no args at all -> safe defaults, no throw.
 var none = buildShareCardLines();
-assert.strictEqual(none.brand, 'KARAOKEE', 'no-arg brand');
+assert.strictEqual(none.brand, 'AUDIOPIAN', 'no-arg brand');
 assert.strictEqual(none.stat, '0 pts · 0%', 'no-arg stat');
 assert.strictEqual(none.song, '', 'no-arg song');
 

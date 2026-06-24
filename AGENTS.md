@@ -1,4 +1,4 @@
-# Karaokee Agent Guide
+# Audiopian Agent Guide
 
   ## Scope
   These instructions apply to the whole repository.

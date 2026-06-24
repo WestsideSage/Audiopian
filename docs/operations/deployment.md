@@ -1,6 +1,6 @@
-# Deployment (getting Karaokee online)
+# Deployment (getting Audiopian online)
 
-Karaokee runs locally today (`python app.py` on your own machine). This is the plan for putting it **online so other people can play it in their browser** — the current top priority. It's written to be read by anyone; the decisions behind it live in [`docs/adr/`](../adr/).
+Audiopian runs locally today (`python app.py` on your own machine). This is the plan for putting it **online so other people can play it in their browser** — the current top priority. It's written to be read by anyone; the decisions behind it live in [`docs/adr/`](../adr/).
 
 > **Status:** in progress. **Build item #1 — client-side YouTube IFrame playback — is DONE & merged (2026-06-06)**; the remaining items below are still the map.
 
