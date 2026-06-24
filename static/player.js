@@ -151,13 +151,15 @@ class GameMode {
         this._vadAnalyserBuf = null;     // Float32Array reused each tick
         this._micVad = null;             // @ricky0123/vad-web MicVAD instance (V2 neural VAD)
         this._neuralVadActive = false;   // true once MicVAD inits OK (else fall back to RMS)
-        // Pre-game Mic Check: observes the already-open mic + active recognizer (no new session).
+        // Pre-game Mic Check: SELF-CONTAINED — opens its own mic stream + analyser + recognizer
+        // for the check (the game's capture stack is start()-gated, not running during prep).
         this._micCheckActive = false;
         this._micCheckText = '';
         this._micCheckInterim = '';
         this._micCheckPeak = 0;
         this._micCheckStart = 0;
         this._micCheckTimer = null;
+        this._mcStream = null; this._mcCtx = null; this._mcAnalyser = null; this._mcBuf = null; this._mcRecog = null;
         this._commitState = null;        // KaraokeeCommitHelpers state machine
         this._vadInitError = null;       // last neural-VAD init error (telemetry/HUD)
         this.currentParams = getWindowParams('normal'); // adaptive window params for active line
@@ -424,11 +426,6 @@ class GameMode {
                 } else {
                     interim += e.results[i][0].transcript + ' ';
                 }
-            }
-            // Mic Check (pre-game): capture what the recognizer hears, without scoring it.
-            if (self._micCheckActive) {
-                if (finalText) self._micCheckText = (self._micCheckText + ' ' + finalText).replace(/\s+/g, ' ').trim();
-                self._micCheckInterim = interim.trim();
             }
             // Feed the session (feed-only — rendering happens on the next tick). A single
             // SR event can carry BOTH a final and an interim: ingest the final first (if
@@ -752,8 +749,6 @@ class GameMode {
                 var current = this._whisperRealtimeTranscript.get(event.item_id) || '';
                 this._whisperRealtimeTranscript.set(event.item_id, current + (event.delta || ''));
             }
-            // Mic Check (pre-game): accumulate the live realtime transcript for the panel.
-            if (this._micCheckActive) this._micCheckText = (this._micCheckText + (event.delta || '')).replace(/\s+/g, ' ');
             return;
         }
         if (event.type === 'conversation.item.input_audio_transcription.completed') {
@@ -823,10 +818,12 @@ class GameMode {
         return counts;
     }
 
-    // Pre-game Mic Check — reuses the already-open VAD analyser (level meter) and the
-    // active recognizer's transcript (Web Speech or realtime, via the hooks above). Pure
-    // verdict logic lives in mic-check-helpers.js.
-    _runMicCheck() {
+    // Pre-game Mic Check — SELF-CONTAINED: opens its OWN mic stream + analyser (level meter)
+    // and its OWN Web Speech recognizer (transcript), runs for the check, then tears them down
+    // on Done. The game's capture stack is start()-gated and is NOT running during the prep
+    // overlay, so the check can't observe it — it stands alone. Verdict logic: mic-check-helpers.js.
+    async _runMicCheck() {
+        if (this._micCheckActive) return;
         var panel = document.getElementById('micCheckPanel');
         if (panel) panel.style.display = 'block';
         this._micCheckActive = true;
@@ -835,14 +832,60 @@ class GameMode {
         this._micCheckPeak = 0;
         this._micCheckStart = Date.now();
         var self = this;
+        var vEl0 = document.getElementById('micCheckVerdict');
+
+        // (1) Own mic stream for the level meter.
+        try {
+            this._mcStream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+            });
+        } catch (err) {
+            if (vEl0) { vEl0.textContent = 'Couldn’t access your mic — allow mic access in your browser and try again.'; vEl0.className = 'mc-verdict warn'; }
+            this._micCheckActive = false;
+            return;
+        }
+        if (!this._micCheckActive) {                 // Done clicked during the permission await
+            this._mcStream.getTracks().forEach(function (t) { t.stop(); });
+            this._mcStream = null;
+            return;
+        }
+        this._mcCtx = new AudioContext();
+        if (this._mcCtx.state === 'suspended') { try { await this._mcCtx.resume(); } catch (e) {} }
+        var src = this._mcCtx.createMediaStreamSource(this._mcStream);
+        this._mcAnalyser = this._mcCtx.createAnalyser();
+        this._mcAnalyser.fftSize = 256;
+        this._mcBuf = new Float32Array(this._mcAnalyser.fftSize);
+        src.connect(this._mcAnalyser);
+
+        // (2) Own Web Speech recognizer for the transcript — works on BOTH lanes (it's a browser
+        // API, independent of any OpenAI key) and self-manages its restart while the check runs.
         var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        var recognizerAvailable = !!SR || this._isRealtimeWhisperProvider();
+        var recognizerAvailable = !!SR;
+        if (SR) {
+            this._mcRecog = new SR();
+            this._mcRecog.continuous = true;
+            this._mcRecog.interimResults = true;
+            this._mcRecog.lang = 'en-US';
+            this._mcRecog.onresult = function (e) {
+                var interim = '', finalText = '';
+                for (var i = e.resultIndex; i < e.results.length; i++) {
+                    if (e.results[i].isFinal) finalText += e.results[i][0].transcript + ' ';
+                    else interim += e.results[i][0].transcript + ' ';
+                }
+                if (finalText) self._micCheckText = (self._micCheckText + ' ' + finalText).replace(/\s+/g, ' ').trim();
+                self._micCheckInterim = interim.trim();
+            };
+            this._mcRecog.onend = function () { if (self._micCheckActive) { try { self._mcRecog.start(); } catch (e) {} } };
+            try { this._mcRecog.start(); } catch (e) {}
+        }
+
+        // (3) Meter + verdict loop.
         if (this._micCheckTimer) clearInterval(this._micCheckTimer);
         this._micCheckTimer = setInterval(function () {
             var level = 0;
-            if (self._vadAnalyser && self._vadAnalyserBuf) {
-                self._vadAnalyser.getFloatTimeDomainData(self._vadAnalyserBuf);
-                var sum = 0, buf = self._vadAnalyserBuf;
+            if (self._mcAnalyser && self._mcBuf) {
+                self._mcAnalyser.getFloatTimeDomainData(self._mcBuf);
+                var sum = 0, buf = self._mcBuf;
                 for (var i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
                 level = Math.sqrt(sum / buf.length);
             }
@@ -873,6 +916,11 @@ class GameMode {
     _stopMicCheck() {
         this._micCheckActive = false;
         if (this._micCheckTimer) { clearInterval(this._micCheckTimer); this._micCheckTimer = null; }
+        if (this._mcRecog) { try { this._mcRecog.onend = null; this._mcRecog.stop(); } catch (e) {} this._mcRecog = null; }
+        if (this._mcStream) { try { this._mcStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} this._mcStream = null; }
+        if (this._mcCtx) { try { this._mcCtx.close(); } catch (e) {} this._mcCtx = null; }
+        this._mcAnalyser = null;
+        this._mcBuf = null;
         var panel = document.getElementById('micCheckPanel');
         if (panel) panel.style.display = 'none';
         var fill = document.getElementById('micMeterFill');
