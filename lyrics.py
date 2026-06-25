@@ -9,6 +9,68 @@ LRCLIB_TIMEOUT_SECONDS = 10
 LRCLIB_MAX_ATTEMPTS = 2
 
 
+MAX_SPEAKER_LABEL_WORDS = 4
+
+# Presence of any of these in a colon-ending line means it is a SENTENCE or a
+# short lyric phrase ("and then she said:", "Hold on:"), not a bare speaker tag
+# -> keep it. We err toward KEEPING: under-filtering a genuine label is far safer
+# than stripping a line the singer actually sings.
+SENTENCE_STOPWORDS = {
+    "and", "then", "the", "to", "of", "in", "is", "are", "was", "were", "she",
+    "he", "we", "you", "it", "that", "this", "but", "so", "with", "my", "your",
+    "a", "i", "for", "not", "no", "on", "me", "do", "if", "at", "or", "all",
+    "us", "from", "by", "as", "be", "oh", "an", "am", "how", "what", "why",
+    "when", "where", "who", "our", "up", "out", "now",
+}
+
+SECTION_KEYWORDS = {
+    "intro", "verse", "chorus", "prechorus", "pre-chorus", "postchorus",
+    "post-chorus", "bridge", "outro", "hook", "refrain", "interlude",
+    "breakdown", "drop", "instrumental", "solo", "vamp", "coda", "spoken",
+}
+
+
+def is_speaker_label(text: str) -> bool:
+    """True for a bare rap-battle / dialogue speaker tag like 'Lil D:'."""
+    t = (text or "").strip()
+    if not t.endswith(":"):
+        return False
+    core = t[:-1].strip()
+    if not core:
+        return False
+    words = core.split()
+    if not words or len(words) > MAX_SPEAKER_LABEL_WORDS:
+        return False
+    for word in words:
+        w = re.sub(r"[^a-z'-]", "", word.lower())
+        if w in SENTENCE_STOPWORDS:
+            return False
+    return True
+
+
+def is_section_header(text: str) -> bool:
+    """True when the ENTIRE line is a balanced section tag like '[Chorus]' / '(Verse 1)'."""
+    t = (text or "").strip()
+    m = re.match(r"^(?:\[([^\[\](){}]+?)\]|\(([^\[\](){}]+?)\)|\{([^\[\](){}]+?)\})$", t)
+    if not m:
+        return False
+    inner = (m.group(1) or m.group(2) or m.group(3)).lower().strip()
+    inner = re.sub(r"[\s-]*(?:x\s*)?\d+\s*x?$", "", inner, flags=re.IGNORECASE).strip()
+    first = inner.split()[0] if inner.split() else inner
+    return inner in SECTION_KEYWORDS or first in SECTION_KEYWORDS
+
+
+def is_non_lyric_line(text: str) -> bool:
+    return is_speaker_label(text) or is_section_header(text)
+
+
+def strip_non_lyric_lines(lines: list[dict]) -> list[dict]:
+    out = [ln for ln in lines if not is_non_lyric_line(ln.get("text", ""))]
+    if not out and lines:  # fail-safe: never blank the sheet
+        return lines
+    return out
+
+
 def parse_lrc(lrc_text: str) -> list[dict]:
     """Parse LRC format string into list of {time: float, text: str} dicts."""
     lines = []
@@ -21,7 +83,7 @@ def parse_lrc(lrc_text: str) -> list[dict]:
             text = match.group(3).strip()
             if text:
                 lines.append({"time": minutes * 60 + seconds, "text": text})
-    return lines
+    return strip_non_lyric_lines(lines)
 
 
 def _token_overlap(a: str, b: str) -> float:

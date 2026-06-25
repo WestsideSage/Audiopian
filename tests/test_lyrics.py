@@ -1,4 +1,7 @@
-from lyrics import parse_lrc, fetch_lyrics, _score_candidate
+from lyrics import (
+    parse_lrc, fetch_lyrics, _score_candidate,
+    is_speaker_label, is_section_header, strip_non_lyric_lines,
+)
 from unittest.mock import MagicMock, patch
 import requests
 
@@ -122,3 +125,41 @@ def test_fetch_lyrics_retries_after_lrclib_timeout():
 
     assert mock_get.call_count == 2
     assert result == [{"time": 1.0, "text": "Let it fly"}]
+
+
+def test_is_speaker_label_detects_trailing_colon_labels():
+    assert is_speaker_label("Shawty e demoni:") is True
+    assert is_speaker_label("Lil'D:") is True
+    assert is_speaker_label("and then she said:") is False  # stopword guard
+    assert is_speaker_label("Hold on:") is False  # short-phrase stopword ("on")
+    assert is_speaker_label("Trust me:") is False  # short-phrase stopword ("me")
+    assert is_speaker_label("Soul? Shawty I got that") is False  # no colon
+    assert is_speaker_label('Ah Lil D! Welcome to "soul stack records".') is False
+
+
+def test_is_section_header_detects_full_wrap_section_words():
+    assert is_section_header("[Chorus]") is True
+    assert is_section_header("(Verse 1)") is True
+    assert is_section_header("(Verse1)") is True  # no-space number still stripped
+    assert is_section_header("(Pre-Chorus 2)") is True
+    assert is_section_header("(Soul) Ah ah ah ah!") is False  # partial wrap
+    assert is_section_header("(Ooh)") is False  # fully wrapped, not a section word
+    assert is_section_header("[Chorus)") is False  # mismatched brackets
+
+
+def test_parse_lrc_strips_speaker_labels_and_section_headers():
+    lrc = (
+        "[00:01.00] Verse line one\n"
+        "[00:02.00] Lil'D:\n"
+        "[00:03.00] [Chorus]\n"
+        "[00:04.00] All we want is your soul"
+    )
+    assert parse_lrc(lrc) == [
+        {"time": 1.0, "text": "Verse line one"},
+        {"time": 4.0, "text": "All we want is your soul"},
+    ]
+
+
+def test_strip_non_lyric_lines_fail_safe_keeps_all_annotation_sheet():
+    lines = [{"time": 1.0, "text": "Lil D:"}, {"time": 2.0, "text": "[Verse]"}]
+    assert strip_non_lyric_lines(lines) == lines  # never blank out the whole sheet
