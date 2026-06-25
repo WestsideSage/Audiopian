@@ -43,5 +43,16 @@ function fakeFetch(rows) {
 
     const none = await client.searchSongs('', { fetch: fakeFetch([]) });
     assert.deepStrictEqual(none, []);
+
+    // --- parseLrc drops non-lyric annotation lines (speaker labels + section headers) ---
+    const pl = client.parseLrc(
+        '[00:01.00] Verse line one\n' +
+        "[00:02.00] Lil'D:\n" +
+        '[00:03.00] [Chorus]\n' +
+        '[00:04.00] All we want is your soul'
+    );
+    assert.strictEqual(pl.length, 2, 'parseLrc strips the speaker label and the section header');
+    assert.deepStrictEqual(pl.map(l => l.text), ['Verse line one', 'All we want is your soul']);
+
     console.log('test_lyrics_search: OK');
 })();

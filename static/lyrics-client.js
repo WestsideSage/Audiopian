@@ -7,6 +7,14 @@
 var LRCLIB_SEARCH_URL = 'https://lrclib.net/api/search';
 var LRCLIB_MAX_ATTEMPTS = 2;
 
+// Lazy resolver (load-order robust): require() in Node, window global in browser.
+function _annotations() {
+    if (typeof module !== 'undefined' && module.exports) {
+        try { return require('./lyric-annotations.js'); } catch (e) { return null; }
+    }
+    return (typeof window !== 'undefined' && window.KaraokeeLyricAnnotations) || null;
+}
+
 function parseLrc(lrcText) {
     var lines = [];
     var re = /^\[(\d+):(\d+\.\d+)\]\s*(.*)$/;
@@ -18,7 +26,8 @@ function parseLrc(lrcText) {
             if (text) lines.push({ time: parseInt(m[1], 10) * 60 + parseFloat(m[2]), text: text });
         }
     }
-    return lines;
+    var ann = _annotations();
+    return (ann && ann.stripNonLyricLines) ? ann.stripNonLyricLines(lines) : lines;
 }
 
 function tokenOverlap(a, b) {
