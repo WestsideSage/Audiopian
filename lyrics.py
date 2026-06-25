@@ -56,7 +56,8 @@ def is_section_header(text: str) -> bool:
         return False
     inner = (m.group(1) or m.group(2) or m.group(3)).lower().strip()
     inner = re.sub(r"[\s-]*(?:x\s*)?\d+\s*x?$", "", inner, flags=re.IGNORECASE).strip()
-    first = inner.split()[0] if inner.split() else inner
+    parts = inner.split()
+    first = parts[0] if parts else inner
     return inner in SECTION_KEYWORDS or first in SECTION_KEYWORDS
 
 

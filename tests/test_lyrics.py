@@ -142,6 +142,7 @@ def test_is_section_header_detects_full_wrap_section_words():
     assert is_section_header("(Verse 1)") is True
     assert is_section_header("(Verse1)") is True  # no-space number still stripped
     assert is_section_header("(Pre-Chorus 2)") is True
+    assert is_section_header("{Bridge}") is True  # curly-brace wrap variant
     assert is_section_header("(Soul) Ah ah ah ah!") is False  # partial wrap
     assert is_section_header("(Ooh)") is False  # fully wrapped, not a section word
     assert is_section_header("[Chorus)") is False  # mismatched brackets
