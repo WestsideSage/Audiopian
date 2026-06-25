@@ -7,12 +7,18 @@
  */
 var MAX_SPEAKER_LABEL_WORDS = 4;
 
-// Presence of any of these in a colon-ending line means it is a SENTENCE
-// (e.g. "and then she said:"), not a bare speaker tag -> keep it.
+// Presence of any of these in a colon-ending line means it is a SENTENCE or a
+// short lyric phrase ("and then she said:", "Hold on:", "Trust me:"), not a bare
+// speaker tag -> keep it. We err toward KEEPING: under-filtering a genuine label
+// is far safer than stripping a line the singer actually sings.
 var SENTENCE_STOPWORDS = {
     'and': 1, 'then': 1, 'the': 1, 'to': 1, 'of': 1, 'in': 1, 'is': 1, 'are': 1,
     'was': 1, 'were': 1, 'she': 1, 'he': 1, 'we': 1, 'you': 1, 'it': 1, 'that': 1,
-    'this': 1, 'but': 1, 'so': 1, 'with': 1, 'my': 1, 'your': 1, 'a': 1, 'i': 1
+    'this': 1, 'but': 1, 'so': 1, 'with': 1, 'my': 1, 'your': 1, 'a': 1, 'i': 1,
+    'for': 1, 'not': 1, 'no': 1, 'on': 1, 'me': 1, 'do': 1, 'if': 1, 'at': 1,
+    'or': 1, 'all': 1, 'us': 1, 'from': 1, 'by': 1, 'as': 1, 'be': 1, 'oh': 1,
+    'an': 1, 'am': 1, 'how': 1, 'what': 1, 'why': 1, 'when': 1, 'where': 1,
+    'who': 1, 'our': 1, 'up': 1, 'out': 1, 'now': 1
 };
 
 // First inner word of a fully-wrapped line (after dropping a trailing number / "xN").
@@ -44,9 +50,10 @@ function isSpeakerLabel(text) {
 function isSectionHeader(text) {
     var t = String(text || '').trim();
     // entire line is ONE balanced [ ] / ( ) / { } wrap, no inner brackets
-    var m = /^[\[({]\s*([^\[\](){}]+?)\s*[\])}]$/.exec(t);
+    // (alternation enforces matching pairs, so "[Chorus)" is NOT a header)
+    var m = /^(?:\[([^\[\](){}]+?)\]|\(([^\[\](){}]+?)\)|\{([^\[\](){}]+?)\})$/.exec(t);
     if (!m) return false;
-    var inner = m[1].toLowerCase().trim();
+    var inner = (m[1] || m[2] || m[3]).toLowerCase().trim();
     inner = inner.replace(/[\s-]*(?:x\s*)?\d+\s*x?$/i, '').trim(); // "verse 1" -> "verse"
     var first = inner.split(/\s+/)[0] || inner;
     return !!(SECTION_KEYWORDS[inner] || SECTION_KEYWORDS[first]);

@@ -14,6 +14,11 @@ assert.strictEqual(isSpeakerLabel('Soul? Shawty I got that'), false, 'no trailin
 assert.strictEqual(isSpeakerLabel('Ah Lil D! Welcome to "soul stack records".'), false, 'ends in period, name is mid-lyric');
 assert.strictEqual(isSpeakerLabel('Get em Shawty'), false, 'no colon');
 assert.strictEqual(isSpeakerLabel('I want to tell you all something right now please:'), false, 'too many words to be a label');
+// short imperative/exclamatory lyric phrases ending in a colon must survive (stopword guard)
+assert.strictEqual(isSpeakerLabel('Hold on:'), false, '"on" stopword keeps the phrase');
+assert.strictEqual(isSpeakerLabel('Come on:'), false, '"on" stopword keeps the phrase');
+assert.strictEqual(isSpeakerLabel('Trust me:'), false, '"me" stopword keeps the phrase');
+assert.strictEqual(isSpeakerLabel('No more:'), false, '"no" stopword keeps the phrase');
 
 // --- section headers (entire line is a section tag) -> DROP ---
 assert.strictEqual(isSectionHeader('[Chorus]'), true);
@@ -28,6 +33,9 @@ assert.strictEqual(isSectionHeader('(Soul) Ah ah ah ah!'), false, 'wrap does not
 assert.strictEqual(isSectionHeader("(I Can't Get No) Satisfaction"), false, 'text continues past paren');
 assert.strictEqual(isSectionHeader('(Ooh)'), false, 'fully wrapped but not a section word');
 assert.strictEqual(isSectionHeader('(Soul)'), false, 'backing vocal, not a section word');
+// mismatched bracket pairs are not a balanced wrap -> not a header
+assert.strictEqual(isSectionHeader('[Chorus)'), false, 'mismatched brackets not a header');
+assert.strictEqual(isSectionHeader('(Verse 1]'), false, 'mismatched brackets not a header');
 
 // --- combined predicate ---
 assert.strictEqual(isNonLyricLine("Lil'D:"), true);
@@ -49,5 +57,12 @@ assert.deepStrictEqual(kept.map(l => l.time), [1, 3, 5], 'order preserved, label
 // --- fail-safe: an all-annotations list returns the ORIGINAL unchanged ---
 const allAnn = [{ time: 1, text: 'Lil D:' }, { time: 2, text: '[Verse]' }];
 assert.strictEqual(stripNonLyricLines(allAnn).length, 2, 'never blank out the whole sheet');
+
+// --- defensive: null / empty / non-array inputs never throw ---
+assert.strictEqual(isSpeakerLabel(null), false, 'null is not a speaker label');
+assert.strictEqual(isSpeakerLabel(''), false, 'empty string is not a speaker label');
+assert.strictEqual(isSectionHeader(null), false, 'null is not a section header');
+assert.strictEqual(isSectionHeader(''), false, 'empty string is not a section header');
+assert.deepStrictEqual(stripNonLyricLines(null), null, 'non-array passes through unchanged');
 
 console.log('test_lyric_annotations: OK');
