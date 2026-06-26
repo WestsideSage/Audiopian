@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Privacy Policy — Audiopian</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="legal-page">
+    <main class="legal">
+        <a class="doc-home" href="/"><span class="logo-dot"></span>Audiopian</a>
+        <h1 class="doc-title">Privacy Policy</h1>
+        <p class="updated">Last updated: 25 June 2026</p>
+
+        <div class="callout">
+            <p>Audiopian runs almost entirely in your browser. We don&rsquo;t have accounts, we don&rsquo;t run analytics, and our own servers store essentially nothing about you. The one thing you should know: <strong>to score your singing, your microphone audio is sent to a third-party speech-recognition service</strong> &mdash; Google by default, or OpenAI if you opt in. Details below.</p>
+        </div>
+
+        <h2>1. Who we are</h2>
+        <p>Audiopian (&ldquo;we,&rdquo; &ldquo;the Service&rdquo;) is a free, browser-based singing game operated as an independent project. This policy explains what happens to your information when you use it.</p>
+
+        <h2>2. What we collect (almost nothing)</h2>
+        <p>We don&rsquo;t ask you to create an account, and we don&rsquo;t run advertising or analytics trackers. When you search for a song or load one, your request passes through our lyrics lookup and song-resolver, which are hosted on Cloudflare. Like virtually all web hosts, Cloudflare may process standard connection data (such as your IP address and a timestamp) and keep short-lived logs to deliver and protect the Service. We don&rsquo;t use this to build a profile of you.</p>
+
+        <h2>3. Your microphone &mdash; please read</h2>
+        <p>Audiopian needs your microphone to hear you sing and score it. What happens to that audio depends on which recognizer is active:</p>
+        <ul>
+            <li><strong>Default &mdash; your browser&rsquo;s speech recognition.</strong> Audiopian uses the Web Speech API built into Chrome and Edge. In those browsers, your microphone audio is sent to <strong>Google&rsquo;s</strong> servers to be turned into text, under Google&rsquo;s privacy policy. Audiopian never receives or stores this audio.</li>
+            <li><strong>Optional &mdash; your own OpenAI key.</strong> If you turn on sharper recognition and provide an OpenAI key, your microphone audio is streamed to <strong>OpenAI</strong> to be transcribed, under OpenAI&rsquo;s policies. Audiopian never receives or stores this audio.</li>
+        </ul>
+        <p>In both cases, we don&rsquo;t record, save, or upload your singing to Audiopian&rsquo;s servers. If you don&rsquo;t want your audio processed this way, don&rsquo;t grant microphone access (you won&rsquo;t be able to play scored mode).</p>
+
+        <h2>4. What&rsquo;s stored on your device</h2>
+        <p>Audiopian saves a few things in your browser&rsquo;s local storage, which stays on your device &mdash; we can&rsquo;t see it:</p>
+        <ul>
+            <li>your OpenAI API key, if you add one (sent only to OpenAI);</li>
+            <li>your high score and recent match history;</li>
+            <li>small preferences (such as difficulty).</li>
+        </ul>
+        <p>You can clear these at any time using your browser&rsquo;s &ldquo;clear site data,&rdquo; or the in-app button that removes your saved key.</p>
+
+        <h2>5. Third-party services</h2>
+        <p>Audiopian relies on services with their own privacy practices:</p>
+        <ul>
+            <li><strong><a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">YouTube / Google</a></strong> &mdash; the embedded player that streams the backing track. It may set cookies and collect data per Google&rsquo;s Privacy Policy, even before a video plays.</li>
+            <li><strong>Google Web Speech</strong> &mdash; default speech recognition (see section 3).</li>
+            <li><strong><a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener noreferrer">OpenAI</a></strong> &mdash; optional speech recognition, only if you provide a key.</li>
+            <li><strong><a href="https://lrclib.net" target="_blank" rel="noopener noreferrer">lrclib.net</a></strong> &mdash; supplies lyrics; receives your song search and selection.</li>
+            <li><strong><a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener noreferrer">Cloudflare</a></strong> &mdash; hosts the site and the lookups.</li>
+        </ul>
+        <p>We don&rsquo;t control these services and aren&rsquo;t responsible for their practices; please review their policies.</p>
+
+        <h2>6. Cookies &amp; similar technologies</h2>
+        <p>Audiopian itself doesn&rsquo;t set advertising or tracking cookies. We use local storage as described above. Embedded third-party content (the YouTube player) may set its own cookies.</p>
+
+        <h2>7. Children</h2>
+        <p>Audiopian isn&rsquo;t directed to children under 13, and we don&rsquo;t knowingly collect their information. If you&rsquo;re under 13, please don&rsquo;t use it.</p>
+
+        <h2>8. Your choices &amp; rights</h2>
+        <p>You can decline microphone access, skip the optional OpenAI key, clear your locally-stored data, and use your browser&rsquo;s privacy controls. Because we don&rsquo;t collect personal data on our own servers, there&rsquo;s little for us to access or delete &mdash; but if you have a question, or you&rsquo;re in a region with privacy rights (such as the EEA, UK, or California) and want to exercise them, email <a href="mailto:privacy@audiopian.com">privacy@audiopian.com</a>. Where your data is handled by Google, OpenAI, YouTube, or Cloudflare, those requests are best directed to them.</p>
+
+        <h2>9. Security</h2>
+        <p>We minimize risk by not holding your data: your key stays in your browser and goes only to OpenAI. That said, no method of transmission or storage is completely secure.</p>
+
+        <h2>10. Changes</h2>
+        <p>We may update this policy; we&rsquo;ll change the date above when we do.</p>
+
+        <h2>11. Contact</h2>
+        <p><a href="mailto:privacy@audiopian.com">privacy@audiopian.com</a></p>
+
+        <p class="disclaimer">Audiopian is an independent hobby project. This page is provided for transparency and is not legal advice.</p>
+
+        <nav class="doc-nav">
+            <a href="/terms">Terms of Service</a>
+            <a href="/dmca">DMCA</a>
+            <a href="/">&larr; Home</a>
+        </nav>
+    </main>
+</body>
+</html>

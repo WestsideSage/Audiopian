@@ -265,3 +265,93 @@ button:disabled { background: var(--surface-2); color: var(--text-faint); cursor
 }
 .search-divider::before { left: 0; }
 .search-divider::after { right: 0; }
+
+/* ============================================================
+   Site footer (landing page) + legal/policy documents
+   ============================================================ */
+
+/* ---- shared footer (added to the landing card layout) ---- */
+.site-footer {
+    width: 100%;
+    text-align: center;
+    font-size: .78rem;
+    color: var(--text-faint);
+    letter-spacing: .02em;
+}
+.site-footer a { color: var(--text-dim); text-decoration: none; }
+.site-footer a:hover { color: var(--p); text-decoration: underline; }
+.site-footer .sep { margin: 0 7px; opacity: .5; }
+
+/* When the body opts into a footer, stack the card + footer in a column
+   (body is otherwise a single-item centering flexbox). */
+body.has-footer { flex-direction: column; gap: 26px; padding: 44px 16px; }
+
+/* ---- long-form legal documents (terms / privacy / dmca) ---- */
+/* These pages are scrollable documents, not a centered card, so opt out of
+   the body flex-centering and lay out top-aligned. */
+body.legal-page {
+    display: block;
+    padding: 56px 20px 72px;
+}
+.legal {
+    max-width: 760px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    padding: 44px 48px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.02);
+}
+.legal .doc-home {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: #f4f5fb;
+    font-weight: 700;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    font-size: 1rem;
+    text-decoration: none;
+}
+.legal .doc-home .logo-dot {
+    width: 13px; height: 13px; border-radius: 4px;
+    background: var(--grad-accent); box-shadow: 0 0 14px var(--p);
+}
+.legal h1.doc-title {
+    text-align: left;
+    font-size: 1.7rem;
+    margin: 20px 0 4px;
+    color: #f4f5fb;
+}
+.legal .updated { color: var(--text-faint); font-size: .8rem; margin-bottom: 10px; }
+.legal .lede { color: var(--text-dim); font-size: .95rem; line-height: 1.6; margin-bottom: 8px; }
+.legal h2 { font-size: 1.05rem; color: #f4f5fb; margin: 26px 0 9px; letter-spacing: .01em; }
+.legal p { color: var(--text-dim); font-size: .9rem; line-height: 1.65; margin-bottom: 12px; }
+.legal ul, .legal ol { margin: 0 0 12px 22px; }
+.legal li { color: var(--text-dim); font-size: .9rem; line-height: 1.6; margin-bottom: 6px; }
+.legal a { color: var(--p); text-decoration: none; }
+.legal a:hover { text-decoration: underline; }
+.legal strong { color: var(--text); }
+.legal .callout {
+    background: var(--p-soft);
+    border: 1px solid var(--p-line);
+    border-radius: var(--r);
+    padding: 14px 16px;
+    margin: 0 0 22px;
+}
+.legal .callout p { color: var(--text); margin: 0; }
+.legal .disclaimer {
+    border-top: 1px solid var(--line);
+    margin-top: 28px;
+    padding-top: 16px;
+    font-size: .8rem;
+    color: var(--text-faint);
+}
+.legal .doc-nav {
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: .85rem;
+}
+.legal .doc-nav a { color: var(--text-dim); text-decoration: none; margin-right: 18px; }
+.legal .doc-nav a:hover { color: var(--p); text-decoration: underline; }

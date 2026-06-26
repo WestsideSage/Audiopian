@@ -385,6 +385,17 @@
             max-width: 400px;
         }
 
+        .prep-legal {
+            max-width: 380px;
+            margin: 2px auto 0;
+            font-size: 0.72rem;
+            line-height: 1.5;
+            color: var(--text-faint);
+            text-align: center;
+        }
+        .prep-legal a { color: var(--text-dim); text-decoration: underline; }
+        .prep-legal a:hover { color: var(--p); }
+
         .diff-gate { display: flex; flex-direction: column; align-items: center; gap: 18px; }
         .diff-gate-label { font-size: 1rem; color: var(--text-dim); letter-spacing: .04em; }
         .diff-gate-cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
@@ -535,6 +546,10 @@
                     <button class="ctrl-btn" id="micCheckDone" type="button" style="margin-top:10px; width:auto; padding:6px 18px;">Done</button>
                 </div>
             </div>
+            <p class="prep-legal">
+                By playing you agree to the <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>.
+                Your singing is sent to Google or OpenAI for speech recognition &mdash; see <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>.
+            </p>
         </div>
     </div>
 

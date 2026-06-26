@@ -282,6 +282,23 @@ def player():
     return send_from_directory(os.path.join(_HERE, "static"), "player.html")
 
 
+# Legal pages. On the deployed (Cloudflare Pages) static site these resolve via
+# clean URLs automatically; these routes give the local Flask dev server parity.
+@app.route("/terms")
+def terms():
+    return send_from_directory(os.path.join(_HERE, "static"), "terms.html")
+
+
+@app.route("/privacy")
+def privacy():
+    return send_from_directory(os.path.join(_HERE, "static"), "privacy.html")
+
+
+@app.route("/dmca")
+def dmca():
+    return send_from_directory(os.path.join(_HERE, "static"), "dmca.html")
+
+
 @app.route("/load", methods=["POST"])
 def load():
     data = request.get_json()
