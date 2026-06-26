@@ -322,9 +322,14 @@
     function isInsideReviewWindow(session, phrase, evidence, token) {
         var profile = session.plan.difficulty;
         var t = tokenTime(evidence, token);
-        var tolerance = profile.timingToleranceMs / 1000;
         var settlement = (profile.settlementMs + LATE_EVIDENCE_GRACE_MS) / 1000;
-        return t >= phrase.startSec - tolerance && t <= phrase.endSec + settlement;
+        // Strict early edge (no pre-start tolerance). Adjacent/repeated hook lines
+        // share a boundary (next.start == this.end), so ANY early grace lets the
+        // previous identical line's still-streaming tokens pre-credit — and the live
+        // painter pre-green — this phrase before the singer has reached it. Mirrors
+        // the RECONCILE_FLOW_GRACE_MS=0 reasoning. The late side stays generous
+        // (endSec + settlement + grace) so lagged recognition still lands.
+        return t >= phrase.startSec && t <= phrase.endSec + settlement;
     }
 
     function updatePhraseResult(session, state) {

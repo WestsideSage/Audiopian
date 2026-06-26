@@ -246,6 +246,39 @@ assert.strictEqual(sharedSession.states['p2'].lyricStatus, 'missing', 'the share
 assert.strictEqual(Object.keys(sharedSession.states['p0'].anchorHits).length, 0, 'no spurious anchor credit on p0');
 assert.strictEqual(Object.keys(sharedSession.states['p2'].anchorHits).length, 0, 'no spurious anchor credit on p2');
 
+// Forward-bleed guard (pre-green): adjacent IDENTICAL hook lines. While line N is
+// active the recognizer keeps re-emitting the hook; the live path must NOT spill
+// that credit forward onto the next identical phrase before the audio reaches it,
+// or that line pre-greens (and inflates) the instant it becomes active.
+var hookPlan = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'gorilla go gorilla go go' },
+    { time: 2, text: 'gorilla go gorilla go go' },
+    { time: 4, text: 'tail end here' }
+], { difficulty: 'expert', audioDuration: 6 });
+var hookSession = phraseEngine.createPhraseSession(hookPlan);
+// Mid line 0 (audio 1.0): credits p0.
+phraseEngine.addEvidence(hookSession, {
+    id: 'hook-1', source: 'browser_final', text: 'gorilla go gorilla go go', words: [],
+    receivedAtSec: 1.0, audioTimeSec: 1.0
+});
+assert.strictEqual(hookSession.states['p0'].lyricStatus, 'confirmed', 'the active hook line confirms');
+// Still inside line 0 (audio 1.9 < p1.start 2.0): the re-recognized hook must NOT credit p1.
+phraseEngine.addEvidence(hookSession, {
+    id: 'hook-2', source: 'browser_final', text: 'gorilla go gorilla go go', words: [],
+    receivedAtSec: 1.9, audioTimeSec: 1.9
+});
+assert.strictEqual(Object.keys(hookSession.states['p1'].anchorHits).length, 0,
+    'next identical hook is NOT pre-credited before the audio reaches it');
+assert.notStrictEqual(hookSession.states['p1'].lyricStatus, 'confirmed',
+    'next hook line does not pre-green/confirm before its window opens');
+// Once the audio is inside line 1 and the singer repeats it, p1 credits normally.
+phraseEngine.addEvidence(hookSession, {
+    id: 'hook-3', source: 'browser_final', text: 'gorilla go gorilla go go', words: [],
+    receivedAtSec: 2.5, audioTimeSec: 2.5
+});
+assert.strictEqual(hookSession.states['p1'].lyricStatus, 'confirmed',
+    'p1 confirms normally once the audio reaches its window');
+
 // Inflation guard, worst ordering: a bare repeated anchor word, fed once,
 // credits AT MOST one phrase (cannot inflate every line that holds it).
 var bareSession = phraseEngine.createPhraseSession(sharedPlan);
