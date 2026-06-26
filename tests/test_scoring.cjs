@@ -65,7 +65,12 @@ var matchCases = [
     { spoken: 'gnaw', target: 'naw', method: 'phonetic', score: 0.8 },
     { spoken: 'cat', target: 'dog', method: 'none', score: 0.0 },
     { spoken: 'alpha', target: 'omega', method: 'none', score: 0.0 },
-    { spoken: 'going', target: 'gonna', method: 'none', score: 0.0 },
+    // Reverse contraction: ASR splits a sung contraction into its multi-word
+    // expansion and streams the leading word first ("gonna" -> "going [to]",
+    // "wanna" -> "want [to]"). The leading word alone credits the contraction
+    // target so it scores in-time instead of waiting for the full expansion.
+    { spoken: 'going', target: 'gonna', method: 'contraction', score: 1.0 },
+    { spoken: 'want', target: 'wanna', method: 'contraction', score: 1.0 },
     { spoken: 'tree', target: 'sky', method: 'none', score: 0.0 },
     // Homophones the phonetic path misses (short side and/or different first letter).
     // The recognizer's spelling differs but the sound is identical -> credit it.

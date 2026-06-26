@@ -204,14 +204,26 @@ var _expansionIndex = {};
 
 /**
  * Check if a spoken word matches a target word via contraction expansion.
- * Handles the case where spoken="gonna" and target="going" (first word of expansion).
+ * Symmetric in both directions:
+ *  - spoken is the contraction, target is the first word of its expansion
+ *    (spoken="gonna", target="going").
+ *  - target is the contraction, spoken is the first word of its expansion
+ *    (spoken="want", target="wanna"). The recognizer splits a sung contraction
+ *    into its expansion ("wanna" -> "want to") and the leading word arrives one
+ *    interim before the rest, so it must credit the target on its own.
  */
 function contractionsMatch(spoken, target) {
     var expansion = CONTRACTION_MAP[spoken];
-    if (expansion) {
-        var expWords = expansion.split(' ');
-        if (expWords[0] === target) return true;
-    }
+    if (expansion && expansion.split(' ')[0] === target) return true;
+
+    // Reverse: target is a multi-word contraction; spoken is its expansion's
+    // leading word. Restricted to multi-word expansions because only those have
+    // the recognizer-splits-then-streams-incrementally problem ("want to"); a
+    // single-word slang expansion (e.g. wit->with) is already handled elsewhere.
+    var targetExpansion = CONTRACTION_MAP[target];
+    if (targetExpansion && targetExpansion.indexOf(' ') !== -1 &&
+        targetExpansion.split(' ')[0] === spoken) return true;
+
     return false;
 }
 

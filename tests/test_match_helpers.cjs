@@ -27,10 +27,25 @@ assert.strictEqual(contractionsMatch('gonna', 'going'), true,
 assert.strictEqual(contractionsMatch('hello', 'going'), false,
     'unrelated word should not match');
 
-// --- contractionsMatch: spoken full-form vs contraction target ---
-// Lyric says "gonna", ASR says "going" — need reverse lookup
-assert.strictEqual(contractionsMatch('going', 'gonna'), false,
-    'single word "going" does not match "gonna" (need multi-word "going to")');
+// --- contractionsMatch: spoken first-word-of-expansion vs contraction target ---
+// Lyric says "gonna"/"wanna", ASR splits the sung contraction into "going to" /
+// "want to" and the LEADING word arrives one interim before the rest. The leading
+// word alone must credit the contraction target (symmetric with the forward case
+// above) so it scores in-time instead of waiting for the full expansion.
+assert.strictEqual(contractionsMatch('going', 'gonna'), true,
+    'leading word "going" should match contraction target "gonna" (first word of "going to")');
+assert.strictEqual(contractionsMatch('want', 'wanna'), true,
+    'leading word "want" should match contraction target "wanna" (first word of "want to")');
+assert.strictEqual(contractionsMatch('got', 'gotta'), true,
+    'leading word "got" should match contraction target "gotta" (first word of "got to")');
+// Honesty bound: only the EXPANSION's first word credits — not an arbitrary word,
+// and not a first word belonging to a different contraction.
+assert.strictEqual(contractionsMatch('want', 'gonna'), false,
+    '"want" is not the first word of "gonna"\'s expansion — must not match');
+assert.strictEqual(contractionsMatch('to', 'wanna'), false,
+    'a non-first expansion word ("to") must not match the contraction target');
+assert.strictEqual(contractionsMatch('hello', 'wanna'), false,
+    'unrelated word must not match a contraction target');
 
 // --- multiWordContractionMatch ---
 // ASR returns ["going", "to"] and target is "gonna"
