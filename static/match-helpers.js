@@ -151,6 +151,29 @@ function slangMatch(spoken, target) {
     return !!(alts && alts.has(target));
 }
 
+// --- ASR-mishearing dictionary (target-directional) ---
+// Unlike SLANG_MAP (bidirectional), this is keyed by the LYRIC word -> the set of
+// tokens the recognizer is known to emit when that word is sung with non-standard
+// stress. It fires ONLY when the lyric target is a registered key, so a curated
+// substitution can credit the real word without polluting other songs: e.g. a
+// drawn-out 2-beat "Go-rilla" is transcribed by Web Speech as "really" (metaphone
+// RL vs gorilla's KRL — too far for the phonetic/edit paths). Honesty-safe because
+// the bridge is one-directional: "really" can credit "gorilla" only on a line whose
+// lyric is literally "gorilla"; it never credits a "really" lyric (exact handles
+// those), and singing "gorilla" never credits "really". Add new entries here.
+var ASR_MISHEARINGS = {
+    gorilla: ['really'],   // drawn-out "Go-rilla" -> Web Speech hears "really"
+};
+
+/**
+ * Check if a recognizer-mishearing of the lyric target should be credited.
+ * Target-directional: only fires when `target` is a registered lyric key.
+ */
+function mishearingMatch(spoken, target) {
+    var subs = ASR_MISHEARINGS[target];
+    return !!(subs && subs.indexOf(spoken) !== -1);
+}
+
 // --- Reverse Contraction Map (auto-generated) ---
 var REVERSE_CONTRACTION_MAP = {};
 (function() {
@@ -429,6 +452,8 @@ if (typeof module !== 'undefined' && module.exports) {
         MetaphoneLRU: MetaphoneLRU,
         SLANG_MAP: SLANG_MAP,
         slangMatch: slangMatch,
+        ASR_MISHEARINGS: ASR_MISHEARINGS,
+        mishearingMatch: mishearingMatch,
         FUNCTION_WORDS: FUNCTION_WORDS,
         ADLIB_WORDS: ADLIB_WORDS,
         WORD_WEIGHTS: WORD_WEIGHTS,

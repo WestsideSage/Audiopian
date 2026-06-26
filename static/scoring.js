@@ -7,6 +7,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function(matchHelpers, syncHelpers, root) {
     var contractionsMatch = matchHelpers.contractionsMatch;
     var slangMatch = matchHelpers.slangMatch;
+    var mishearingMatch = matchHelpers.mishearingMatch;
     var skipFuzzyMatch = matchHelpers.skipFuzzyMatch;
     var isEdit2PrefixTruncation = matchHelpers.isEdit2PrefixTruncation;
     var classifyWord = matchHelpers.classifyWord;
@@ -308,6 +309,7 @@
 
         if (contractionsMatch(spoken, target)) return true;
         if (slangMatch(spoken, target)) return true;
+        if (mishearingMatch(spoken, target)) return true;
 
         if (spoken.length >= 3 && target.length >= 3) {
             var sp = spokenMetaphoneLRU.get(spoken);
@@ -350,6 +352,7 @@
 
         if (contractionsMatch(spoken, target)) return { score: 1.0, method: 'contraction' };
         if (slangMatch(spoken, target)) return { score: 0.9, method: 'slang' };
+        if (mishearingMatch(spoken, target)) return { score: 0.9, method: 'mishearing' };
 
         if (spoken.length >= 3 && target.length >= 3) {
             var sp = spokenMetaphoneLRU.get(spoken);

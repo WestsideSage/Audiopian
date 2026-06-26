@@ -28,7 +28,7 @@ node tests/test_scoring_session.cjs
 node tests/test_telemetry_helpers.cjs
 # ...and the rest under tests/*.cjs (scoring, phrase-engine, phrase-score, scoring-arcade,
 # commit-helpers, vad-helpers, anchor-selection, lyric-paint-helpers, realtime-whisper, telemetry-replay,
-# lyric-annotations)
+# lyric-annotations, mishearing)
 ```
 
 ### Whisper / transcription configuration (environment variables)
@@ -79,7 +79,7 @@ No build step; files are served directly by Flask.
 - **`scoring.js`** (`window.KaraokeeScoring`) — phonetic/fuzzy matching + line scoring engine: `doubleMetaphone`, `editDistance`, `wordsMatch`/`wordsMatchScore`, word normalization, syllable-weighted `interpolateWordTimings`, `computeLineScore`, `findMatchInWindow`, `mergeConfirmedMatches`. **Single source of truth** for these — `player.js` binds them. Tested in `test_scoring.cjs`.
 - **`phrase-engine.js`** (`window.KaraokeePhraseEngine`) — phrase-level scoring built on `scoring.js`: anchor matching, line settle/commit, late-evidence reconciliation. Tested in `test_phrase_engine.cjs` / `test_phrase_score.cjs`.
 - **`scoring-arcade.js`** (`window.KaraokeeArcade`) — pure arcade scoring state machine (combos, points, grade). Tested in `test_scoring_arcade.cjs`.
-- **`match-helpers.js`** — contraction/slang normalization, **homophone matching** (`HOMOPHONE_PAIRS` → `SLANG_MAP`: short/different-first-letter homophones the metaphone path misses, e.g. eye/I, no/know, one/won, by/bye), filler-word skipping, `MetaphoneLRU`, `maxEditDistance`, `classifyWord`. Loaded before `scoring.js`/`player.js`.
+- **`match-helpers.js`** — contraction/slang normalization, **homophone matching** (`HOMOPHONE_PAIRS` → `SLANG_MAP`: short/different-first-letter homophones the metaphone path misses, e.g. eye/I, no/know, one/won, by/bye), **target-directional ASR-mishearing bridge** (`ASR_MISHEARINGS` → `mishearingMatch`: a lyric-word-keyed map of recognizer mistranscriptions for words sung with non-standard stress, e.g. a drawn-out "Go-rilla" → Web Speech "really", which the phonetic/edit paths can't reach. Honesty-safe because it's one-directional — credits only when the *lyric target* is a registered key, never the reverse — and consumed in `scoring.js` `wordsMatch`/`wordsMatchScore` at score 0.9, method `mishearing`. Tested in `test_mishearing.cjs`), filler-word skipping, `MetaphoneLRU`, `maxEditDistance`, `classifyWord`. Loaded before `scoring.js`/`player.js`.
 - **`sync-helpers.js`** — pure adaptive-sync timing: `classifyTempo()`, `getWindowParams()` keyed by tempo class (slow/normal/fast). Tested in `test_sync_helpers.cjs`.
 - **`vad-helpers.js`** — the RMS energy-gate voice-activity logic (EMA noise floor, dual-threshold hysteresis), used as the **fallback**. Tested in `test_vad_helpers.cjs`. The **primary** VAD is a neural model (Silero, via the vendored `@ricky0123/vad-web` `MicVAD` under `static/vendor/vad/`), wired in `player.js` (`_micVad` / `_neuralVadActive`) with the RMS gate as fallback.
 - **`telemetry-helpers.js`** (`window.KaraokeeTelemetry`) — `summarizeRun` digest builder for the telemetry `summary` block. Tested in `test_telemetry_helpers.cjs`.
