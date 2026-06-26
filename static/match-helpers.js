@@ -355,6 +355,11 @@ var ADLIB_WORDS = new Set([
     'oo', 'ooo', 'oooh', 'ahh', 'ahhh',
     'skrrt', 'brr', 'grr', 'pew', 'pow', 'bang',
     'yuh', 'yah', 'aye',
+    // Hyphenated interjections collapse to one token once the hyphen is stripped
+    // ("Uh-oh" -> "uhoh"), so they slip past the single-word entries above and
+    // would otherwise be scored as required `core` anchors the recognizer can
+    // never satisfy. Keep them free (weight 0) like every other interjection.
+    'uhoh', 'uhhuh', 'uhuh', 'ohoh',
 ]);
 
 // adlib = 0 ("free"): non-lexical ad-libs/fillers ("uh", "hm", "oh", "yeah", and

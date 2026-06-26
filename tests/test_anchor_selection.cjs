@@ -96,4 +96,21 @@ check('getPhraseTrace exposes per-anchor word/wordClass/weight/hit', () => {
   assert.ok(trace.anchors.every(a => a.wordClass !== 'adlib'));
 });
 
+// --- Task 5: non-lexical interjections must not gate a phrase ---
+// "Uh-oh" normalizes (hyphen stripped) to the single token "uhoh". Speech
+// recognizers essentially never surface it, so making it a required anchor is an
+// honestly-unwinnable gate. It must classify as adlib (weight 0) and never anchor,
+// while the real lexical words on the line still do.
+check('interjection "uh-oh" is not selected as an anchor', () => {
+  const plan = PE.buildPhrasePlan(
+    [{ time: 0, text: 'just dont tap the glass uh-oh gorilla go gorilla go go' }],
+    { difficulty: 'expert' }
+  );
+  const anchorWords = plan.phrases.flatMap(p => p.anchors.map(a => a.word));
+  assert.ok(!anchorWords.includes('uhoh'),
+    '"uh-oh" -> "uhoh" is a non-lexical interjection and must not be an anchor');
+  assert.ok(anchorWords.includes('gorilla'),
+    'lexical "gorilla" should still anchor the phrase');
+});
+
 console.log('anchor-selection: ' + passed + ' checks passed');
