@@ -777,7 +777,11 @@
         var states = s.phraseSession.states;
         for (var id in states) {
             var st = states[id];
-            if (!st || st.status === 'open') continue;
+            // Only fully-'settled' phrases count toward the live headline. A 'settling'
+            // phrase (past endSec, still inside its settlement/grace window) has partial
+            // anchorHits that late + reconcile evidence is still landing into; counting it
+            // made the on-screen Honest % dip then recover (jitter). 'open' is excluded too.
+            if (!st || st.status !== 'settled') continue;
             var req = (st.phrase && st.phrase.anchorsRequired) || 0;
             if (req <= 0) continue;
             var hit = Object.keys(st.anchorHits).length;

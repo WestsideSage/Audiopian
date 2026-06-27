@@ -780,4 +780,28 @@ function matchHotWordForTest(s, text, now) {
     assert.strictEqual(s.matchedSet.size, 0, 'pre-seek transcript does not credit the post-seek line');
 })();
 
+// --- R15: getHonestPct counts ONLY settled phrases (settling + open excluded) ---
+// The live on-screen Honest % (scoring-session.js honestPct event -> player.js #score-pct)
+// was computed over every non-'open' phrase, so a 'settling' phrase counted its partial
+// anchorHits before its late/reconcile evidence had landed -> the headline dipped then
+// recovered (jitter). Excluding 'settling' makes a phrase enter the headline only once
+// 'settled', so the number stops sagging mid-judgment and re-climbing.
+(function () {
+    // p0 fully cleared + settled (2/2); p1 mid-'settling' with no hits yet (0/2);
+    // p2 still 'open'. Only p0 should count: 2/2 = 100% (not 2/4 = 50%).
+    var s = { phraseSession: { states: {
+        p0: { status: 'settled',  phrase: { anchorsRequired: 2 }, anchorHits: { 0: 1, 1: 1 } },
+        p1: { status: 'settling', phrase: { anchorsRequired: 2 }, anchorHits: {} },
+        p2: { status: 'open',     phrase: { anchorsRequired: 2 }, anchorHits: {} }
+    } } };
+    assert.strictEqual(session.getHonestPct(s), 100,
+        'getHonestPct counts only settled phrases: 2/2 = 100% (settling p1 + open p2 excluded)');
+    // A lone 'settling' phrase (nothing settled yet) contributes nothing -> null, not 0%.
+    var sSettlingOnly = { phraseSession: { states: {
+        p0: { status: 'settling', phrase: { anchorsRequired: 2 }, anchorHits: {} }
+    } } };
+    assert.strictEqual(session.getHonestPct(sSettlingOnly), null,
+        'a session with only settling/open phrases has no settled denominator -> null');
+})();
+
 console.log('Scoring session tests passed.');
