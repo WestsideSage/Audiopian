@@ -106,13 +106,17 @@ function computeSongTempoProfile(allWordTimings) {
 
 /**
  * Classify a line's tempo relative to its song's tempo profile.
+ * Returns the SAME vocabulary as classifyTempo (slow/normal/fast) so the relative
+ * class can be consumed interchangeably: the mid bucket is 'normal', not an orphan
+ * 'medium' that capMsForTempo / the window+overlap switches don't recognize and would
+ * silently route to their default branch (R18 — eliminates the tempo-vocabulary split).
  * @param {number} wps - words per second for this line
  * @param {{ p50: number, p80: number }} profile - song tempo profile
- * @returns {'slow'|'medium'|'fast'}
+ * @returns {'slow'|'normal'|'fast'}
  */
 function classifyLineTempoRelative(wps, profile) {
     if (wps >= profile.p80) return 'fast';
-    if (wps >= profile.p50) return 'medium';
+    if (wps >= profile.p50) return 'normal';
     return 'slow';
 }
 

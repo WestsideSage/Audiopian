@@ -122,10 +122,12 @@ var profile = { p50: 2.0, p80: 4.0 };
 assert.strictEqual(classifyLineTempoRelative(1.0, profile), 'slow');
 assert.strictEqual(classifyLineTempoRelative(1.9, profile), 'slow');
 
-// at or above p50, below p80 → medium
-assert.strictEqual(classifyLineTempoRelative(2.0, profile), 'medium');
-assert.strictEqual(classifyLineTempoRelative(3.5, profile), 'medium');
-assert.strictEqual(classifyLineTempoRelative(3.99, profile), 'medium');
+// at or above p50, below p80 → 'normal' (the absolute slow/normal/fast vocabulary; NOT
+// the orphan 'medium' that no window/overlap/cap switch understood — R18: relative class
+// must speak the same tempo language as classifyTempo so it never hits a silent default).
+assert.strictEqual(classifyLineTempoRelative(2.0, profile), 'normal');
+assert.strictEqual(classifyLineTempoRelative(3.5, profile), 'normal');
+assert.strictEqual(classifyLineTempoRelative(3.99, profile), 'normal');
 
 // at or above p80 → fast
 assert.strictEqual(classifyLineTempoRelative(4.0, profile), 'fast');
