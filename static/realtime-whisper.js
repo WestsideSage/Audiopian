@@ -1,41 +1,4 @@
 (function(root) {
-    function clampSample(sample) {
-        if (!Number.isFinite(sample)) return 0;
-        if (sample < -1) return -1;
-        if (sample > 1) return 1;
-        return sample;
-    }
-
-    function float32ToPcm16Base64(float32) {
-        var bytes = new Uint8Array(float32.length * 2);
-        for (var i = 0; i < float32.length; i++) {
-            var sample = clampSample(float32[i]);
-            var value = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-            var intSample = Math.round(value);
-            bytes[i * 2] = intSample & 0xff;
-            bytes[i * 2 + 1] = (intSample >> 8) & 0xff;
-        }
-
-        if (typeof Buffer !== 'undefined') {
-            return Buffer.from(bytes).toString('base64');
-        }
-
-        var binary = '';
-        var chunkSize = 0x8000;
-        for (var start = 0; start < bytes.length; start += chunkSize) {
-            var chunk = bytes.subarray(start, start + chunkSize);
-            binary += String.fromCharCode.apply(null, chunk);
-        }
-        return btoa(binary);
-    }
-
-    function buildAppendAudioEvent(base64Audio) {
-        return {
-            type: 'input_audio_buffer.append',
-            audio: base64Audio,
-        };
-    }
-
     function buildCommitEvent() {
         return { type: 'input_audio_buffer.commit' };
     }
@@ -102,8 +65,6 @@
     }
 
     var api = {
-        float32ToPcm16Base64: float32ToPcm16Base64,
-        buildAppendAudioEvent: buildAppendAudioEvent,
         buildCommitEvent: buildCommitEvent,
         buildSessionUpdateEvent: buildSessionUpdateEvent,
         buildClientSecretBody: buildClientSecretBody,

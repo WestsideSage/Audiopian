@@ -1,25 +1,6 @@
 const assert = require('assert');
 const realtime = require('../static/realtime-whisper.js');
 
-function testFloat32ToPcm16Base64ClampsAndEncodes() {
-  const encoded = realtime.float32ToPcm16Base64(new Float32Array([-1, 0, 1]));
-  const bytes = Buffer.from(encoded, 'base64');
-
-  assert.strictEqual(bytes.length, 6);
-  assert.strictEqual(bytes.readInt16LE(0), -32768);
-  assert.strictEqual(bytes.readInt16LE(2), 0);
-  assert.strictEqual(bytes.readInt16LE(4), 32767);
-}
-
-function testBuildAppendAudioEvent() {
-  const event = realtime.buildAppendAudioEvent('abc123');
-
-  assert.deepStrictEqual(event, {
-    type: 'input_audio_buffer.append',
-    audio: 'abc123',
-  });
-}
-
 function testBuildSessionUpdateEvent() {
   const event = realtime.buildSessionUpdateEvent({
     model: 'gpt-realtime-whisper',
@@ -109,8 +90,6 @@ function testBuildClientSecretBodyWhisperIgnoresPromptKeepsDelay() {
   assert.strictEqual(body.session.audio.input.transcription.delay, 'low', 'whisper keeps the delay knob');
 }
 
-testFloat32ToPcm16Base64ClampsAndEncodes();
-testBuildAppendAudioEvent();
 testBuildSessionUpdateEvent();
 testBuildSessionUpdateEventKeepsPromptForSupportedModels();
 testExtractClientSecret();
