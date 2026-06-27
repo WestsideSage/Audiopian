@@ -24,3 +24,16 @@ node_modules/
 .playwright-mcp/
 workers/resolve/.dev.vars
 .dev.vars
+
+# Cloudflare Wrangler local cache / state (incl. wrangler-account.json)
+.wrangler/
+
+# Claude Code local (per-machine) config — shared .claude/ assets stay tracked
+.claude/settings.local.json
+.claude/launch.json
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
