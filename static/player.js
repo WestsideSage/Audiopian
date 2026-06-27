@@ -18,35 +18,7 @@ function _songKey() {
 
 // --- Word-matching, normalization & timing helpers ---
 // Single source of truth: static/scoring.js (tested in tests/test_scoring.cjs),
-// bound from window.KaraokeeScoring below. encodeWav stays inline (audio I/O).
-
-/**
- * Encode a Float32Array of mono audio samples as a standard WAV buffer.
- * @param {Float32Array} float32 - Raw audio samples in [-1, 1]
- * @param {number} sampleRate - Sample rate (16000 for Whisper)
- * @returns {ArrayBuffer} - Valid WAV file bytes ready to POST
- */
-function encodeWav(float32, sampleRate) {
-    const pcm = new Int16Array(float32.length);
-    for (let i = 0; i < float32.length; i++) {
-        pcm[i] = Math.max(-32768, Math.min(32767, float32[i] * 32768));
-    }
-    const buf = new ArrayBuffer(44 + pcm.byteLength);
-    const v = new DataView(buf);
-    const w = (o, str) => { for (let i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
-    w(0, 'RIFF');  v.setUint32(4, 36 + pcm.byteLength, true);
-    w(8, 'WAVE');  w(12, 'fmt ');
-    v.setUint32(16, 16, true);          // PCM chunk size
-    v.setUint16(20, 1, true);           // PCM format
-    v.setUint16(22, 1, true);           // 1 channel (mono)
-    v.setUint32(24, sampleRate, true);  // sample rate
-    v.setUint32(28, sampleRate * 2, true); // byte rate
-    v.setUint16(32, 2, true);           // block align
-    v.setUint16(34, 16, true);          // bits per sample
-    w(36, 'data'); v.setUint32(40, pcm.byteLength, true);
-    new Int16Array(buf, 44).set(pcm);
-    return buf;
-}
+// bound from window.KaraokeeScoring below.
 
 var scoringHelpers = window.KaraokeeScoring;
 var editDistance = scoringHelpers.editDistance;
@@ -89,19 +61,15 @@ class GameMode {
         // Whisper Track 2 state
         this._whisperStream = null;
         this._whisperCtx    = null;
-        this._whisperRealtimeWs = null;
         this._whisperRealtimePc = null;
         this._whisperRealtimeDc = null;
         this._whisperRealtimeSession = null;
         this._whisperRealtimeTranscript = new Map();
         this._whisperRealtimeCallsUrl = 'https://api.openai.com/v1/realtime/calls';
         this.whisperBuffer  = '';
-        this._whisperInFlight = 0;
 
-        // Whisper server state (populated from /whisper-status at game start)
+        // Whisper server state (provider/model derived from the key-store at game start)
         this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null, provider: null, model: null };
-        this._whisperNextStatusPollAt = 0;
-        this._whisperBackoffUntil = 0;
 
         // Whisper client track state (populated by _startWhisperTrack outcome)
         this._whisperTrackStatus  = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0, provider: null };
@@ -348,10 +316,7 @@ class GameMode {
         this._commitState = null;
         this._vadInitError = null;
         this._energyThreshold = 0.01;
-        this._whisperInFlight = 0;
         this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null, provider: null, model: null };
-        this._whisperNextStatusPollAt = 0;
-        this._whisperBackoffUntil = 0;
         this._whisperTrackStatus = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0, provider: null };
         this._chunksDispatched = 0;
         this._chunksSucceeded = 0;
@@ -965,10 +930,6 @@ class GameMode {
 
     _stopWhisperTrack() {
         this._stopRealtimeWhisperCommitTimer();
-        if (this._whisperRealtimeWs) {
-            try { this._whisperRealtimeWs.close(); } catch(e) {}
-            this._whisperRealtimeWs = null;
-        }
         if (this._whisperRealtimeDc) {
             try { this._whisperRealtimeDc.close(); } catch(e) {}
             this._whisperRealtimeDc = null;
@@ -994,107 +955,6 @@ class GameMode {
         if (this._whisperStream) {
             this._whisperStream.getTracks().forEach(t => t.stop());
             this._whisperStream = null;
-        }
-    }
-
-    /** Poll /whisper-status and update _whisperServerStatus. Returns a Promise. */
-    _checkWhisperServerStatus() {
-        // Static build: no server to poll. Status is derived from key-store at start();
-        // kept as a resolved no-op so any legacy caller/poller is inert.
-        return Promise.resolve();
-    }
-
-    _pollWhisperStatusThrottled(intervalMs) {
-        var now = Date.now();
-        intervalMs = intervalMs || 3000;
-        if (now < this._whisperNextStatusPollAt) return;
-        this._whisperNextStatusPollAt = now + intervalMs;
-        this._checkWhisperServerStatus();
-    }
-
-    _canDispatchWhisperChunk() {
-        var now = Date.now();
-        if (now < this._whisperBackoffUntil) return false;
-        if (this._isRealtimeWhisperProvider()) {
-            return !!(this._whisperServerStatus
-                && this._whisperServerStatus.state === 'ready'
-                && this._whisperRealtimeWs
-                && this._whisperRealtimeWs.readyState === WebSocket.OPEN);
-        }
-        return !!(this._whisperServerStatus && this._whisperServerStatus.state === 'ready');
-    }
-
-    _dropWhisperChunkNotReady() {
-        var state = this._whisperServerStatus ? this._whisperServerStatus.state : 'unknown';
-        if (state === 'loading') this._chunksDroppedWhileLoading++;
-        else this._chunksDroppedNotReady++;
-        this._pollWhisperStatusThrottled(state === 'loading' ? 2000 : 5000);
-    }
-
-    async _sendChunkToWhisper(float32) {
-        if (!this._canDispatchWhisperChunk()) {
-            this._dropWhisperChunkNotReady();
-            return;
-        }
-
-        this._chunksDispatched++;
-        if (this._isRealtimeWhisperProvider()) {
-            try {
-                var encoded = KaraokeeRealtimeWhisper.float32ToPcm16Base64(float32);
-                this._whisperRealtimeWs.send(JSON.stringify(KaraokeeRealtimeWhisper.buildAppendAudioEvent(encoded)));
-            } catch (_err) {
-                this._chunksFailedNetwork++;
-            }
-            return;
-        }
-
-        this._whisperInFlight++;
-        const wav = encodeWav(float32, 16000);
-        const dispatchedLineIdx = this.activeLineIdx;
-        try {
-            const resp = await fetch('/transcribe', {
-                method: 'POST',
-                body: wav,
-                headers: { 'Content-Type': 'audio/wav' },
-            });
-
-            if (resp.status === 503) {
-                this._chunksFailed503++;
-                var statusPayload = null;
-                try { statusPayload = await resp.json(); } catch (_jsonErr) {}
-                this._whisperServerStatus = {
-                    state: statusPayload && statusPayload.status ? statusPayload.status : 'loading',
-                    reason: statusPayload && statusPayload.error ? statusPayload.error : 'model not ready',
-                    provider: this._whisperServerStatus.provider || null,
-                    model: this._whisperServerStatus.model || null,
-                    checkedAt: Date.now()
-                };
-                this._whisperBackoffUntil = Date.now() + 5000;
-                this._pollWhisperStatusThrottled(5000);
-                return;
-            }
-            if (resp.status === 500) {
-                this._chunksFailed500++;
-                console.warn('[Whisper] transcription error (500) — continuing');
-                return;
-            }
-            if (!resp.ok) {
-                this._chunksFailed500++;
-                console.warn('[Whisper] unexpected HTTP', resp.status);
-                return;
-            }
-
-            const data = await resp.json();
-            this._chunksSucceeded++;
-            this._whisperServerStatus.state = 'ready'; // confirmed working
-            this._whisperBackoffUntil = 0;
-
-            this._handleWhisperTranscript(data.transcript, data.words || [], dispatchedLineIdx);
-        } catch (_err) {
-            this._chunksFailedNetwork++;
-            /* fire-and-forget — network errors are expected on flaky connections */
-        } finally {
-            this._whisperInFlight = Math.max(0, this._whisperInFlight - 1);
         }
     }
 
