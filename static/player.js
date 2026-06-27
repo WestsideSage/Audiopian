@@ -61,13 +61,9 @@ class GameMode {
         this._whisperTrackStatus  = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0, provider: null };
 
         // Whisper chunk telemetry counters
-        this._chunksDispatched          = 0;
         this._chunksSucceeded           = 0;
-        this._chunksFailed503           = 0;
         this._chunksFailed500           = 0;
-        this._chunksDroppedWhileLoading = 0;
         this._chunksFailedNetwork       = 0;
-        this._chunksDroppedNotReady     = 0;
         this._whisperResponses          = 0;
         this._whisperResponsesWithWords = 0;
         this._whisperWordsTotal         = 0;
@@ -297,13 +293,9 @@ class GameMode {
         this._energyThreshold = 0.01;
         this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null, provider: null, model: null };
         this._whisperTrackStatus = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0, provider: null };
-        this._chunksDispatched = 0;
         this._chunksSucceeded = 0;
-        this._chunksFailed503 = 0;
         this._chunksFailed500 = 0;
-        this._chunksDroppedWhileLoading = 0;
         this._chunksFailedNetwork = 0;
-        this._chunksDroppedNotReady = 0;
         this._whisperResponses = 0;
         this._whisperResponsesWithWords = 0;
         this._whisperWordsTotal = 0;
@@ -1416,13 +1408,9 @@ class GameMode {
         meta.whisperProvider       = this._whisperServerStatus ? this._whisperServerStatus.provider : null;
         meta.whisperModel          = this._whisperServerStatus ? this._whisperServerStatus.model : null;
         meta.whisperChunkCounters  = {
-            dispatched:          this._chunksDispatched          || 0,
             succeeded:           this._chunksSucceeded           || 0,
-            failed503:           this._chunksFailed503           || 0,
             failed500:           this._chunksFailed500           || 0,
             failedNetwork:       this._chunksFailedNetwork       || 0,
-            droppedWhileLoading: this._chunksDroppedWhileLoading || 0,
-            droppedNotReady:     this._chunksDroppedNotReady     || 0,
         };
         meta.whisperResponses          = this._whisperResponses          || 0;
         meta.whisperResponsesWithWords = this._whisperResponsesWithWords  || 0;
@@ -1650,15 +1638,11 @@ class GameMode {
         // Whisper server + track state
         const wSrv   = (this._whisperServerStatus && this._whisperServerStatus.state) || 'unknown';
         const wTrk   = (this._whisperTrackStatus  && this._whisperTrackStatus.state)  || 'idle';
-        const wDisp  = this._chunksDispatched          || 0;
         const wOk    = this._chunksSucceeded           || 0;
-        const w503   = this._chunksFailed503           || 0;
         const w500   = this._chunksFailed500           || 0;
         const wNet   = this._chunksFailedNetwork       || 0;
-        const wDrop  = this._chunksDroppedWhileLoading || 0;
-        const wNotReady = this._chunksDroppedNotReady  || 0;
         const wReason = (this._whisperTrackStatus && this._whisperTrackStatus.reason) ? ` | reason:${this._whisperTrackStatus.reason}` : '';
-        html += `<div class="dbg-row"><span class="dbg-label">Whisp </span>srv:${wSrv} trk:${wTrk} | sent:${wDisp} ok:${wOk} 503:${w503} 500:${w500} net:${wNet} drop:${wDrop} not-ready:${wNotReady}${wReason}</div>`;
+        html += `<div class="dbg-row"><span class="dbg-label">Whisp </span>srv:${wSrv} trk:${wTrk} | ok:${wOk} 500:${w500} net:${wNet}${wReason}</div>`;
         const dcState = this._whisperRealtimeDc ? this._whisperRealtimeDc.readyState : 'none';
         const pcState = this._whisperRealtimePc ? this._whisperRealtimePc.connectionState : 'none';
         html += `<div class="dbg-row"><span class="dbg-label">RT-W  </span>pc:${pcState} dc:${dcState} events:${this._whisperRealtimeEvents || 0} deltas:${this._whisperRealtimeDeltas || 0} complete:${this._whisperRealtimeCompletions || 0} commit:${this._whisperRealtimeCommitsSent || 0} fail:${this._whisperRealtimeFailures || 0}</div>`;

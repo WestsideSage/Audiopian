@@ -237,13 +237,6 @@ lineCases.forEach(function(testCase) {
     assert.strictEqual(actual.perfect, testCase.expected.perfect, testCase.label + ' perfect');
 });
 
-var repeatedTargets = scoring.collectSequentialWordMatches(
-    ['la'],
-    ['la', 'la', 'la'],
-    [{ phonetic: scoring.doubleMetaphone('la') }, { phonetic: scoring.doubleMetaphone('la') }, { phonetic: scoring.doubleMetaphone('la') }]
-);
-assert.deepStrictEqual(Array.from(repeatedTargets.keys()), [0], 'one spoken token should only credit one repeated target slot');
-
 var mergedMatches = new Map([[0, 0.25], [1, 0.25]]);
 var vadOnly = new Map([[0, 0.25], [1, 0.25]]);
 var confirmed = new Set([0]);

@@ -8,17 +8,8 @@ var fakeModule = { exports: {} };
 var fn = new Function('module', 'exports', code);
 fn(fakeModule, fakeModule.exports);
 
-var REVERSE_CONTRACTION_MAP = fakeModule.exports.REVERSE_CONTRACTION_MAP;
 var contractionsMatch = fakeModule.exports.contractionsMatch;
 var multiWordContractionMatch = fakeModule.exports.multiWordContractionMatch;
-
-// --- REVERSE_CONTRACTION_MAP ---
-// "going to" should reverse-map to "gonna"
-assert.strictEqual(REVERSE_CONTRACTION_MAP['going to'], 'gonna');
-assert.strictEqual(REVERSE_CONTRACTION_MAP['want to'], 'wanna');
-assert.strictEqual(REVERSE_CONTRACTION_MAP['got to'], 'gotta');
-assert.strictEqual(REVERSE_CONTRACTION_MAP['kind of'], 'kinda');
-assert.strictEqual(REVERSE_CONTRACTION_MAP['about to'], 'bouta');
 
 // --- contractionsMatch: spoken contraction vs full-form target ---
 // Lyric says "going", ASR says "gonna" — should match via contraction expansion

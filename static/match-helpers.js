@@ -174,19 +174,6 @@ function mishearingMatch(spoken, target) {
     return !!(subs && subs.indexOf(spoken) !== -1);
 }
 
-// --- Reverse Contraction Map (auto-generated) ---
-var REVERSE_CONTRACTION_MAP = {};
-(function() {
-    var seen = {};
-    for (var contraction in CONTRACTION_MAP) {
-        var expansion = CONTRACTION_MAP[contraction];
-        if (!seen[expansion]) {
-            REVERSE_CONTRACTION_MAP[expansion] = contraction;
-            seen[expansion] = true;
-        }
-    }
-})();
-
 // Pre-split expansions for multi-word matching lookups
 var _expansionIndex = {};
 (function() {
@@ -458,7 +445,6 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         buildLyricVocabulary: buildLyricVocabulary,
         CONTRACTION_MAP: CONTRACTION_MAP,
-        REVERSE_CONTRACTION_MAP: REVERSE_CONTRACTION_MAP,
         contractionsMatch: contractionsMatch,
         multiWordContractionMatch: multiWordContractionMatch,
         PHRASE_EQUIV_MAP: PHRASE_EQUIV_MAP,
