@@ -89,7 +89,6 @@ class GameMode {
         // Whisper Track 2 state
         this._whisperStream = null;
         this._whisperCtx    = null;
-        this._whisperNode   = null;
         this._whisperRealtimeWs = null;
         this._whisperRealtimePc = null;
         this._whisperRealtimeDc = null;
@@ -961,7 +960,6 @@ class GameMode {
             console.warn('[Whisper track] unavailable:', this._whisperTrackStatus.reason);
             this._whisperStream = null;
             this._whisperCtx    = null;
-            this._whisperNode   = null;
         }
     }
 
@@ -981,10 +979,6 @@ class GameMode {
         }
         this._whisperRealtimeSession = null;
         this._whisperRealtimeTranscript.clear();
-        if (this._whisperNode) {
-            this._whisperNode.disconnect();
-            this._whisperNode = null;
-        }
         if (this._whisperCtx) {
             this._whisperCtx.close();
             this._whisperCtx = null;
@@ -1208,23 +1202,6 @@ class GameMode {
         }
     }
 
-    // Resize the Whisper chunk for the new line's tempo. Extracted verbatim from the
-    // old setActiveLine _whisperNode.port.postMessage block (1201-1213). No-op when the
-    // realtime-Whisper provider is active (no AudioWorklet node / port).
-    _applyChunkTempo(tempoClass) {
-        if (this._whisperNode && this._whisperNode.port) {
-            this._whisperNode.port.postMessage({ type: 'flush' });
-            this._whisperNode.port.postMessage({
-                type: 'setChunkSize',
-                samples: getChunkSamples(tempoClass)
-            });
-            this._whisperNode.port.postMessage({
-                type: 'enableOverlap',
-                enabled: tempoClass === 'fast'
-            });
-        }
-    }
-
     // Dispatch the render-intent events returned by the scoring session to the existing
     // DOM/telemetry renderers. The session owns the scoring state machine and reads no
     // DOM/clock; the controller renders here. Each case maps 1:1 to the inline DOM the
@@ -1266,7 +1243,6 @@ class GameMode {
                 case 'transition': if (window._kDebug) this._logTransition(e.fromIdx, e.toIdx, e.trigger, e.fromText, e.matchedCount, e.total, e.missedWords, e.lineStartAudioTime, e.sourceCounts); break;
                 case 'resetSpans': this._resetLineSpans(e.lineIdx); break;
                 case 'wordSpans': this._updateWordSpans(); break;
-                case 'chunkTempo': this._applyChunkTempo(e.tempoClass); break;
             }
         }
     }

@@ -85,13 +85,6 @@ assert.strictEqual(classifyTempo(computeWps(12, 20, 21.5)), 'fast');
 // Edge: last line with audio.duration fallback (8s clamp)
 assert.strictEqual(classifyTempo(computeWps(4, 180, 188)), 'slow');
 
-// --- getChunkSamples ---
-var getChunkSamples = fakeModule.exports.getChunkSamples;
-assert.strictEqual(getChunkSamples('slow'), 32000);
-assert.strictEqual(getChunkSamples('normal'), 24000);
-assert.strictEqual(getChunkSamples('fast'), 10000); // 0.625s - lowered for lower realtime latency on dense verses
-assert.strictEqual(getChunkSamples('unknown'), 24000);
-
 // --- computeSongTempoProfile ---
 var computeSongTempoProfile = fakeModule.exports.computeSongTempoProfile;
 

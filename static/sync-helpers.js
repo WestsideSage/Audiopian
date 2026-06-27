@@ -78,20 +78,6 @@ function getScoreDelay(tempoClass) {
 }
 
 /**
- * Return AudioWorklet chunk target (samples at 16kHz) for a tempo class.
- * @param {'slow'|'normal'|'fast'} tempoClass
- * @returns {number}
- */
-function getChunkSamples(tempoClass) {
-    switch (tempoClass) {
-        case 'slow':   return 32000; // 2.0s
-        case 'fast':   return 10000; // 0.625s — smaller chunk on fast tempo so the realtime recognizer commits sooner (less of the "catching up" lag on dense verses); realtime keeps context server-side
-        case 'normal': // fall through
-        default:       return 24000; // 1.5s
-    }
-}
-
-/**
  * Compute per-song tempo distribution from all interpolated line timings.
  * Returns percentile thresholds for slow/medium/fast classification.
  * @param {Array} allWordTimings - array of line timing arrays, each with .wps property
@@ -141,5 +127,5 @@ function getSpokenWindowSize(tempoClass) {
 
 // Node.js exports for testing; browser ignores this
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getAdjustedOverlapDuration, getScoreDelay, getChunkSamples, computeSongTempoProfile, classifyLineTempoRelative, getSpokenWindowSize };
+    module.exports = { classifyTempo, getWindowParams, getOverlapDuration, getAdjustedOverlapDuration, getScoreDelay, computeSongTempoProfile, classifyLineTempoRelative, getSpokenWindowSize };
 }

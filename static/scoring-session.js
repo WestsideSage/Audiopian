@@ -135,8 +135,8 @@
     // final pass BEFORE resetLineState (deferral-closure #1: credits a pre-boundary
     // final to the outgoing line), (3) build prevLine overlay with overlapEnd in media
     // seconds (NOT wall-clock ms) — setTimeout DELETED (tick-driven), (4) transition
-    // diagnostic event, (5) resetLineState + new-line setup with chunkTempo and
-    // resetSpans events (DOM/port calls DELETED).
+    // diagnostic event, (5) resetLineState + new-line setup with resetSpans events
+    // (DOM/port calls DELETED).
     function setActiveLine(s, lineIdx, now) {
         var events = [];
         var nowSec = isFinite(now) ? now : 0;
@@ -224,11 +224,6 @@
         s.currentParams = (s.wordTimings && s.wordTimings.tempoClass)
             ? getWindowParams(s.wordTimings.tempoClass)
             : getWindowParams('normal');
-
-        // _whisperNode.port.postMessage block (1201-1213) DELETED — emit chunkTempo
-        // event so controller can message the worklet.
-        var tempoClass = (s.wordTimings && s.wordTimings.tempoClass) || 'normal';
-        ev(events, 'chunkTempo', { tempoClass: tempoClass });
 
         if (lineIdx < 0 || lineIdx >= s.lyrics.length) {
             s.lineWords = [];
