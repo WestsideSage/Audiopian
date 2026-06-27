@@ -529,7 +529,7 @@
                 <button class="diff-gate-listen ctrl-btn" id="micCheckBtn" type="button" style="margin-top:6px;">🎤 Check your mic</button>
                 <div id="micCheckPanel" style="display:none">
                     <div class="mc-instr">Read this aloud:</div>
-                    <div class="mc-phrase" id="micCheckPhrase">“The quick brown fox jumps over the lazy dog”</div>
+                    <div class="mc-phrase">“The quick brown fox jumps over the lazy dog”</div>
                     <div class="mc-meter"><div class="mc-meter-fill" id="micMeterFill"></div></div>
                     <div class="mc-heard" id="micCheckHeard"></div>
                     <div class="mc-verdict" id="micCheckVerdict">Listening…</div>
@@ -577,9 +577,9 @@
 
     <div class="controls">
         <button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">🎮 Game</button>
-        <button class="ctrl-btn" id="skipBackBtn" onclick="skipBack()">⏮</button>
+        <button class="ctrl-btn" onclick="skipBack()">⏮</button>
         <button class="ctrl-btn" id="playBtn" onclick="togglePlay()">▶</button>
-        <button class="ctrl-btn" id="skipFwdBtn" onclick="skipFwd()">⏭</button>
+        <button class="ctrl-btn" onclick="skipFwd()">⏭</button>
         <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
         <div id="time-display">0:00 / 0:00</div>
         <span style="font-size:0.8rem;color:#aaa">🔊</span>
