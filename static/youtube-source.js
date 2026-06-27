@@ -1,6 +1,6 @@
 /**
  * YouTube IFrame implementation of the playback-source contract (see
- * static/playback-source.js). The spike (spikes/youtube-clock/NOTES.md) proved
+ * static/playback-source.js). A clock-precision spike (verdict folded into ADR-0002) proved
  * getCurrentTime() is frame-grained and smoother than <audio>.currentTime, so the
  * clock is player.getCurrentTime() with NO performance.now() interpolation layer.
  */
