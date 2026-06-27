@@ -2,9 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Prime Directives
+
+    1. Ask, don't assume. If something is unclear, ask before writing a single line. Never make silent assumptions about intent, architecture, or requirements. When running unattended, pick the most reasonable interpretation, proceed, and record the assumption rather than blocking.
+
+    2. Implement the simplest solution for simple problems, better solutions for harder problems. Do not over-engineer or add flexibility that isn't needed yet. 
+
+    3. Don't touch unrelated code but please do surface bad code or design smells you discover with me so we can address them as a separate issue.
+
+    4. Flag uncertainty explicitly. If you're unsure about something, see point 1 above. If it makes sense to do so, conduct a small, localised and low-risk experiment and bring the hypothesis and results to me to discuss. Confidence without certainty causes more damage than admitting a gap.
+
+    5. I'm always open to ideas on better ways to do things. Please don't hesitate to suggest a better way, or one that has long lasting impact over a tactical change. (as a few examples)
+
 ## Commands
 
 ### Run the app
+
 ```bash
 python app.py
 # Or with debug mode:
@@ -12,6 +25,7 @@ FLASK_DEBUG=1 python app.py
 ```
 
 ### Run Python tests
+
 ```bash
 python -m pytest tests/test_app.py tests/test_downloader.py tests/test_lyrics.py -v
 # Single test file:
@@ -21,6 +35,7 @@ python -m pytest tests/test_app.py::test_transcribe_returns_transcript -v
 ```
 
 ### Run JS tests
+
 ```bash
 node tests/test_match_helpers.cjs
 node tests/test_sync_helpers.cjs
@@ -32,6 +47,7 @@ node tests/test_telemetry_helpers.cjs
 ```
 
 ### Whisper / transcription configuration (environment variables)
+
 ```bash
 WHISPER_PROVIDER=auto          # auto|local (faster-whisper) | openai | openai_realtime (gpt-realtime-whisper, browser-streamed)
 OPENAI_API_KEY=...             # required for the openai / openai_realtime providers
@@ -46,7 +62,9 @@ WHISPER_CPU_COMPUTE=int8       # for CPU fallback
 ## Architecture
 
 ### Backend (Python/Flask — `app.py`)
+
 Single-file Flask server with these responsibilities:
+
 - **`/`** / **`/player`** — serve `static/index.html` (search/load UI) and `static/player.html` (the karaoke player)
 - **`/load`** — accepts a YouTube URL; returns JSON with `title`/`artist`/**`videoId`**/`audioUrl`/`lyrics` (lyrics via `lyrics.py`). The browser plays the backing track **client-side via the YouTube IFrame player** (from `videoId`); `audioUrl` is always `/audio` but is read **only by the local `<audio>` fallback** (the IFrame path ignores it). The server **does not download audio by default** — set `KARAOKEE_SERVER_AUDIO=1` (dev) to re-enable the `yt-dlp` download to `temp/audio.*` for that `<audio>` path. (See ADR-0002 + `static/youtube-source.js`.)
 - **`/load-local`** — multipart upload of a local audio file + lyrics by title/artist (saved to `temp/audio.<ext>`); lets the app run/test without YouTube
@@ -63,12 +81,15 @@ Single-file Flask server with these responsibilities:
 **Whisper lifecycle:** The local model prewarms in a background thread on the first HTTP request (`_ensure_prewarm`). CUDA load failures automatically fall back to CPU. Runtime CUDA errors during transcription trigger `_switch_whisper_to_cpu`. For `openai_realtime`, `_mark_openai_realtime_ready()` flips state to `ready` without loading a local model. Module-level globals (`_whisper_model`, `_whisper_state`, `_whisper_error`, `_whisper_active_provider`, etc.) are protected by `_whisper_lock`. Tests that touch these globals must save/restore them (see `test_app.py` patterns with `orig_state`/`finally` blocks).
 
 ### Lyrics pipeline (`lyrics.py`)
+
 Fetches time-synced LRC lyrics from lrclib.net. Scores candidates by title/artist token overlap + duration proximity + synced-lyrics bonus. `parse_lrc()` converts LRC format to `[{time: float, text: str}]` list, dropping non-lyric speaker labels / section headers (mirrors `static/lyric-annotations.js`; the deployed path filters client-side in `lyrics-client.js parseLrc`).
 
 ### Downloader (`downloader.py`)
+
 Wraps yt-dlp: `extract_metadata()` (no download — returns `title`/`artist`/`duration`/**`id`**), `download_audio()` (saves to `temp/audio.webm` — **dev-only now**: `/load` calls it only when `KARAOKEE_SERVER_AUDIO=1`), `search_youtube()`. Artist/title are parsed from the YouTube title using ` - ` split or explicit `artist` tag.
 
 ### Frontend (plain HTML/JS — `static/`)
+
 No build step; files are served directly by Flask.
 
 - **`player.js`** — main karaoke controller (DOM, playback, lyric scrolling, mic capture, game mode, HUD). Playback goes through a **source-agnostic `playback` adapter** (`playback-source.js`): a YouTube IFrame source when `songData.videoId` is present, else an `<audio>` source for uploaded local files. Orchestration and rendering only: it feeds events into `KaraokeeScoringSession` (see `scoring-session.js`) and renders the session's emitted events via `_renderEvents`. The scoring state machine itself (match→reconcile→score→commit) lives in `scoring-session.js`.
@@ -98,9 +119,11 @@ No build step; files are served directly by Flask.
 *(The former `audio-processor.js` AudioWorklet `chunk-processor` was removed: it was never loaded on the deployed build — VAD energy reads from the `AnalyserNode` and the realtime path streams mic audio over WebRTC, so the worklet chunk path was dead. Its `getChunkSamples` tempo helper went with it.)*
 
 ### JS helper isolation pattern
+
 The helper modules above (`scoring.js`, `phrase-engine.js`, `scoring-arcade.js`, `scoring-session.js`, `match-helpers.js`, `sync-helpers.js`, `vad-helpers.js`, `telemetry-helpers.js`, `lyric-paint-helpers.js`, `realtime-whisper.js`, `commit-helpers.js`, `browser-support.js`, `share-card.js`, `alternatives.js`, `profanity.js`, `metadata-clean.js`, `lyric-annotations.js`, `mic-check-helpers.js`, `playback-gate.js`, `playback-source.js`, `youtube-source.js`) use a UMD wrapper, so they can be `require()`d by the `.cjs` test files in `tests/` **and** loaded as `<script>` globals in the browser. Most are pure (no DOM/AudioContext); the playback sources are thin adapters tested via dependency injection (a fake `<audio>` element / a fake `YT` API). `player.js` is the only DOM-bound file. When adding logic, prefer a pure helper module (with a `.cjs` test) over growing `player.js`, and preserve Node.js compatibility.
 
 ### Telemetry
+
 Each completed run auto-saves a JSON to `output_telemetry/<date>/` via `POST /telemetry` (Flask writes it; the client builds it in `player.js` `_buildTelemetryPayload`, called on song-end and on stop). Schema v2 (`meta.schemaVersion: 2`) adds a `summary` block (final scores, arcade outcome, recognizer attribution, sync drift, and a cheese/honesty correlation) and an `arcade` block (per-phrase commit events + high score). Lean by default; the heavy raw arrays (`asr`/`matches`/`promotions`/`phraseEngine.traces`) are included only when debug is on (press `D`). The `summary` digest is derived by the pure `static/telemetry-helpers.js` (`summarizeRun`, golden-tested in `tests/test_telemetry_helpers.cjs`). For offline analysis of scoring honesty/economy and timing drift — not part of the production serving path.
 
 ## Key constraints
