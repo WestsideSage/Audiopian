@@ -32,8 +32,13 @@ var base = {
     arcadeSummary: { points: 8400, maxMultiplier: 6, longestStreak: 9, perfects: 4, clears: 2 },
     grade: 'B',
     phraseTraces: [
-        trace('confirmed', ['whisper', 'whisper', 'browser_sr']),
-        trace('confirmed', ['browser_sr', 'browser_sr']),
+        // Real production source labels: browser_final / browser_interim (each gains a
+        // '_reconciled' suffix when credited by the post-line reconcile pass), plus
+        // whisper / vad. Production NEVER puts the bare 'browser_sr' label on a consumed
+        // token (that string is only used on promotion render events), so clearsBySource
+        // must normalize these into the three canonical recognizer buckets.
+        trace('confirmed', ['whisper', 'whisper', 'browser_final']),         // whisper dominant (2 vs 1)
+        trace('confirmed', ['browser_final', 'browser_interim_reconciled']), // both -> browser_sr
         trace('partial', ['vad']),
         trace('missing', [])
     ],
@@ -46,13 +51,20 @@ var base = {
 var s = T.summarizeRun(base);
 assert.deepStrictEqual(s.phraseOutcomes, { cleared: 2, partial: 1, missed: 1, total: 4 }, 'outcome tally');
 
-// --- clearsBySource: dominant source per cleared phrase ---
-// phrase 1 -> whisper (2 vs 1); phrase 2 -> browser_sr (2). partial/missing excluded.
-assert.deepStrictEqual(s.recognizer.clearsBySource, { whisper: 1, browser_sr: 1, vad: 0 }, 'dominant source per clear');
+// --- clearsBySource: dominant source per cleared phrase, normalized to canonical buckets ---
+// phrase 1 -> whisper (2 whisper vs 1 browser); phrase 2 -> browser_sr (browser_final +
+// browser_interim_reconciled both normalize to browser_sr). partial/missing excluded.
+assert.deepStrictEqual(s.recognizer.clearsBySource, { whisper: 1, browser_sr: 1, vad: 0 }, 'dominant source per clear (normalized)');
 assert.deepStrictEqual(s.recognizer.finalWordSourceCounts, base.finalWordSourceCounts, 'final word source counts passthrough');
 
+// A clear credited entirely by the reconcile pass ('<src>_reconciled') still attributes
+// to its base recognizer — the suffix must be stripped, not dropped (the real-world case:
+// browser_interim_reconciled dominates most clears).
+var reconciled = Object.assign({}, base, { phraseTraces: [trace('confirmed', ['browser_interim_reconciled', 'browser_final_reconciled'])] });
+assert.deepStrictEqual(T.summarizeRun(reconciled).recognizer.clearsBySource, { whisper: 0, browser_sr: 1, vad: 0 }, 'reconciled browser clear attributes to browser_sr');
+
 // --- clearsBySource tie-break: whisper > browser_sr > vad ---
-var tie = Object.assign({}, base, { phraseTraces: [trace('confirmed', ['browser_sr', 'whisper'])] });
+var tie = Object.assign({}, base, { phraseTraces: [trace('confirmed', ['browser_final', 'whisper'])] });
 assert.strictEqual(T.summarizeRun(tie).recognizer.clearsBySource.whisper, 1, 'tie breaks to whisper');
 
 // --- sync ---

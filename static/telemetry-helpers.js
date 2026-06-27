@@ -14,6 +14,21 @@
     // Source preference for breaking clearsBySource ties.
     var SOURCE_RANK = { whisper: 3, browser_sr: 2, vad: 1 };
 
+    // Map a raw consumed-token source to one of the three canonical recognizer buckets.
+    // Production emits browser_final / browser_interim (each gaining a '_reconciled' suffix
+    // when credited by the post-line reconcile pass), plus whisper / vad — it never puts the
+    // bare 'browser_sr' label on a consumed token (that string is only used on promotion
+    // render events). Without this normalization every browser-sourced clear fell through
+    // the fixed {whisper,browser_sr,vad} buckets and clearsBySource read all-zero.
+    function normalizeSource(src) {
+        if (!src) return null;
+        var base = String(src).replace(/_reconciled$/, '');
+        if (base === 'whisper') return 'whisper';
+        if (base === 'vad') return 'vad';
+        if (base === 'browser_final' || base === 'browser_interim' || base === 'browser_sr') return 'browser_sr';
+        return null;
+    }
+
     function median(nums) {
         if (!nums || nums.length === 0) return null;
         var arr = nums.slice().sort(function (a, b) { return a - b; });
@@ -24,7 +39,7 @@
     function dominantSource(consumedTokens) {
         var counts = {};
         (consumedTokens || []).forEach(function (t) {
-            var s = t && t.source;
+            var s = normalizeSource(t && t.source);
             if (!s) return;
             counts[s] = (counts[s] || 0) + 1;
         });
