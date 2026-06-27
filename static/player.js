@@ -21,17 +21,8 @@ function _songKey() {
 // bound from window.KaraokeeScoring below.
 
 var scoringHelpers = window.KaraokeeScoring;
-var editDistance = scoringHelpers.editDistance;
-var doubleMetaphone = scoringHelpers.doubleMetaphone;
-var wordsMatch = scoringHelpers.wordsMatch;
-var wordsMatchScore = scoringHelpers.wordsMatchScore;
 var normalizeWord = scoringHelpers.normalizeWord;
-var normalizeWords = scoringHelpers.normalizeWords;
-var estimateSyllables = scoringHelpers.estimateSyllables;
 var interpolateWordTimings = scoringHelpers.interpolateWordTimings;
-var computeLineScore = scoringHelpers.computeLineScore;
-var mergeConfirmedMatches = scoringHelpers.mergeConfirmedMatches;
-var findMatchInWindow = scoringHelpers.findMatchInWindow;
 
 class GameMode {
     constructor() {
@@ -45,14 +36,10 @@ class GameMode {
         this.vadMatchedSet  = new Map(); // indices matched via VAD (optimistic)
         this.asrConfirmedSet = new Set(); // VAD-matched words later confirmed by ASR
         this.wordSourceMap     = new Map(); // word index -> vad | browser_sr | whisper
-        this.transcript        = '';      // accumulated final transcript (never reset)
         this.transcriptWords   = [];      // normalized final transcript cached at append time
         this.lineStartWordCount = 0;      // word count in transcript when current line started
         this.lineStartTranscriptPos = 0;  // transcript word index when current line started (fence)
         this.latestInterim     = '';      // most recent interim, used to anchor fast-song lines
-
-        // ASR activity tracking (zero-ASR line fencing)
-        this.lineHadAsrEvent = false;
 
         // Recognition watchdog
         this._lastResultTime = 0;
@@ -66,7 +53,6 @@ class GameMode {
         this._whisperRealtimeSession = null;
         this._whisperRealtimeTranscript = new Map();
         this._whisperRealtimeCallsUrl = 'https://api.openai.com/v1/realtime/calls';
-        this.whisperBuffer  = '';
 
         // Whisper server state (provider/model derived from the key-store at game start)
         this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null, provider: null, model: null };
@@ -94,12 +80,10 @@ class GameMode {
         this._whisperRealtimeLastEvent  = '';
         this._whisperRealtimeLastError  = '';
         this._lastWhisperTranscriptText = '';
-        this._lastWhisperTranscriptAt   = null;
 
         // Diagnostic
         this._dbBuf = [];
         this._telemetry = null;   // populated by _initTelemetry() when debug mode is on
-        this._lineStartAudioTime = null;
         this._phrasePlan = null;
         this._phraseSession = null;
         this._phraseDifficulty = 'medium';
@@ -129,7 +113,6 @@ class GameMode {
         this._mcStream = null; this._mcCtx = null; this._mcAnalyser = null; this._mcBuf = null; this._mcRecog = null;
         this._commitState = null;        // KaraokeeCommitHelpers state machine
         this._vadInitError = null;       // last neural-VAD init error (telemetry/HUD)
-        this.currentParams = getWindowParams('normal'); // adaptive window params for active line
 
         this.lrcOffset = 0;   // seconds to add to all LRC timestamps (positive = delay lyrics)
         this._suspended = false;
@@ -269,11 +252,8 @@ class GameMode {
         this.lineStartWordCount = this.transcriptWords.length;
         this.lineStartTranscriptPos = this.lineStartWordCount;
         this.hotWordIndex = -1;
-        this.whisperBuffer = '';
-        this.lineHadAsrEvent = false;
         this._lineComparisonCount = 0;
         this._telemetryLoggedMatches = new Set();
-        this._lineStartAudioTime = lineStartAudioTime;
         if (discardPrevLine) this.prevLine = null;
     }
 
@@ -285,7 +265,6 @@ class GameMode {
         this.activeLineIdx = -1;
         this.lineWords = [];
         this._resetLineState(0, true);
-        this.transcript = '';
         this.transcriptWords = [];
         this.lineStartWordCount = 0;
         this.lineStartTranscriptPos = 0;
@@ -336,7 +315,6 @@ class GameMode {
         this._whisperRealtimeLastEvent = '';
         this._whisperRealtimeLastError = '';
         this._lastWhisperTranscriptText = '';
-        this._lastWhisperTranscriptAt = null;
         this.allWordTimings = [];
         this.songTempoProfile = null;
     }
@@ -724,7 +702,6 @@ class GameMode {
             this._chunksSucceeded++;
             this._whisperRealtimeCompletions++;
             this._lastWhisperTranscriptText = transcript;
-            this._lastWhisperTranscriptAt = performance.now();
             this._handleWhisperTranscript(transcript, [], null);
             return;
         }
@@ -767,7 +744,6 @@ class GameMode {
         if (words && words.length > 0) {
             this._whisperResponsesWithWords++;
             this._whisperWordsTotal += words.length;
-            this._lastWhisperWords = words;
         }
     }
 
@@ -2082,7 +2058,6 @@ function fmt(s) {
 
 // Suppress autoplay while loading overlay is active
 let overlayDismissed = false;
-let prepTimer = null;
 
 // Wire the source's lifecycle callbacks once the source exists (called from both load
 // paths). gameMode.suspend()/resume() are guarded no-ops (idempotent + side-effect-light),
@@ -2285,15 +2260,11 @@ function _runCountIn(d) {
 // Escape hatch \u2014 passive karaoke, no scoring.
 function justListen() {
     if (!playback || !_playbackReady) return;   // wait for onReady (gesture-initiated play)
-    clearInterval(prepTimer);
     overlayDismissed = true;
     gameMode._stopMicCheck();
     document.getElementById('prepOverlay').style.display = 'none';
     Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
 }
-
-// Back-compat shim (existing callers): behaves like "just listen".
-function skipPrep() { justListen(); }
 
 // Wire the gate cards once.
 (function initDifficultyGate() {

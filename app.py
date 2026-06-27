@@ -8,7 +8,7 @@ import threading
 from datetime import datetime, timezone
 import requests
 from flask import Flask, request, jsonify, send_file, send_from_directory
-from downloader import extract_metadata, download_audio, AUDIO_PATH, TEMP_DIR, search_youtube
+from downloader import extract_metadata, download_audio, TEMP_DIR, search_youtube
 from lyrics import fetch_lyrics
 
 _HERE = os.path.dirname(os.path.abspath(__file__))

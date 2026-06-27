@@ -223,9 +223,6 @@ button:disabled { background: var(--surface-2); color: var(--text-faint); cursor
 /* ============================================================
    Search feature (kept; tokenised)
    ============================================================ */
-.search-row { display: flex; gap: 8px; margin-bottom: 18px; }
-.search-row input { flex: 1; margin-bottom: 0; }
-.search-row button { width: auto; padding: 10px 16px; font-size: .9rem; }
 
 .search-results {
     background: var(--surface-2);
