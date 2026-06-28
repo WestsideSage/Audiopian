@@ -35,14 +35,14 @@ Non-negotiables carried in from the existing architecture: **no build step** (pl
 
 **Token groups** (representative values — final hues tuned in implementation against Geist):
 
-- **Neutral ramp:** `--gray-0 … --gray-1000` (low-chroma). Dark theme maps surfaces/text/borders onto it; light theme overrides. Every hardcoded grey in `player.html` (`#4b4e60`, `#6c6f82`, `#aaa`, `#ccc`, `#666`, `#555`, `#fff`) remaps onto this ramp.
+- **Neutral ramp:** `--gray-50 … --gray-900` (low-chroma). Dark theme maps surfaces/text/borders onto it; light theme overrides. Every hardcoded grey in `player.html` (`#4b4e60`, `#6c6f82`, `#aaa`, `#ccc`, `#666`, `#555`, `#fff`) remaps onto this ramp.
 - **Semantic aliases:** `--bg`, `--bg-elev`, `--surface`, `--surface-2`, `--text`, `--text-dim`, `--text-faint`, `--border`, `--border-strong`, `--bg-wash` (kills the 3×-duplicated background wash).
 - **Two accent identities (intentionally distinct):**
   - **Brand** = cyan→magenta. Used *sparingly*: active key-word, logo dot, focus ring, primary CTA accent. A single canonical gradient angle (no more 96/95/135/90deg copies).
   - **Fire** = warm red→orange→gold. Used **only** in the on-fire state, so "on fire" is visually its own event, never confused with the normal brand accent.
 - **Scoring colors:** `--key` (key-word cyan), `--matched` (green), `--partial` (amber), `--missed` (red) — promoted to real tokens and actually consumed (the current `--key` is defined but unused).
 - **Type scale:** `--text-xs … --text-3xl` + `--font-display` (Space Grotesk), `--font-text` (Inter), `--font-mono` (replaces the debug HUD's hardcoded Courier New). Consolidates the ~25 ad-hoc rem sizes and the 3 near-duplicate "tiny uppercase label" treatments.
-- **Spacing scale:** 4px base (`--space-1 … --space-12`); replaces 100% literal px.
+- **Spacing scale:** 4px base (`--space-1 … --space-8`); replaces 100% literal px.
 - **Radius:** one language (`--r-sm`, `--r`, `--r-lg`, `--r-pill`); player's hardcoded 7/8/999px adopt it.
 - **Shadows:** `--shadow-card`, `--shadow-modal`, `--glow`; replaces copy-pasted `0 24px 60px rgba(0,0,0,.5)` literals.
 - **Motion:** `--dur-fast/-base/-slow`, `--ease-out`, `--ease-spring`; plus a **global `@media (prefers-reduced-motion: reduce)`** guard (none exists today anywhere).

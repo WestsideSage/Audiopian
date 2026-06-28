@@ -130,9 +130,9 @@ Create `static/word-fill-helpers.js`:
         var start = word.start;
         var end = word.end;
         if (typeof start !== 'number' || typeof end !== 'number') return 0;
+        if (end <= start) return nowSec < start ? 0 : 1;  // zero/neg duration: step (must precede <=start guard)
         if (nowSec <= start) return 0;
         if (nowSec >= end) return 1;
-        if (end <= start) return nowSec < start ? 0 : 1;
         return clamp01((nowSec - start) / (end - start));
     }
 
@@ -232,18 +232,18 @@ git commit -m "feat(word-fill): load word-fill-helpers global in the player"
 ## Task 3: CSS — render `--fill` as a left-to-right sweep on unresolved word spans
 
 **Files:**
-- Modify: the player word-span CSS. In Phase 0 this block was extracted from `player.html`'s inline `<style>` into `static/style.css` under the "Player page" section. **Locate it by the stable selector `.word-span` (the `display: inline-block; color: #4b4e60;` rule)**, wherever it now lives (`static/style.css` if Phase 0 landed; otherwise the inline `<style>` in `player.html`). Edit it in its current home.
+- Modify: the player word-span CSS. In Phase 0 this block was extracted from `player.html`'s inline `<style>` into `static/style.css` under the "Player page" section. **Locate it by the stable selector `.word-span`** (Phase 1 remapped its color to `var(--text-faint)`, so match the selector, not a color literal), wherever it now lives (`static/style.css` if Phase 0 landed; otherwise the inline `<style>` in `player.html`). Edit it in its current home.
 
 This adds the gradient sweep **without touching** the existing `.matched` / `.matched-partial` / `.missed` rules, and scopes it so it only applies to spans that the scorer has **not** resolved yet. The sweep is keyed off a `--fill` custom property (default 0) and a base/fill color pair.
 
 - [ ] **Step 1: Add the fill-color tokens to the player word-span base rule**
 
-Find the `.word-span` base rule (anchor: `display: inline-block;` + `color: #4b4e60;`):
+Find the `.word-span` base rule (anchor: `display: inline-block;` + `color: var(--text-faint);`):
 
 ```css
         .word-span {
             display: inline-block;
-            color: #4b4e60;
+            color: var(--text-faint);
             transition: color 0.15s, text-shadow 0.15s;
             cursor: default;
         }
@@ -254,13 +254,13 @@ Replace it with (adds a `--fill` default and a local fill-color var; keeps the e
 ```css
         .word-span {
             display: inline-block;
-            color: #4b4e60;
+            color: var(--text-faint);
             /* Progressive fill: 0..1 written per-frame by player.js _paintWordFill.
                Default 0 so a span with no fill paints exactly as before. */
             --fill: 0;
             /* The color the sweep reveals as a word's window passes (cyan key cue
                for key words is overridden below; non-key words sweep to text white). */
-            --fill-color: #e7e9f2;
+            --fill-color: var(--text);
             transition: color 0.15s, text-shadow 0.15s;
             cursor: default;
         }
@@ -304,7 +304,7 @@ Immediately **after** the `.lyric-line.active .word-span.key-word:not(.matched):
 
 - [ ] **Step 3: Correct the sweep so the unfilled remainder stays grey (not invisible)**
 
-`background-clip:text` paints text from the gradient; `transparent` stops would hide the not-yet-filled letters. Replace the rule you just added in Step 2 with this version, which sweeps from `--fill-color` to the base grey `#4b4e60` (so the word is always fully legible, the front portion just turns the fill color):
+`background-clip:text` paints text from the gradient; `transparent` stops would hide the not-yet-filled letters. Replace the rule you just added in Step 2 with this version, which sweeps from `--fill-color` to the base grey `var(--text-faint)` (so the word is always fully legible, the front portion just turns the fill color):
 
 ```css
         /* ── Word-by-word fill (Phase 3) ──────────────────────────────
@@ -320,8 +320,8 @@ Immediately **after** the `.lyric-line.active .word-span.key-word:not(.matched):
                 90deg,
                 var(--fill-color) 0%,
                 var(--fill-color) calc(var(--fill) * 100%),
-                #4b4e60 calc(var(--fill) * 100%),
-                #4b4e60 100%
+                var(--text-faint) calc(var(--fill) * 100%),
+                var(--text-faint) 100%
             );
             -webkit-background-clip: text;
             background-clip: text;
@@ -334,7 +334,7 @@ Immediately **after** the `.lyric-line.active .word-span.key-word:not(.matched):
         }
 ```
 
-> Note: with `--fill: 0` (the default for any span the loop hasn't painted, e.g. on a non-reduced-motion machine before the rAF loop touches a span), the gradient is `#4b4e60` across the whole word — visually identical to today's grey. So even an un-painted active line looks unchanged.
+> Note: with `--fill: 0` (the default for any span the loop hasn't painted, e.g. on a non-reduced-motion machine before the rAF loop touches a span), the gradient is `var(--text-faint)` across the whole word — visually identical to today's grey. So even an un-painted active line looks unchanged.
 
 - [ ] **Step 4: Preview-verify the sweep mechanically (before wiring the loop)**
 
@@ -485,9 +485,11 @@ In `static/player.js`, immediately **after** the `_activeLineFillWords(lineIdx) 
         var nowSec = playback ? playback.currentTime() : 0;
         var fills = window.KaraokeeWordFill.lineFillProgress(words, nowSec);
         var spans = lineEl.querySelectorAll('.word-span');
-        // The DOM span list and the timing list are the same 1:1 word sequence
-        // (renderLyricsGameMode filters with normalizeWord().length, exactly as
-        // interpolateWordTimings splits the line), so index alignment holds.
+        // The DOM span list and the timing list are *usually* the same word
+        // sequence, but can drift if a token normalizes to empty (renderLyrics-
+        // GameMode drops normalizeWord().length===0 tokens; interpolateWordTimings
+        // keeps every token). Math.min below bounds the pairing, and the sweep is
+        // render-only, so any drift is cosmetic — never a scoring effect.
         var n = Math.min(spans.length, fills.length);
         for (var i = 0; i < n; i++) {
             var span = spans[i];

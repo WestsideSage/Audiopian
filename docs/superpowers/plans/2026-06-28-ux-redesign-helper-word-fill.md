@@ -174,9 +174,10 @@ Create `static/word-fill-helpers.js`:
     function wordFillProgress(word, nowSec) {
         var start = word.start;
         var end = word.end;
-        if (nowSec <= start) return 0;
         // Zero or negative duration: no ramp to interpolate -> step at start.
-        if (end <= start) return 1;
+        // MUST run before the <= start guard so nowSec === start steps to 1 (per contract).
+        if (end <= start) return nowSec < start ? 0 : 1;
+        if (nowSec <= start) return 0;
         if (nowSec >= end) return 1;
         var p = (nowSec - start) / (end - start);
         if (p < 0) return 0;

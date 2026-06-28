@@ -92,6 +92,7 @@ These are the seams between plans. Each is already noted inside the relevant pla
 - [x] Phase 0 plan written
 - [x] H1 / H2 / H3 helper plans written
 - [x] Phase 1 / 2 / 3 plans written
+- [x] Adversarial verification pass (8 reviewers, high effort) — 2 blockers + 6 majors found and fixed (word-fill guard order, share-card/word-span seam de-staling, Phase 1 emoji coverage, spec token-name reconcile)
 - [ ] Wave A executed (Phase 0 + H1 + H2 + H3)
 - [ ] Wave B executed (Phase 1)
 - [ ] Wave C executed (Phase 2)

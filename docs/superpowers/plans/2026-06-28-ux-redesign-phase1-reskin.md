@@ -1917,10 +1917,10 @@ function togglePlay() {
 
 `player.js` sets the play button glyph in several places (the seek/play helpers, count-in, prep). Replace each:
 
-- `playBtn.textContent = '⏸';` → `_setPlayIcon(true);`
-- `playBtn.textContent = '▶';` → `_setPlayIcon(false);`
-- `playBtn.textContent = '⏸';` → `_setPlayIcon(true);`
-- `playBtn.textContent = '▶';` → `_setPlayIcon(false);`
+- Pause set → `_setPlayIcon(true);` — the pause glyph appears in source **two ways**: the literal character `playBtn.textContent = '⏸';` and a backslash-`u` unicode-escape sequence with the same codepoint (`⏸`). Replace **both** spellings.
+- Play set → `_setPlayIcon(false);` — likewise the play glyph appears as a literal `playBtn.textContent = '▶';` and as a unicode-escape with the same codepoint (`▶`). Replace **both** spellings.
+
+The `grep -n "playBtn.textContent"` check in the next step is the source of truth — it matches every glyph/escape form, so a clean grep proves all were migrated.
 
 Find each occurrence with:
 
@@ -2564,13 +2564,17 @@ python -m pytest tests/test_app.py tests/test_downloader.py tests/test_lyrics.py
 
 Expected: PASS.
 
-- [ ] **Step 3: Grep for residual emoji/entity icons + stale strings**
+- [ ] **Step 3: Swap the last dev-only glyph, then grep for residual emoji/entity icons + stale strings**
+
+First, swap the dev-only Load-Local button glyph that no earlier task touches. In `static/index.html`, `#loadLocalBtn` reads `🎵 Load Local File`; replace the `🎵 ` prefix with the Lucide `music` inline-SVG (the glyph defined in this plan's icon reference) followed by the text — e.g. `<svg …>…</svg> Load Local File`. (The button is hidden on non-localhost, but the spec's "no emoji" rule still applies.)
+
+Then confirm nothing slipped through:
 
 ```bash
-grep -rn "🎮\|▶\|⏮\|⏭\|🔊\|🎤\|🔥\|♪\|&#128293;\|karaokee-score\|TODO(operator)\|confirmPulse\|asr-confirmed" static/
+grep -rn "🎮\|🎵\|▶\|⏮\|⏭\|🔊\|🎤\|🔥\|♪\|&#128293;\|karaokee-score\|TODO(operator)\|confirmPulse\|asr-confirmed" static/
 ```
 
-Expected: no output (every emoji/entity icon swapped to Lucide; share filename renamed; operator TODOs gone; dead CSS removed). The `🎮` in `dbg-header` is gone; `♪` in no-lyrics is gone.
+Expected: no output (every emoji/entity icon swapped to Lucide; share filename renamed; operator TODOs gone; dead CSS removed). The `🎮` in `dbg-header`, the `🎵` on the Load-Local button, and the `♪` in no-lyrics are all gone.
 
 - [ ] **Step 4: Manual theme + surface matrix (preview)**
 

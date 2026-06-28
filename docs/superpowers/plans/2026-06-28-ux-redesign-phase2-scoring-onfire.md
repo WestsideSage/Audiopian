@@ -118,7 +118,7 @@ Delete this entire line. (The `#score-pct` id moves into the unified panel below
 
 - [ ] **Step 2: Replace the `.arcade-hud` block with the unified score panel**
 
-In `static/player.html`, find the whole block:
+In `static/player.html`, locate the block by its container opening tag `<div class="arcade-hud" id="arcadeHud"` and replace through its matching closing `</div>`. **Phase 1 (Task 18) may already have swapped the `#ahFire` inner text and the `#ahStreak` `&#128293;` entity for inline Lucide SVGs**, so do not match on the literal `ON FIRE` / `&#128293;` inner content — replace the whole container regardless of its current inner glyph form. The pre-Phase-1 block, for reference:
 
 ```html
     <div class="arcade-hud" id="arcadeHud" style="display:none" aria-hidden="true">
@@ -214,7 +214,7 @@ In `static/style.css`, find and delete the three `.score-display*` rules (reloca
 
 - [ ] **Step 2: Replace the `.arcade-hud` + `.ah-*` rules with the score-panel rules**
 
-In `static/style.css`, find the arcade-HUD rules (relocated from player inline `<style>`):
+In `static/style.css`, locate the rule by the **`.arcade-hud {` selector** (relocated from the player inline `<style>` in Phase 0). **Phase 1 (Task 18) already restyled this rule** — it added padding/background/border/box-shadow and changed `gap: 7px` to `gap: var(--space-2)` — so do **not** match on the literal `gap: 7px` or the absence of padding; replace the whole rule body regardless of its current declarations. The pre-Phase-1 rule, for reference:
 
 ```css
         /* ── Arcade floating HUD ─────────────────────────────────── */
@@ -1079,7 +1079,7 @@ Expected: PASS — `All share-card tests passed.` (We are not changing `share-ca
 
 - [ ] **Step 3: Rebuild the canvas draw in `_downloadShareImage`**
 
-In `static/player.js`, find the current `_downloadShareImage` body (anchor on `a.download = 'karaokee-score.png';`). Replace the **entire** method:
+In `static/player.js`, locate the `_downloadShareImage(summary) {` method **by its function name** — Phase 1 already renamed its download to `audiopian-score.png`, so do **not** search for `karaokee-score.png` (it no longer exists by the time Phase 2 runs). Replace the **entire** method (the block below shows its post-Phase-1 state):
 
 ```js
     _downloadShareImage(summary) {
@@ -1098,7 +1098,7 @@ In `static/player.js`, find the current `_downloadShareImage` body (anchor on `a
         x.fillStyle = '#9ca3af'; x.font = '40px sans-serif';       x.fillText(L.song, 540, 860);
         var a = document.createElement('a');
         a.href = c.toDataURL('image/png');
-        a.download = 'karaokee-score.png';
+        a.download = 'audiopian-score.png';
         document.body.appendChild(a); a.click(); a.remove();
     }
 ```
