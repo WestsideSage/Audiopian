@@ -180,8 +180,6 @@ class GameMode {
             : { state: 'ready', reason: null, provider: 'browser_sr', model: 'Web Speech API', checkedAt: Date.now() };
         this._renderAsrProviderStatus();
 
-        var scoreDisplay = document.getElementById('score-display');
-        if (scoreDisplay) scoreDisplay.style.display = 'flex';
         document.getElementById('score-pct').textContent = '0%';
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
@@ -205,8 +203,6 @@ class GameMode {
         this._stopWhisperTrack();
         this.prevLine = null;
         renderLyrics(); // restore normal lyric rendering
-        var scoreDisplay = document.getElementById('score-display');
-        if (scoreDisplay) scoreDisplay.style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
@@ -224,6 +220,7 @@ class GameMode {
     suspend() {
         if (!this.active || this._suspended) return;
         this._suspended = true;
+        this._stopWordFillLoop(); // paused clock makes the sweep a no-op repaint; don't spin rAF
         if (this._session) this._session._suspended = true;
         if (this.recognition) {
             try { this.recognition.stop(); } catch(e) {}
@@ -238,6 +235,7 @@ class GameMode {
     resume() {
         if (!this.active || !this._suspended) return;
         this._suspended = false;
+        this._startWordFillLoop(); // restart the sweep paint loop (idempotent + reduced-motion gated)
         if (this._session) this._session._suspended = false;
         if (this.recognition) {
             try { this.recognition.start(); } catch(e) {}
