@@ -261,6 +261,10 @@
         function setStatus(msg, type) {
             statusEl.textContent = msg;
             statusEl.className = type;
+            // Errors should be announced promptly; everything else stays polite.
+            var isErr = type === 'error';
+            statusEl.setAttribute('role', isErr ? 'alert' : 'status');
+            statusEl.setAttribute('aria-live', isErr ? 'assertive' : 'polite');
         }
 
         // ---------- In-app search (lyrics-first → resolver Worker → smart picker) ----------
@@ -268,7 +272,13 @@
 
         function setSearchStatus(msg, type) {
             var el = document.getElementById('searchStatus');
-            if (el) { el.textContent = msg; el.className = type || ''; }
+            if (el) {
+                el.textContent = msg;
+                el.className = type || '';
+                var isErr = type === 'error';
+                el.setAttribute('role', isErr ? 'alert' : 'status');
+                el.setAttribute('aria-live', isErr ? 'assertive' : 'polite');
+            }
         }
 
         async function runSearch() {
@@ -308,7 +318,7 @@
             songs.slice(0, 6).forEach(function (s, i) {
                 var div = document.createElement('div');
                 div.className = 'search-result-item has-thumb';
-                div.onclick = function () { pickSong(i); };
+                _activatable(div, 'Play ' + s.trackName + ' by ' + s.artistName, function () { pickSong(i); });
                 var dur = s.duration || 0;
                 var mins = Math.floor(dur / 60), secs = ('0' + (dur % 60)).slice(-2);
                 div.appendChild(_thumbPlaceholder());
@@ -324,6 +334,24 @@
             box.style.display = 'block';
         }
         function _esc(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+
+        // Make a styled <div> row behave like a button for keyboard + screen-reader
+        // users: button role, focusability (picks up the universal :focus-visible
+        // ring), an accessible name, and Enter/Space activation. The row's child
+        // thumbnail stays alt="" (decorative) so the name isn't announced twice.
+        function _activatable(el, label, fn) {
+            el.setAttribute('role', 'button');
+            el.setAttribute('tabindex', '0');
+            if (label) el.setAttribute('aria-label', label);
+            el.onclick = fn;
+            el.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                    e.preventDefault();
+                    fn();
+                }
+            });
+            return el;
+        }
 
         // A music-note tile for rows that don't yet have a real video thumbnail
         // (lrclib search results resolve their video only on pick).
@@ -369,7 +397,7 @@
             candidates.forEach(function (c, idx) {
                 var div = document.createElement('div');
                 div.className = 'search-result-item has-thumb' + (idx === 0 ? ' is-best' : '');
-                div.onclick = function () { pickVideo(c.videoId, song); };
+                _activatable(div, 'Use this version: ' + c.title, function () { pickVideo(c.videoId, song); });
                 var dur = c.durationSec || 0;
                 var mins = Math.floor(dur / 60), secs = ('0' + (dur % 60)).slice(-2);
 
@@ -442,7 +470,7 @@
             STARTER_SONGS.forEach(function (s, i) {
                 var div = document.createElement('div');
                 div.className = 'search-result-item has-thumb';
-                div.onclick = function () { playStarter(i); };
+                _activatable(div, 'Play ' + s.title + ' by ' + s.artist, function () { playStarter(i); });
                 var thumb = document.createElement('img');
                 thumb.className = 'sr-thumb';
                 thumb.loading = 'lazy';
