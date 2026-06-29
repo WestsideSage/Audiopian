@@ -158,7 +158,7 @@ body {
     background: var(--bg-wash);
     background-attachment: fixed;
     color: var(--text);
-    font-family: var(--font);
+    font-family: var(--font-text);
     display: flex;
     justify-content: center;
     align-items: center;
@@ -565,6 +565,21 @@ body.legal-page {
 .theme-toggle .ico-sun  { display: block; }
 :root[data-theme="light"] .theme-toggle .ico-sun  { display: none; }
 :root[data-theme="light"] .theme-toggle .ico-moon { display: block; }
+
+/* ============================================================
+   Inline SVG icon sizing (Lucide glyphs pasted as raw <svg>).
+   currentColor inherits the button/text color; em sizing keeps
+   icons aligned to adjacent text.
+   ============================================================ */
+.icon {
+    width: 1.1em;
+    height: 1.1em;
+    display: inline-block;
+    vertical-align: -0.15em;
+    flex-shrink: 0;
+    stroke: currentColor;
+    fill: none;
+}
 
 /* ============================================================
    Player page (extracted verbatim from player.html inline <style>
