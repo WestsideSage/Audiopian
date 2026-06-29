@@ -1,6 +1,6 @@
-﻿/* ============================================================
-   Audiopian â€” design tokens + shared (landing) styles
-   "Neon Arcade", cyan Ã— magenta.
+/* ============================================================
+   Audiopian — design tokens + shared (landing) styles
+   "Neon Arcade", cyan × magenta.
    See docs/superpowers/specs/2026-06-08-ux-refresh-design.md
    ============================================================ */
 :root {
@@ -12,6 +12,10 @@
     --surface-3:    #1c2030;
     --line:         rgba(255,255,255,.07);
     --line-strong:  rgba(255,255,255,.12);
+    /* spec-named semantic aliases (resolve via var() so they follow the theme) */
+    --bg-elev:       var(--surface-2);
+    --border:        var(--line);
+    --border-strong: var(--line-strong);
 
     /* text */
     --text:         #e7e9f2;
@@ -19,8 +23,8 @@
     --text-faint:   #5c5f73;
 
     /* accents */
-    --p:            #2dd4ee;   /* primary  â€” cyan    */
-    --s:            #f0468f;   /* secondary â€” magenta */
+    --p:            #2dd4ee;   /* primary  — cyan    */
+    --s:            #f0468f;   /* secondary — magenta */
     --p-soft:       rgba(45,212,238,.14);
     --p-line:       rgba(45,212,238,.40);
 
@@ -30,7 +34,7 @@
     --missed:       #ff5d73;
     --key:          var(--p);
 
-    /* fire (warm, fixed â€” reads as "hot") */
+    /* fire (warm, fixed — reads as "hot") */
     --fire-a:       #ff5470;
     --fire-b:       #ff9f45;
 
@@ -101,7 +105,6 @@
     /* shadow tokens (replace copy-pasted literals in Phase 1) */
     --shadow-card:  0 1px 2px rgba(0,0,0,.4);
     --shadow-modal: 0 24px 60px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.02);
-    --glow:         0 0 22px;
 
     /* motion */
     --dur-fast:   120ms;
@@ -173,7 +176,7 @@ body {
     border-radius: var(--r-lg);
     padding: 40px;
     width: 480px;
-    box-shadow: 0 24px 60px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.02);
+    box-shadow: var(--shadow-modal);
 }
 
 /* ---- wordmark ---- */
@@ -293,7 +296,7 @@ button:disabled { background: var(--surface-2); color: var(--text-faint); cursor
 }
 .byok summary::-webkit-details-marker { display: none; }
 .byok summary::before { content: '+ '; color: var(--p); font-weight: 700; }
-.byok[open] summary::before { content: 'â€“ '; }
+.byok[open] summary::before { content: '– '; }
 .byok input { margin-top: 10px; }
 .byok-actions { display: flex; gap: 8px; }
 .byok-note { font-size: .75rem; color: var(--text-faint); margin-top: 8px; line-height: 1.5; }
@@ -391,7 +394,7 @@ body.legal-page {
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
     padding: 44px 48px;
-    box-shadow: 0 24px 60px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.02);
+    box-shadow: var(--shadow-modal);
 }
 .legal .doc-home {
     display: inline-flex;
@@ -865,7 +868,7 @@ body.legal-page .site-footer {
             -webkit-text-fill-color: currentColor;
         }
 
-        /* Key (scored) word target cue â€” only on the ACTIVE line, until passed/missed. */
+        /* Key (scored) word target cue — only on the ACTIVE line, until passed/missed. */
         .lyric-line.active .word-span.key-word:not(.matched):not(.matched-partial):not(.missed) {
             color: var(--key);
             text-shadow: 0 0 12px rgba(45,212,238,.45);
@@ -916,7 +919,7 @@ body.legal-page .site-footer {
             -webkit-text-fill-color: currentColor;
         }
 
-        /* Insane difficulty â€” collapse every non-key word; only the scored key words show
+        /* Insane difficulty — collapse every non-key word; only the scored key words show
            (adjacent whitespace collapses, so the key words sit on a clean single-spaced line). */
         body.insanity #lyrics-scroll .word-span:not(.key-word) { display: none; }
         /* ...and show ONE line at a time: hide every line but the active one, so you can't
@@ -940,7 +943,7 @@ body.legal-page .site-footer {
             box-shadow: 0 0 12px rgba(45,212,238,.5);
         }
 
-        /* â”€â”€ Unified score panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        /* ── Unified score panel ──────────────────────────────────────
            One anchored .panel container (replaces the two floating
            corners). Points is the hero; accuracy + multiplier secondary.
            Reads in both themes (token surface/border, no dark-only glow). */
@@ -1022,8 +1025,8 @@ body.legal-page .site-footer {
         .sp-acc { display: flex; align-items: baseline; gap: var(--space-1); font-size: var(--text-sm); color: var(--text-dim); }
         .sp-acc-label { font-size: var(--text-xs); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint); }
         .sp-acc #score-pct { color: var(--matched); font-weight: 700; }
-        .ah-streak { align-self: flex-end; font-size: var(--text-sm); color: var(--fire-b); font-weight: 700; }
-        /* â”€â”€ On Fire ("C", beat-synced) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        .ah-streak { align-self: flex-end; font-size: var(--text-sm); color: var(--s); font-weight: 700; }
+        /* ── On Fire ("C", beat-synced) ───────────────────────────────
            Event-driven ignition -> sustained pulse driven by --beat (0..1,
            set on <body> from the helper-computed phase in player.js) -> fade.
            Leans on border/shape/gradient/embers/motion (NOT a dark-only glow)
@@ -1069,7 +1072,7 @@ body.legal-page .site-footer {
         }
         body.arcade-onfire .ah-points { background: linear-gradient(95deg, var(--fire-a), var(--fire-b), var(--fire-c)); -webkit-background-clip: text; background-clip: text; }
 
-        /* On Fire â€” bold active lyric (held STEADY; pulse never moves the text). */
+        /* On Fire — bold active lyric (held STEADY; pulse never moves the text). */
         body.arcade-onfire .lyric-line.active {
             background: linear-gradient(90deg, var(--fire-a), var(--fire-b), var(--fire-c));
             -webkit-background-clip: text; background-clip: text;
@@ -1118,13 +1121,14 @@ body.legal-page .site-footer {
         .line-score-flash.v-perfect { color: var(--matched); }
         .line-score-flash.v-nice    { color: var(--p); }
         .line-score-flash.v-partial { color: var(--partial); }
+        .line-score-flash.v-miss    { color: var(--missed); }
 
         @keyframes fadeOut {
             0%   { opacity: 1; transform: translateY(0); }
             100% { opacity: 0; transform: translateY(-16px); }
         }
 
-        /* â”€â”€ End-of-song results (staged entrance) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        /* ── End-of-song results (staged entrance) ───────────────────
            Stages are driven by [data-stage] on .game-modal, advanced by
            player.js. prefers-reduced-motion collapses the timings (Phase 0
            global guard) so the screen still appears, just without motion. */
@@ -1159,12 +1163,12 @@ body.legal-page .site-footer {
             transform: scale(1); opacity: 1;
         }
 
-        /* â”€â”€ Grade-hero scorecard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        /* ── Grade-hero scorecard ─────────────────────────────────── */
         .grade-hero { position: relative; margin-bottom: var(--space-5); }
         .grade-letter {
             font-family: var(--font-display);
             font-size: 5rem; font-weight: 700; line-height: 1; letter-spacing: -.02em;
-            background: linear-gradient(135deg, var(--p), var(--s) 60%, var(--matched));
+            background: linear-gradient(96deg, var(--p), var(--s) 60%, var(--matched));
             -webkit-background-clip: text; background-clip: text;
             -webkit-text-fill-color: transparent; color: transparent;
             transform: scale(.6); opacity: 0;
@@ -1272,12 +1276,12 @@ body.legal-page .site-footer {
         .diff-card.selected { border-color: var(--s); box-shadow: 0 0 18px rgba(240,70,143,.45); }
         .diff-gate-listen { width: auto; padding: 8px 16px; font-size: 0.85rem; opacity: .8; }
 
-        /* â”€â”€ Mic Check panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        /* ── Mic Check panel ─────────────────────────────────────── */
         #micCheckPanel { max-width: 440px; margin: 6px auto 0; text-align: center; }
         .mc-instr { font-size: 0.82rem; color: var(--text-dim); letter-spacing: .02em; }
         .mc-phrase { font-size: 1.05rem; color: var(--text-strong); font-weight: 600; margin: 6px 0 12px; }
         .mc-meter { height: 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
-        .mc-meter-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--p), var(--s)); transition: width .08s linear; }
+        .mc-meter-fill { height: 100%; width: 0%; background: var(--grad-accent); transition: width .08s linear; }
         .mc-heard { min-height: 1.3em; margin-top: 10px; font-size: 0.92rem; color: var(--text-dim); font-style: italic; }
         .mc-heard.has-text { color: var(--matched); font-style: normal; }
         .mc-verdict { margin-top: 8px; font-size: 0.95rem; font-weight: 600; color: var(--text-dim); }
@@ -1314,7 +1318,7 @@ body.legal-page .site-footer {
         /* Difficulty gate disabled while the video embed is still loading */
         .diff-gate-cards.loading { opacity: .4; pointer-events: none; filter: grayscale(.4); }
 
-        /* â”€â”€ Loading + count-in overlay (between difficulty pick and the song) â”€â”€â”€â”€ */
+        /* ── Loading + count-in overlay (between difficulty pick and the song) ──── */
         .countin-overlay {
             position: fixed; inset: 0; z-index: 250; cursor: pointer;
             display: flex; align-items: center; justify-content: center;
@@ -1330,14 +1334,14 @@ body.legal-page .site-footer {
         .countin-num {
             font-family: var(--font-display);
             font-size: 7rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; color: transparent;
-            background: linear-gradient(135deg, var(--p), var(--s)); -webkit-background-clip: text; background-clip: text;
+            background: var(--grad-accent); -webkit-background-clip: text; background-clip: text;
             filter: drop-shadow(0 0 26px rgba(45,212,238,.45)); animation: countPop .4s var(--ease-out);
         }
         @keyframes countPop { 0% { transform: scale(.5); opacity: .15; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
         .countin-label { font-family: var(--font-display); font-size: var(--text-lg); font-weight: 700; color: var(--text); }
         .countin-skip { font-size: .74rem; color: var(--text-dim); margin-top: 4px; letter-spacing: .04em; }
 
-        /* â”€â”€ Debug HUD (toggle with D key) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        /* ── Debug HUD (toggle with D key) ────────────────────────── */
         #debug-hud {
             position: fixed;
             top: 60px;
@@ -1368,7 +1372,7 @@ body.legal-page .site-footer {
         .dbg-ev-match { color: #5af; }
 
         #ytplayer-wrap { border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0,0,0,.5); }
-        /* The YouTube iframe must fill its wrap exactly â€” never overflow/clip â€” or YouTube
+        /* The YouTube iframe must fill its wrap exactly — never overflow/clip — or YouTube
            treats the player as off-screen and pauses playback after a few seconds. */
         #ytplayer-wrap iframe { width: 100%; height: 100%; border: 0; display: block; }
 

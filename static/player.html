@@ -1,8 +1,8 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Audiopian â€” Player</title>
+    <title>Audiopian — Player</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <meta name="description" content="Audiopian player - sing along to your chosen song with live scoring.">
     <meta property="og:title" content="Audiopian - Player">
@@ -41,11 +41,11 @@
             <div class="diff-gate" id="diffGate" role="group" aria-label="Choose difficulty">
                 <div class="diff-gate-label">Choose your difficulty</div>
                 <div class="diff-gate-cards" id="diffGateCards">
-                    <button class="diff-card" data-diff="easy"><span class="dc-name">Easy</span><span class="dc-desc">Forgiving â€” a few key words</span></button>
+                    <button class="diff-card" data-diff="easy"><span class="dc-name">Easy</span><span class="dc-desc">Forgiving — a few key words</span></button>
                     <button class="diff-card" data-diff="medium"><span class="dc-name">Medium</span><span class="dc-desc">Balanced</span></button>
                     <button class="diff-card" data-diff="hard"><span class="dc-name">Hard</span><span class="dc-desc">Strict words &amp; timing</span></button>
                     <button class="diff-card" data-diff="expert"><span class="dc-name">Expert</span><span class="dc-desc">Nearly every word, tight</span></button>
-                    <button class="diff-card" data-diff="insane"><span class="dc-name">Insane</span><span class="dc-desc">Lyrics hidden â€” only key words show</span></button>
+                    <button class="diff-card" data-diff="insane"><span class="dc-name">Insane</span><span class="dc-desc">Lyrics hidden — only key words show</span></button>
                 </div>
                 <div class="diff-preview" id="diffPreview" style="display:none">
                     <div class="dp-line" id="dpLine"></div>
@@ -53,10 +53,10 @@
                 </div>
                 <div class="prep-status">
                     <div class="prep-spinner"></div>
-                    <span id="prepStatus">Preparing audioâ€¦</span>
+                    <span id="prepStatus">Preparing audio…</span>
                 </div>
                 <div class="prep-toolbar">
-                    <button class="diff-gate-listen ctrl-btn" onclick="justListen()">Just listen â€” no scoring</button>
+                    <button class="diff-gate-listen ctrl-btn" onclick="justListen()">Just listen — no scoring</button>
                     <button class="diff-gate-listen ctrl-btn" id="cleanModeToggle" type="button" aria-pressed="false">
                       <span class="switch-dot" aria-hidden="true"></span> Clean mode: <span id="cleanModeState">Off</span>
                     </button>
@@ -67,10 +67,10 @@
                 </div>
                 <div id="micCheckPanel" class="panel" style="display:none;padding:14px 16px">
                     <div class="mc-instr">Read this aloud:</div>
-                    <div class="mc-phrase">â€œThe quick brown fox jumps over the lazy dogâ€</div>
+                    <div class="mc-phrase">“The quick brown fox jumps over the lazy dog”</div>
                     <div class="mc-meter"><div class="mc-meter-fill" id="micMeterFill"></div></div>
                     <div class="mc-heard" id="micCheckHeard"></div>
-                    <div class="mc-verdict" id="micCheckVerdict">Listeningâ€¦</div>
+                    <div class="mc-verdict" id="micCheckVerdict">Listening…</div>
                     <button class="ctrl-btn" id="micCheckDone" type="button" style="margin-top:10px; width:auto; padding:6px 18px;">Done</button>
                 </div>
             </div>
@@ -85,7 +85,7 @@
         <div class="countin-box">
             <div class="countin-spinner" id="countInSpinner"></div>
             <div class="countin-num" id="countInNum"></div>
-            <div class="countin-label" id="countInLabel">Loadingâ€¦</div>
+            <div class="countin-label" id="countInLabel">Loading…</div>
             <div class="countin-skip">tap or press space to skip</div>
         </div>
     </div>
@@ -157,7 +157,7 @@
         <div id="asr-provider-display" class="asr-display">ASR: checking...</div>
         <div id="lrc-offset-control" class="offset-control" style="display:none">
           <span>Lyrics offset</span>
-          <button id="offsetMinus" class="offset-btn" title="Shift lyrics earlier">âˆ’0.5s</button>
+          <button id="offsetMinus" class="offset-btn" title="Shift lyrics earlier">−0.5s</button>
           <span id="offsetDisplay">0.0s</span>
           <button id="offsetPlus"  class="offset-btn" title="Shift lyrics later">+0.5s</button>
         </div>
@@ -171,10 +171,10 @@
         <div id="ytplayer"></div>
     </div>
 
-    <!-- Debug HUD â€” toggle with D key while Game Mode is active -->
+    <!-- Debug HUD — toggle with D key while Game Mode is active -->
     <div id="debug-hud" style="display:none"></div>
 
-    <div class="game-modal" id="gameModal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="gradeLetter">
+    <div class="game-modal" id="gameModal" style="display:none" role="dialog" aria-modal="true" aria-label="Your results">
         <div class="game-modal-box panel">
             <div class="grade-hero" id="gradeHero" style="display:none">
                 <div class="nb-ribbon" id="nbRibbon" data-best="0">NEW BEST</div>
@@ -196,6 +196,19 @@
             </div>
         </div>
     </div>
+
+    <footer class="site-footer">
+        &copy; <span class="footer-year">2026</span> Audiopian
+        <span class="sep">&middot;</span><a href="/terms">Terms</a>
+        <span class="sep">&middot;</span><a href="/privacy">Privacy</a>
+        <span class="sep">&middot;</span><a href="/dmca">DMCA</a>
+    </footer>
+    <script>
+      (function () {
+        var els = document.querySelectorAll('.footer-year');
+        for (var i = 0; i < els.length; i++) els[i].textContent = String(new Date().getFullYear());
+      })();
+    </script>
 
     <script src="/static/sync-helpers.js"></script>
     <script src="/static/vad-helpers.js"></script>
