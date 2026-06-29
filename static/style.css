@@ -647,6 +647,15 @@ button.is-loading::after {
 /* The whole-row is-best tint is enough; drop the old left-border bar treatment. */
 .search-result-item.is-best.has-thumb { background: var(--surface-3); box-shadow: none; }
 
+/* ---- placeholder music-note thumbnail (lrclib search rows) ---- */
+.sr-thumb-ph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+}
+.sr-thumb-ph .icon { width: 18px; height: 18px; }
+
 /* ============================================================
    Player page (extracted verbatim from player.html inline <style>
    in Phase 0; re-skinned onto tokens in Phase 1). Player is pinned
