@@ -836,6 +836,12 @@ body.legal-page .site-footer {
         .word-span {
             display: inline-block;
             color: var(--text-faint);
+            /* Progressive fill: 0..1 written per-frame by player.js _paintWordFill.
+               Default 0 so a span with no fill paints exactly as before. */
+            --fill: 0;
+            /* The color the sweep reveals as a word's window passes (cyan key cue
+               for key words is overridden below; non-key words sweep to text white). */
+            --fill-color: var(--text);
             transition: color 0.15s, text-shadow 0.15s;
             cursor: default;
         }
@@ -857,6 +863,33 @@ body.legal-page .site-footer {
         .lyric-line.active .word-span.key-word:not(.matched):not(.matched-partial):not(.missed) {
             color: var(--key);
             text-shadow: 0 0 12px rgba(45,212,238,.45);
+        }
+
+        /* Word-by-word fill (Phase 3)
+           A left-to-right color sweep across each word on the ACTIVE line
+           while its timing window passes. Purely cosmetic: applies ONLY to
+           spans the scorer has NOT resolved (no .matched/.matched-partial/
+           .missed). The instant a real scoring class lands, that rule's
+           plain color: wins and the sweep is moot. --fill (0..1) is written
+           per-frame by player.js; the filled head is --fill-color, the tail
+           stays the base grey so the whole word is always legible. */
+        .lyric-line.active .word-span:not(.matched):not(.matched-partial):not(.missed) {
+            background-image: linear-gradient(
+                90deg,
+                var(--fill-color) 0%,
+                var(--fill-color) calc(var(--fill) * 100%),
+                var(--text-faint) calc(var(--fill) * 100%),
+                var(--text-faint) 100%
+            );
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            color: transparent;
+        }
+
+        /* Key words sweep to the cyan key cue instead of plain text white. */
+        .lyric-line.active .word-span.key-word:not(.matched):not(.matched-partial):not(.missed) {
+            --fill-color: var(--key);
         }
 
         /* Insane difficulty â€” collapse every non-key word; only the scored key words show
