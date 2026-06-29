@@ -1885,23 +1885,53 @@ class GameMode {
         document.getElementById('gameModal').style.display = 'flex';
     }
 
-    // Render the final grade/score/song to a 1080x1080 PNG and download it. The
-    // pure line-building (truncation, DIFF · pts · % stat) is in share-card.js
-    // (buildShareCardLines); this method only draws + triggers the download.
+    // Render the final grade/score/song to a 1080x1080 PNG on the app's brand and download
+    // it. Pure line-building (truncation, DIFF · pts · % stat) stays in share-card.js
+    // (buildShareCardLines); this method only draws + triggers the download. On-brand:
+    // app backdrop, Space Grotesk display face, real cyan->magenta accent, wordmark,
+    // audiopian-score.png filename.
     _downloadShareImage(summary) {
         if (typeof buildShareCardLines !== 'function' || typeof document === 'undefined') return;
         var sd = (typeof songData !== 'undefined' && songData) ? songData : {};
         var L = buildShareCardLines(summary, sd);
+        // Best-effort: ensure the display face is decoded before drawing to canvas.
+        try { if (document.fonts && document.fonts.load) { document.fonts.load("700 64px 'Space Grotesk'"); } } catch (e) {}
         var c = document.createElement('canvas');
         c.width = 1080; c.height = 1080;
         var x = c.getContext('2d');
         if (!x) return;
+
+        // Brand display face. Falls back gracefully if Space Grotesk isn't decoded yet.
+        var DISPLAY = "700 {px}px 'Space Grotesk', 'Segoe UI', sans-serif";
+        var TEXT = "{px}px 'Inter', 'Segoe UI', sans-serif";
+        function fDisplay(px) { return DISPLAY.replace('{px}', px); }
+        function fText(px) { return TEXT.replace('{px}', px); }
+
+        // App backdrop: deep base + the brand wash (cyan/magenta radials), matching the stage.
         x.fillStyle = '#0b0b12'; x.fillRect(0, 0, 1080, 1080);
+        var g1 = x.createRadialGradient(1080, 0, 0, 1080, 0, 900);
+        g1.addColorStop(0, 'rgba(240,70,143,0.16)'); g1.addColorStop(1, 'rgba(240,70,143,0)');
+        x.fillStyle = g1; x.fillRect(0, 0, 1080, 1080);
+        var g2 = x.createRadialGradient(0, 1080, 0, 0, 1080, 900);
+        g2.addColorStop(0, 'rgba(45,212,238,0.14)'); g2.addColorStop(1, 'rgba(45,212,238,0)');
+        x.fillStyle = g2; x.fillRect(0, 0, 1080, 1080);
+
         x.textAlign = 'center';
-        x.fillStyle = '#8b5cf6'; x.font = 'bold 64px sans-serif';  x.fillText(L.brand, 540, 170);
-        x.fillStyle = '#ffffff'; x.font = 'bold 320px sans-serif'; x.fillText(L.grade, 540, 620);
-        x.fillStyle = '#e5e7eb'; x.font = '52px sans-serif';       x.fillText(L.stat, 540, 770);
-        x.fillStyle = '#9ca3af'; x.font = '40px sans-serif';       x.fillText(L.song, 540, 860);
+
+        // Wordmark - brand cyan->magenta gradient text.
+        var brandGrad = x.createLinearGradient(380, 0, 700, 0);
+        brandGrad.addColorStop(0, '#2dd4ee'); brandGrad.addColorStop(1, '#f0468f');
+        x.fillStyle = brandGrad; x.font = fDisplay(60); x.fillText(L.brand, 540, 180);
+
+        // Grade - huge brand-gradient letter (the hero).
+        var gradeGrad = x.createLinearGradient(360, 360, 720, 720);
+        gradeGrad.addColorStop(0, '#2dd4ee'); gradeGrad.addColorStop(0.6, '#f0468f'); gradeGrad.addColorStop(1, '#3ddc84');
+        x.fillStyle = gradeGrad; x.font = fDisplay(320); x.fillText(L.grade, 540, 640);
+
+        // Stat (DIFF · pts · %) and song.
+        x.fillStyle = '#e5e7eb'; x.font = fDisplay(54); x.fillText(L.stat, 540, 790);
+        x.fillStyle = '#9ca3af'; x.font = fText(40);    x.fillText(L.song, 540, 880);
+
         var a = document.createElement('a');
         a.href = c.toDataURL('image/png');
         a.download = 'audiopian-score.png';
