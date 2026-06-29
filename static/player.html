@@ -7,6 +7,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Phase 0: the player stage is not themed yet, so pin dark to keep it
+         visually unchanged. Phase 1 replaces this with the shared theme boot
+         (script src theme-helpers.js + resolveInitialTheme) once the stage is
+         token-driven. -->
+    <script>
+      document.documentElement.setAttribute('data-theme', 'dark');
+    </script>
     <style>
         body { display: block; padding: 0; }
 

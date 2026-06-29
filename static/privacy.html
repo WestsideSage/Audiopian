@@ -8,6 +8,23 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
+    <!-- Theme boot: set data-theme before first paint to avoid a flash. -->
+    <script src="/static/theme-helpers.js"></script>
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem(window.KaraokeeTheme.THEME_STORAGE_KEY);
+          var prefersLight = window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: light)').matches;
+          document.documentElement.setAttribute(
+            'data-theme',
+            window.KaraokeeTheme.resolveInitialTheme({ stored: stored, prefersLight: prefersLight })
+          );
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
 </head>
 <body class="legal-page">
     <main class="legal">
