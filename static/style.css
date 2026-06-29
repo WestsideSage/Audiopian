@@ -197,9 +197,6 @@ body {
     box-shadow: 0 0 16px var(--p);
     flex-shrink: 0;
 }
-/* fallback for any bare h1 */
-h1 { font-size: 1.85rem; text-align: center; color: var(--text-strong); }
-
 .tagline {
     text-align: center;
     font-size: .85rem;
@@ -207,9 +204,6 @@ h1 { font-size: 1.85rem; text-align: center; color: var(--text-strong); }
     margin: 0 0 22px;
     line-height: 1.55;
 }
-.tagline a { color: var(--p); text-decoration: none; }
-.tagline a:hover { text-decoration: underline; }
-
 label {
     display: block;
     font-size: .68rem;
@@ -219,13 +213,6 @@ label {
     letter-spacing: .12em;
     margin-bottom: 7px;
 }
-label .hint {
-    color: var(--text-faint);
-    text-transform: none;
-    letter-spacing: 0;
-    font-weight: 500;
-}
-
 input[type="text"],
 input[type="password"] {
     width: 100%;
@@ -283,14 +270,6 @@ button:disabled { background: var(--surface-2); color: var(--text-faint); cursor
 #searchStatus.error   { color: var(--missed); }
 #status.success,
 #searchStatus.success { color: var(--matched); }
-
-/* ---- small helper text (consolidated from inline styles) ---- */
-.hint-text {
-    font-size: .78rem;
-    color: var(--text-faint);
-    margin: -8px 0 10px;
-    line-height: 1.5;
-}
 
 /* ---- bring-your-own-key disclosure ---- */
 .byok {
@@ -735,7 +714,7 @@ body.legal-page {
 
         /* Key (scored) word target cue â€” only on the ACTIVE line, until passed/missed. */
         .lyric-line.active .word-span.key-word:not(.matched):not(.matched-partial):not(.missed) {
-            color: var(--p);
+            color: var(--key);
             text-shadow: 0 0 12px rgba(45,212,238,.45);
         }
 
@@ -753,16 +732,6 @@ body.legal-page {
             left: 0;
             right: 0;
             transform: translateY(-50%);
-        }
-
-        @keyframes confirmPulse {
-            0%   { text-shadow: 0 0 0px #fff; }
-            50%  { text-shadow: 0 0 8px #fff, 0 0 16px var(--matched); }
-            100% { text-shadow: 0 0 0px #fff; }
-        }
-
-        .word-span.asr-confirmed {
-            animation: confirmPulse 0.4s ease-out;
         }
 
         /* Game button active state */
@@ -882,28 +851,6 @@ body.legal-page {
             box-shadow: 0 24px 70px rgba(0,0,0,.6);
         }
 
-        .game-modal-title {
-            font-size: 1.3rem;
-            color: var(--text);
-            font-weight: 700;
-            margin-bottom: 16px;
-        }
-
-        .game-modal-score {
-            font-size: 3rem;
-            font-weight: 800;
-            color: var(--matched);
-            margin-bottom: 20px;
-            font-variant-numeric: tabular-nums;
-        }
-
-        .game-modal-stats {
-            color: var(--text-dim);
-            font-size: 0.95rem;
-            line-height: 2;
-            margin-bottom: 28px;
-        }
-
         /* â”€â”€ Grade-hero end screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         .grade-hero { position: relative; margin-bottom: 22px; }
         .grade-letter {
@@ -1002,7 +949,7 @@ body.legal-page {
         .dp-line { font-size: 1.15rem; line-height: 1.8; }
         .dp-word { color: #4b4e60; transition: color .15s; }
         .dp-word.dp-anchor { color: var(--text-dim); }
-        .dp-word.dp-target { color: #fff; font-weight: 700; text-shadow: 0 0 8px var(--p), 0 0 14px rgba(45,212,238,.5); }
+        .dp-word.dp-target { color: var(--text-strong); font-weight: 700; text-shadow: 0 0 8px var(--key), 0 0 14px rgba(45,212,238,.5); }
         .dp-caption { margin-top: 8px; font-size: 0.78rem; color: var(--text-dim); letter-spacing: .02em; }
 
         .prep-status {

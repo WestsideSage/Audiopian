@@ -1025,7 +1025,7 @@ class GameMode {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
         if (lines[lineIdx]) {
             lines[lineIdx].querySelectorAll('.word-span').forEach(function (s) {
-                s.classList.remove('matched', 'matched-partial', 'missed', 'asr-confirmed');
+                s.classList.remove('matched', 'matched-partial', 'missed');
             });
         }
     }
