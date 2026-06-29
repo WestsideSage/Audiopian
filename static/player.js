@@ -1234,8 +1234,52 @@ class GameMode {
             streak.style.visibility = st.streak >= 2 ? 'visible' : 'hidden';
         }
         var fire = document.getElementById('ahFire');
-        if (fire) fire.style.display = st.onFire ? 'block' : 'none';
+        if (fire) fire.style.display = st.onFire ? 'inline-flex' : 'none';
+        var wasOnFire = document.body.classList.contains('arcade-onfire');
         document.body.classList.toggle('arcade-onfire', !!st.onFire);
+        if (st.onFire && !wasOnFire) this._startOnFirePulse();
+        else if (!st.onFire && wasOnFire) this._stopOnFirePulse();
+    }
+
+    // Begin the on-fire pulse loop: each frame, write a --beat (0..1) custom property on
+    // <body> from the helper-computed beat phase, anchored to the last sung-word onset.
+    // Reduced-motion -> hold a static vivid --beat (no loop), per spec.
+    _startOnFirePulse() {
+        var body = document.body;
+        var reduce = false;
+        try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+        if (reduce || !window.KaraokeeBeatPulse) {
+            body.style.setProperty('--beat', '0.6');   // vivid-but-static
+            return;
+        }
+        if (this._onFireRaf) return;   // already running
+        var self = this;
+        this._onFireRaf = requestAnimationFrame(function step(now) {
+            self._onFirePulseFrame(now);
+            self._onFireRaf = requestAnimationFrame(step);
+        });
+    }
+
+    // One pulse frame: 0..1 triangle wave over the beat period so the glow swells and
+    // recedes once per beat. Period from the active line's tempo class; phase anchored to
+    // the last sung-word onset (captured in _renderEvents). Pure helpers do the math.
+    _onFirePulseFrame(nowMs) {
+        if (!window.KaraokeeBeatPulse) return;
+        var tempoClass = 'normal';
+        if (this.allWordTimings && this.activeLineIdx >= 0 && this.allWordTimings[this.activeLineIdx]) {
+            tempoClass = this.allWordTimings[this.activeLineIdx].vadTempoClass || 'normal';
+        }
+        var period = KaraokeeBeatPulse.pulsePeriodMs(tempoClass);
+        var phase = KaraokeeBeatPulse.beatPhase(nowMs, period, this._lastOnsetMs || 0);
+        // Triangle wave: 0 -> 1 -> 0 across the beat, so the glow breathes symmetrically.
+        var beat = phase < 0.5 ? (phase * 2) : (2 - phase * 2);
+        document.body.style.setProperty('--beat', beat.toFixed(3));
+    }
+
+    // Stop the pulse loop and relax --beat to 0 (the CSS transition fades the glow out).
+    _stopOnFirePulse() {
+        if (this._onFireRaf) { cancelAnimationFrame(this._onFireRaf); this._onFireRaf = null; }
+        document.body.style.setProperty('--beat', '0');
     }
 
     // Drive the score number from `from` to `to` using the pure count-up helper.
@@ -1267,6 +1311,7 @@ class GameMode {
         var hud = document.getElementById('arcadeHud');
         if (hud) hud.style.display = 'none';
         document.body.classList.remove('arcade-onfire');
+        this._stopOnFirePulse();
         if (this._countUpRaf) { cancelAnimationFrame(this._countUpRaf); this._countUpRaf = null; }
         this._shownPoints = 0;
         this._shownMult = 1;
