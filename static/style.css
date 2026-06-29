@@ -268,15 +268,21 @@ button:disabled { background: var(--surface-2); color: var(--text-faint); cursor
 .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--line); }
 .btn-secondary:hover { background: var(--surface-3); filter: none; box-shadow: inset 0 0 0 1px var(--line-strong); }
 
-#status {
-    margin-top: 16px;
+/* ---- unified status messages (#status + #searchStatus share one treatment) ---- */
+#status,
+#searchStatus {
+    margin-top: var(--space-4);
     text-align: center;
-    font-size: .9rem;
+    font-size: var(--text-base);
     min-height: 1.2em;
     color: var(--text-dim);
+    line-height: 1.5;
 }
-#status.error { color: var(--missed); }
-#status.success { color: var(--matched); }
+#searchStatus { margin-top: var(--space-3); }
+#status.error,
+#searchStatus.error   { color: var(--missed); }
+#status.success,
+#searchStatus.success { color: var(--matched); }
 
 /* ---- small helper text (consolidated from inline styles) ---- */
 .hint-text {
