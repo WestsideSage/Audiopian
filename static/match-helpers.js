@@ -360,9 +360,26 @@ var WORD_WEIGHTS = { core: 1.0, function: 0.5, adlib: 0 };
  * @param {boolean} inParentheses - true if the word was inside parentheses in the original lyric
  * @returns {'core'|'function'|'adlib'}
  */
+// Expressively-spelled, non-lexical vocables the recognizer can't reliably
+// return -- drawn-out sounds ("awww", "ooooh", "mmmm", "noooo", "yeahhh") and
+// laughter ("hahaha", "heehee", "heeheeheehee"). Treated as adlibs (free) so a
+// vocable-only line isn't scored as a required word. Honesty-only: this can
+// never CREDIT anything, it just stops penalizing unrecognizable sounds.
+function isElongatedVocable(normalizedWord) {
+    if (!normalizedWord) return false;
+    // A letter repeated 3+ times in a row is an elongation -- real English words
+    // don't have triple consecutive identical letters.
+    if (/(.)\1\1/.test(normalizedWord)) return true;
+    // A laugh syllable repeated 2+ times (>=2 reps, so the pronoun "he" and the
+    // word "ho" aren't caught).
+    if (/^(?:ha|hah|he|heh|hee|ho){2,}$/.test(normalizedWord)) return true;
+    return false;
+}
+
 function classifyWord(normalizedWord, inParentheses) {
     if (inParentheses) return 'adlib';
     if (ADLIB_WORDS.has(normalizedWord)) return 'adlib';
+    if (isElongatedVocable(normalizedWord)) return 'adlib';
     if (FUNCTION_WORDS.has(normalizedWord)) return 'function';
     return 'core';
 }
@@ -461,6 +478,7 @@ if (typeof module !== 'undefined' && module.exports) {
         ADLIB_WORDS: ADLIB_WORDS,
         WORD_WEIGHTS: WORD_WEIGHTS,
         classifyWord: classifyWord,
+        isElongatedVocable: isElongatedVocable,
         isEdit2PrefixTruncation: isEdit2PrefixTruncation,
     };
 }

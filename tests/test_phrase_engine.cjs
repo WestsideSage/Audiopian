@@ -47,10 +47,12 @@ assert.strictEqual(plan.phrases[0].lineIdx, 0, 'preserves source line index');
 assert.strictEqual(plan.phrases[0].startSec, 10, 'uses lyric timestamp as phrase start');
 assert.strictEqual(plan.phrases[0].endSec, 14, 'uses next lyric timestamp as phrase end');
 assert.ok(plan.phrases[0].anchors.some(function(anchor) { return anchor.word === 'final'; }), 'selects distinctive anchors');
-// Filler-only lines ("yeah yeah", "uh uh") fall back to filler-marked anchors so the
-// phrase can still be scored when Whisper transcribes them.
-assert.ok(plan.phrases[2].anchors.some(function(anchor) { return anchor.word === 'yeah'; }), 'filler-only lines fall back to filler anchors');
-assert.ok(plan.phrases[2].anchors.every(function(anchor) { return anchor.fillerOnly === true; }), 'fallback anchors are marked fillerOnly');
+// Filler-only lines ("yeah yeah", "uh uh") are NOT scoreable: no anchors are
+// selected, so anchorsRequired is 0 and the line is excluded from scoring. Adlibs
+// are structurally unwinnable (recognizers don't return them) -- they must neither
+// help nor hurt the score.
+assert.strictEqual(plan.phrases[2].anchors.length, 0, 'filler-only lines get no anchors');
+assert.strictEqual(plan.phrases[2].anchorsRequired, 0, 'filler-only lines require no anchors');
 assert.ok(plan.phrases[0].anchors.every(function(anchor) { return !anchor.fillerOnly; }), 'normal anchors are not marked fillerOnly');
 assert.ok(plan.difficulty.requiredAnchorRatio > 0.5, 'hard profile requires meaningful anchor coverage');
 
@@ -139,11 +141,17 @@ assert.strictEqual(phrase1.rescuedByWhisper, true, 'whisper can rescue missed an
 assert.strictEqual(phrase1.liveClean, false, 'whisper rescue does not mark phrase live clean');
 assert.ok(phrase1.rejectedCandidates.some(function(item) { return item.reason === 'weak_source' && item.source === 'vad'; }), 'vad-only lyric evidence is rejected as weak source');
 
-// Filler-only line: phrase clears when Whisper transcribes the filler word
+// Filler-only line ("uh uh"): NOT scoreable. No anchors are selected, so even when
+// Whisper transcribes the filler word it credits nothing and the line is excluded
+// from the score (neither helps nor hurts the singer).
 var fillerPlan = phraseEngine.buildPhrasePlan([
     { time: 0, text: 'alpha bravo final' },
     { time: 3, text: 'uh uh' }
 ], { difficulty: 'medium', audioDuration: 7 });
+var fillerLinePhrase = fillerPlan.phrases.find(function(p) { return p.lineIdx === 1; });
+assert.ok(fillerLinePhrase, 'filler-only phrase exists in the plan');
+assert.strictEqual(fillerLinePhrase.anchors.length, 0, 'filler-only line gets no anchors');
+assert.strictEqual(fillerLinePhrase.anchorsRequired, 0, 'filler-only line requires no anchors');
 var fillerSession = phraseEngine.createPhraseSession(fillerPlan);
 phraseEngine.addEvidence(fillerSession, {
     id: 'whisper-uh',
@@ -154,11 +162,45 @@ phraseEngine.addEvidence(fillerSession, {
     audioTimeSec: 4.0
 });
 phraseEngine.settlePhrases(fillerSession, 5.5);
-var fillerTrace = phraseEngine.getPhraseTrace(fillerSession);
-var fillerPhrase = fillerTrace.find(function(item) { return item.lineIdx === 1; });
-assert.ok(fillerPhrase, 'filler-only phrase trace exists');
-assert.strictEqual(fillerPhrase.lyricStatus, 'confirmed', 'filler-only phrase confirms when whisper provides the filler word');
-assert.ok(fillerPhrase.anchorsHit > 0, 'filler-only phrase records anchor hits');
+var fillerState = fillerSession.states[fillerLinePhrase.phraseId];
+assert.strictEqual(Object.keys(fillerState.anchorHits).length, 0, 'filler-only line records no anchor hits even when the filler word is transcribed');
+assert.notStrictEqual(fillerState.lyricStatus, 'confirmed', 'filler-only line never confirms (nothing scoreable)');
+
+// Compound-word split: a lyric token "throwdown" that the recognizer emits as two
+// tokens ("throw down") is still credited by merging adjacent ASR tokens.
+// (Real case: Class of 3000 - Throwdown.)
+var compPlan = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'we throwdown hey' },
+    { time: 4, text: 'mountain river stone' }
+], { difficulty: 'easy', audioDuration: 8 });
+var compPhrase = compPlan.phrases.find(function (p) { return p.lineIdx === 0; });
+var throwdownAnchor = compPhrase.anchors.find(function (a) { return a.word === 'throwdown'; });
+assert.ok(throwdownAnchor, 'precondition: throwdown is selected as an anchor');
+var compSession = phraseEngine.createPhraseSession(compPlan);
+phraseEngine.addEvidence(compSession, {
+    id: 'final-td', source: 'browser_final', text: 'we throw down',
+    words: [], receivedAtSec: 1.0, audioTimeSec: 1.0
+});
+assert.ok(compSession.states[compPhrase.phraseId].anchorHits[throwdownAnchor.anchorIdx],
+    'compound anchor "throwdown" credited from the split "throw down" (addEvidence)');
+
+// Same via the late-evidence reconcile path.
+var compSession2 = phraseEngine.createPhraseSession(compPlan);
+phraseEngine.reconcileLateEvidence(compSession2, {
+    id: 'late-td', source: 'browser_final', text: 'we throw down',
+    words: [], receivedAtSec: 5.0, audioTimeSec: 3.5
+}, 5.0);
+assert.ok(compSession2.states[compPhrase.phraseId].anchorHits[throwdownAnchor.anchorIdx],
+    'compound anchor "throwdown" credited from the split "throw down" (reconcile)');
+
+// Honesty guard: unrelated adjacent words must NOT merge into a false credit.
+var negSession = phraseEngine.createPhraseSession(compPlan);
+phraseEngine.addEvidence(negSession, {
+    id: 'neg-td', source: 'browser_final', text: 'mountain river',
+    words: [], receivedAtSec: 1.0, audioTimeSec: 1.0
+});
+assert.ok(!negSession.states[compPhrase.phraseId].anchorHits[throwdownAnchor.anchorIdx],
+    'unrelated adjacent words do not merge into a false compound credit');
 
 var longLyrics = [];
 for (var i = 0; i < 180; i++) {
@@ -487,9 +529,10 @@ assert.ok(Object.keys(uniqSession.states['p0'].anchorHits).length > 0,
 console.log('Class-2 unique-anchor reconcile: passed.');
 
 // === Fast-tempo recognition allowance (cheese-floored bar) ===
-// High-WPS lines the recognizer can't fully transcribe get a LOWER anchorsRequired,
-// floored at 2 genuinely-recognized anchors (cheese with 0-1 recognized still fails);
-// normal-tempo lines keep the full bar. The buff is fast-tempo only.
+// On dense/fast lines the browser recognizer drops most words (verified in real
+// telemetry: ~3 of 4 dropped on back-to-back bars), so the bar drops toward a
+// SINGLE genuinely-recognized anchor -- 1 confirmed word + VAD engagement is enough.
+// Cheese with 0 recognized still fails. Normal-tempo lines keep the full bar.
 var fastP = phraseEngine.buildPhrasePlan([
     { time: 0, text: 'alpha bravo charlie delta echo foxtrot golf hotel' }, // ~5 wps -> fast
     { time: 1.6, text: 'tail line words here now' }
@@ -500,10 +543,28 @@ var fastChunks = fastP.phrases.filter(function (p) {
 });
 assert.ok(fastChunks.length > 0, 'precondition: a fast chunk with >=3 anchors exists');
 fastChunks.forEach(function (p) {
-    var fastBar = Math.max(2, Math.ceil(p.anchors.length * 0.5));
-    assert.ok(p.anchorsRequired <= fastBar, 'fast chunk: bar lowered to <= max(2, ceil(anchors*0.5))');
-    assert.ok(p.anchorsRequired >= 2, 'cheese floor: fast bar is never below 2 recognized anchors');
+    var fastBar = Math.max(1, Math.ceil(p.anchors.length * 0.25));
+    assert.ok(p.anchorsRequired <= fastBar, 'fast chunk: bar lowered to <= max(1, ceil(anchors*0.25))');
+    assert.ok(p.anchorsRequired >= 1, 'cheese floor: fast bar is never below 1 recognized anchor');
 });
+// A dense line with just a few anchors drops all the way to ONE recognized anchor
+// (the recognizer-drops case from the Roots telemetry).
+var fastFew = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'darkness preach gospel' },        // 3 words in 0.7s -> very fast
+    { time: 0.7, text: 'tail words here now please' }
+], { difficulty: 'expert', audioDuration: 8 });
+var ff = fastFew.phrases.find(function (p) { return p.lineIdx === 0; });
+assert.ok(ff.anchors.length >= 2 && ff.anchors.length <= 4, 'precondition: a dense line with a few anchors');
+assert.strictEqual(ff.anchorsRequired, 1, 'a dense few-anchor line requires just 1 recognized anchor');
+// Short back-to-back lines (minimal pausing) get the allowance even at moderate
+// WPS -- the recognizer can't emit a final inside a sub-1.2s window.
+var shortP = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'preach gospel' },                  // 2 words in 0.8s -> WPS ~2.5, tiny window
+    { time: 0.8, text: 'tail words here now please' }
+], { difficulty: 'expert', audioDuration: 8 });
+var sp = shortP.phrases.find(function (p) { return p.lineIdx === 0; });
+assert.ok((sp.words.length / (sp.endSec - sp.startSec)) < 4.0, 'precondition: short line is below the WPS threshold');
+assert.strictEqual(sp.anchorsRequired, 1, 'a short back-to-back line requires just 1 anchor even at moderate WPS');
 var normP = phraseEngine.buildPhrasePlan([
     { time: 0, text: 'slow measured steady careful chosen words' }          // very low wps -> normal
 ], { difficulty: 'expert', audioDuration: 30 });

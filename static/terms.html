@@ -4,12 +4,40 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Terms of Service — Audiopian</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <meta name="description" content="Audiopian Terms of Service - plain-English terms for using the free browser singing game.">
+    <meta property="og:title" content="Audiopian - Terms of Service">
+    <meta property="og:description" content="Plain-English terms for using Audiopian.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://audiopian.com/terms">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Audiopian - Terms of Service">
+    <meta name="twitter:description" content="Plain-English terms for using Audiopian.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Theme boot: self-contained; set data-theme BEFORE the stylesheet paints (no FOUC, no external dep). -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('audiopian-theme');
+          if (t !== 'light' && t !== 'dark') {
+            t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/theme-helpers.js"></script>
 </head>
 <body class="legal-page">
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" title="Switch theme">
+      <svg class="ico-sun icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      <svg class="ico-moon icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
     <main class="legal">
         <a class="doc-home" href="/"><span class="logo-dot"></span>Audiopian</a>
         <h1 class="doc-title">Terms of Service</h1>
@@ -59,7 +87,6 @@
         <p>We may modify or discontinue the Service, or update these Terms, at any time. If we change the Terms, we&rsquo;ll update the date above; continued use means you accept the changes.</p>
 
         <h2>13. Governing law</h2>
-        <!-- TODO(operator): set your U.S. state below before publishing. -->
         <p>These Terms are governed by the laws of the State of <strong>Washington</strong>, United States, without regard to its conflict-of-laws rules.</p>
 
         <h2>14. Contact</h2>
@@ -73,5 +100,19 @@
             <a href="/">&larr; Home</a>
         </nav>
     </main>
+    <footer class="site-footer">
+        &copy; <span class="footer-year">2026</span> Audiopian
+        <span class="sep">&middot;</span><a href="https://github.com/WestsideSage" target="_blank" rel="noopener noreferrer">GitHub</a>
+        <span class="sep">&middot;</span><a href="/terms">Terms</a>
+        <span class="sep">&middot;</span><a href="/privacy">Privacy</a>
+        <span class="sep">&middot;</span><a href="/dmca">DMCA</a>
+    </footer>
+    <script>
+      (function () {
+        var els = document.querySelectorAll('.footer-year');
+        for (var i = 0; i < els.length; i++) els[i].textContent = String(new Date().getFullYear());
+      })();
+    </script>
+    <script src="/static/theme-toggle.js" defer></script>
 </body>
 </html>

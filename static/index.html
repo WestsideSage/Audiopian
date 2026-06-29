@@ -3,33 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <title>Audiopian</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <meta name="description" content="Audiopian - sing along to any song in your browser. Free, scored, real-time lyrics. No downloads.">
+    <meta property="og:title" content="Audiopian - sing any song, scored, in your browser">
+    <meta property="og:description" content="Search any song and sing along. Free, scored, real-time lyrics - no downloads.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://audiopian.com/">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Audiopian - sing any song, scored, in your browser">
+    <meta name="twitter:description" content="Search any song and sing along. Free, scored, real-time lyrics - no downloads.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Theme boot: self-contained; set data-theme BEFORE the stylesheet paints (no FOUC, no external dep). -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('audiopian-theme');
+          if (t !== 'light' && t !== 'dark') {
+            t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/theme-helpers.js"></script>
 </head>
 <body class="has-footer">
-    <div id="unsupported" class="unsupported-overlay" style="display:none">
-      <div>
-        <h2>Audiopian needs desktop Chrome or Edge</h2>
+    <div id="unsupported" class="unsupported-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="unsupportedTitle">
+      <div class="unsupported-box panel">
+        <div class="logo-dot" aria-hidden="true"></div>
+        <h2 id="unsupportedTitle">Open in desktop Chrome or Edge</h2>
         <p>
-          The free voice recognition runs only in <strong>desktop Chrome or Edge</strong> with a
-          microphone. Open this link in desktop Chrome or Edge to play.
+          Audiopian's free voice recognition runs only in <strong>desktop Chrome or Edge</strong>
+          with a microphone. Copy this link and open it there to play.
         </p>
+        <button id="copyLinkBtn" class="btn btn--primary" type="button">Copy link</button>
       </div>
     </div>
 
     <div class="card">
-        <h1 class="wordmark"><span class="logo-dot"></span>Audiopian</h1>
+        <div class="card-head">
+            <h1 class="wordmark"><span class="logo-dot"></span>Audiopian</h1>
+            <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" title="Switch theme">
+              <svg class="ico-sun icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+              <svg class="ico-moon icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </button>
+        </div>
 
         <p class="tagline">
-            Search for any song and sing along.
+            Search any song and sing along.
+            <span class="tagline-sub">Scored · free · any song · in your browser</span>
         </p>
 
         <label for="songSearch">Search for a song</label>
         <input type="text" id="songSearch" placeholder="e.g. Special Ed I Got It Made" autofocus autocomplete="off" />
         <button id="searchBtn" onclick="runSearch()">Search</button>
-        <div id="searchStatus"></div>
+        <div id="searchStatus" role="status" aria-live="polite"></div>
         <div id="songResults" class="search-results" style="display:none"></div>
 
         <div id="starterRow" style="display:none">
@@ -41,24 +74,24 @@
             <label for="url">YouTube URL</label>
             <input type="text" id="url" placeholder="https://youtube.com/watch?v=..." />
 
-            <label for="artist">Artist <span class="hint">(auto-filled)</span></label>
-            <input type="text" id="artist" placeholder="Artist name" />
+            <label for="artist">Artist</label>
+            <input type="text" id="artist" placeholder="Artist name (auto-filled)" />
 
-            <label for="title">Title <span class="hint">(auto-filled)</span></label>
-            <input type="text" id="title" placeholder="Song title" />
+            <label for="title">Title</label>
+            <input type="text" id="title" placeholder="Song title (auto-filled)" />
 
             <button id="loadBtn" onclick="loadSong()">Load Song</button>
-            <button id="retryBtn" class="btn-secondary" onclick="retryLyrics()" style="display:none;margin-top:10px">
+            <button id="retryBtn" class="btn btn--secondary" onclick="retryLyrics()" style="display:none;margin-top:10px">
                 Retry with edited title/artist
             </button>
         </div>
-        <div id="status"></div>
+        <div id="status" role="status" aria-live="polite"></div>
 
         <div id="localUploadSection">
             <div class="search-divider">or load a local audio file</div>
-            <p class="hint-text">Fill in Artist + Title above for synced lyrics, then choose a file you already own.</p>
+            <p class="form-hint">Fill in Artist + Title above for synced lyrics, then choose a file you already own.</p>
             <input type="file" id="localFile" accept="audio/*" style="margin-bottom:10px" />
-            <button id="loadLocalBtn" onclick="loadLocal()">🎵 Load Local File</button>
+            <button id="loadLocalBtn" onclick="loadLocal()"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> Load Local File</button>
         </div>
 
         <details class="byok">
@@ -66,14 +99,14 @@
           <input id="openaiKey" type="password" placeholder="sk-…" autocomplete="off" />
           <div class="byok-actions">
             <button id="saveKeyBtn" type="button">Save</button>
-            <button id="clearKeyBtn" class="btn-secondary" type="button">Clear</button>
+            <button id="clearKeyBtn" class="btn btn--secondary" type="button">Clear</button>
           </div>
           <p class="byok-note">Stored in this browser and sent only to OpenAI — never to Audiopian.</p>
         </details>
     </div>
 
     <footer class="site-footer">
-        &copy; 2026 Audiopian
+        &copy; <span class="footer-year">2026</span> Audiopian
         <span class="sep">&middot;</span><a href="https://github.com/WestsideSage" target="_blank" rel="noopener noreferrer">GitHub</a>
         <span class="sep">&middot;</span><a href="/terms">Terms</a>
         <span class="sep">&middot;</span><a href="/privacy">Privacy</a>
@@ -99,6 +132,18 @@
                     hasSpeechRecognition: !!(window.SpeechRecognition || window.webkitSpeechRecognition)
                 })
                 : true;
+            var copyBtn = document.getElementById('copyLinkBtn');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', function () {
+                    var url = window.location.href;
+                    var done = function () { copyBtn.textContent = 'Copied!'; setTimeout(function () { copyBtn.textContent = 'Copy link'; }, 1600); };
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(url).then(done, function () { copyBtn.textContent = url; });
+                    } else {
+                        copyBtn.textContent = url;
+                    }
+                });
+            }
             if (!supported) {
                 var el = document.getElementById('unsupported');
                 if (el) el.style.display = 'flex';
@@ -214,6 +259,10 @@
         function setStatus(msg, type) {
             statusEl.textContent = msg;
             statusEl.className = type;
+            // Errors should be announced promptly; everything else stays polite.
+            var isErr = type === 'error';
+            statusEl.setAttribute('role', isErr ? 'alert' : 'status');
+            statusEl.setAttribute('aria-live', isErr ? 'assertive' : 'polite');
         }
 
         // ---------- In-app search (lyrics-first → resolver Worker → smart picker) ----------
@@ -221,19 +270,28 @@
 
         function setSearchStatus(msg, type) {
             var el = document.getElementById('searchStatus');
-            if (el) { el.textContent = msg; el.className = type || ''; }
+            if (el) {
+                el.textContent = msg;
+                el.className = type || '';
+                var isErr = type === 'error';
+                el.setAttribute('role', isErr ? 'alert' : 'status');
+                el.setAttribute('aria-live', isErr ? 'assertive' : 'polite');
+            }
         }
 
         async function runSearch() {
             var q = document.getElementById('songSearch').value.trim();
             var box = document.getElementById('songResults');
+            var btn = document.getElementById('searchBtn');
             if (!q) { setSearchStatus('Type a song to search.', 'error'); return; }
             setSearchStatus('Searching…', '');
             box.style.display = 'none'; box.innerHTML = '';
+            if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
 
             var songs = [];
             try { songs = await KaraokeeLyricsClient.searchSongs(q); }
             catch (e) { songs = []; }
+            finally { if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); } }
 
             if (!songs.length) {
                 setSearchStatus('No songs found for "' + q + '".', 'error');
@@ -257,20 +315,50 @@
             }
             songs.slice(0, 6).forEach(function (s, i) {
                 var div = document.createElement('div');
-                div.className = 'search-result-item';
-                div.onclick = function () { pickSong(i); };
+                div.className = 'search-result-item has-thumb';
+                _activatable(div, 'Play ' + s.trackName + ' by ' + s.artistName, function () { pickSong(i); });
                 var dur = s.duration || 0;
                 var mins = Math.floor(dur / 60), secs = ('0' + (dur % 60)).slice(-2);
+                div.appendChild(_thumbPlaceholder());
+                var text = document.createElement('div'); text.className = 'sr-text';
                 var t = document.createElement('div'); t.className = 'search-result-title'; t.textContent = s.trackName;
                 // Lead with the artist — it's the real differentiator between same-titled results.
                 var m = document.createElement('div'); m.className = 'search-result-meta';
                 m.innerHTML = '<strong>' + _esc(s.artistName) + '</strong>' + (dur ? ' · ' + mins + ':' + secs : '');
-                div.appendChild(t); div.appendChild(m);
+                text.appendChild(t); text.appendChild(m);
+                div.appendChild(text);
                 box.appendChild(div);
             });
             box.style.display = 'block';
         }
         function _esc(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+
+        // Make a styled <div> row behave like a button for keyboard + screen-reader
+        // users: button role, focusability (picks up the universal :focus-visible
+        // ring), an accessible name, and Enter/Space activation. The row's child
+        // thumbnail stays alt="" (decorative) so the name isn't announced twice.
+        function _activatable(el, label, fn) {
+            el.setAttribute('role', 'button');
+            el.setAttribute('tabindex', '0');
+            if (label) el.setAttribute('aria-label', label);
+            el.onclick = fn;
+            el.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                    e.preventDefault();
+                    fn();
+                }
+            });
+            return el;
+        }
+
+        // A music-note tile for rows that don't yet have a real video thumbnail
+        // (lrclib search results resolve their video only on pick).
+        function _thumbPlaceholder() {
+            var ph = document.createElement('div');
+            ph.className = 'sr-thumb sr-thumb-ph';
+            ph.innerHTML = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+            return ph;
+        }
 
         async function pickSong(i) {
             var song = window._lastSongResults[i];
@@ -306,15 +394,33 @@
             box.appendChild(head);
             candidates.forEach(function (c, idx) {
                 var div = document.createElement('div');
-                div.className = 'search-result-item' + (idx === 0 ? ' is-best' : '');
-                div.onclick = function () { pickVideo(c.videoId, song); };
+                div.className = 'search-result-item has-thumb' + (idx === 0 ? ' is-best' : '');
+                _activatable(div, 'Use this version: ' + c.title, function () { pickVideo(c.videoId, song); });
                 var dur = c.durationSec || 0;
                 var mins = Math.floor(dur / 60), secs = ('0' + (dur % 60)).slice(-2);
+
+                var thumb = document.createElement('img');
+                thumb.className = 'sr-thumb';
+                thumb.loading = 'lazy';
+                thumb.alt = '';
+                thumb.src = c.thumbnail || ('https://i.ytimg.com/vi/' + encodeURIComponent(c.videoId) + '/mqdefault.jpg');
+                thumb.onerror = function () { this.style.visibility = 'hidden'; };
+
+                var text = document.createElement('div'); text.className = 'sr-text';
                 var t = document.createElement('div'); t.className = 'search-result-title';
-                t.textContent = c.title + (idx === 0 ? '  ✓' : '');
+                t.textContent = c.title;
+                if (idx === 0) {
+                    var best = document.createElement('span');
+                    best.className = 'pill sr-best-pill';
+                    best.innerHTML = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Best match';
+                    t.appendChild(document.createTextNode(' '));
+                    t.appendChild(best);
+                }
                 var m = document.createElement('div'); m.className = 'search-result-meta';
                 m.textContent = (c.channelTitle || '') + ' · ' + mins + ':' + secs;
-                div.appendChild(t); div.appendChild(m);
+                text.appendChild(t); text.appendChild(m);
+
+                div.appendChild(thumb); div.appendChild(text);
                 box.appendChild(div);
             });
             box.style.display = 'block';
@@ -361,11 +467,19 @@
             list.innerHTML = '';
             STARTER_SONGS.forEach(function (s, i) {
                 var div = document.createElement('div');
-                div.className = 'search-result-item';
-                div.onclick = function () { playStarter(i); };
+                div.className = 'search-result-item has-thumb';
+                _activatable(div, 'Play ' + s.title + ' by ' + s.artist, function () { playStarter(i); });
+                var thumb = document.createElement('img');
+                thumb.className = 'sr-thumb';
+                thumb.loading = 'lazy';
+                thumb.alt = '';
+                thumb.src = 'https://i.ytimg.com/vi/' + encodeURIComponent(s.videoId) + '/mqdefault.jpg';
+                thumb.onerror = function () { this.style.visibility = 'hidden'; };
+                var text = document.createElement('div'); text.className = 'sr-text';
                 var t = document.createElement('div'); t.className = 'search-result-title'; t.textContent = s.title;
                 var m = document.createElement('div'); m.className = 'search-result-meta'; m.textContent = s.artist;
-                div.appendChild(t); div.appendChild(m);
+                text.appendChild(t); text.appendChild(m);
+                div.appendChild(thumb); div.appendChild(text);
                 list.appendChild(div);
             });
             list.style.display = 'block';
@@ -449,5 +563,12 @@
             });
         })();
     </script>
+    <script>
+      (function () {
+        var els = document.querySelectorAll('.footer-year');
+        for (var i = 0; i < els.length; i++) els[i].textContent = String(new Date().getFullYear());
+      })();
+    </script>
+    <script src="/static/theme-toggle.js" defer></script>
 </body>
 </html>

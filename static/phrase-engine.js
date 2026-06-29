@@ -48,13 +48,19 @@
     // one late `final`). Tunable; see the design spec §7.
     var RECONCILE_LOOKBACK_SEC = 18;
     // Fast-tempo recognition allowance: on high-WPS (>= FAST_WPS_THRESHOLD) lines the
-    // recognizer demonstrably drops words (a hard ASR limit, not a wrong performance), so
-    // demanding the full anchor ratio is unfair and frustrating. buildPhrasePlan lowers
-    // anchorsRequired on such lines toward ~half the anchors, FLOORED at FAST_RECOGNIZED_FLOOR
-    // genuinely-RECOGNIZED anchors. anchorHits only come from real recognition/reconcile
-    // (never bare VAD energy), so humming/cheese (0-1 recognized) still fails the floor.
+    // browser recognizer demonstrably drops words -- real telemetry (a dense Roots rap)
+    // showed ~3 of every 4 words dropped on back-to-back bars while VAD confirmed the
+    // singer was vocalizing throughout. Demanding the full anchor ratio there punishes a
+    // recognizer limit, not the singer. buildPhrasePlan lowers anchorsRequired on such
+    // lines toward ~a quarter of the anchors, FLOORED at FAST_RECOGNIZED_FLOOR genuinely-
+    // RECOGNIZED anchors. anchorHits only come from real recognition/reconcile (never bare
+    // VAD energy), so humming/cheese (0 recognized) still fails the floor.
     var FAST_WPS_THRESHOLD = 4.0;
-    var FAST_RECOGNIZED_FLOOR = 2;
+    // Back-to-back lines with minimal pausing: a line whose window is this short is
+    // gone before the async recognizer can emit a final for it, so it gets the same
+    // allowance as a high-WPS line even at moderate words/sec.
+    var FAST_WINDOW_SEC = 1.2;
+    var FAST_RECOGNIZED_FLOOR = 1;
     // Interim reconciliation credits a line purely by word content (a repeated hook
     // anchor from the NEXT line can match a SKIPPED middle line whose true owner has
     // not yet ended — the forward-only floor only guards lines BEFORE the last
@@ -135,27 +141,12 @@
                 phonetic: scoring.doubleMetaphone ? scoring.doubleMetaphone(word) : undefined
             });
         }
-        // Fallback: if a phrase consists entirely of filler/short words (e.g. "uh uh"),
-        // include those words as low-weight anchors so the phrase can still be scored
-        // when Whisper transcribes them. Without this, anchorsRequired stays 0 and the
-        // line is permanently unscoreable in the phrase engine.
-        if (anchors.length === 0 && words.length > 0) {
-            for (var fi = 0; fi < words.length; fi++) {
-                var fw = words[fi] ? words[fi].word : '';
-                if (!fw) continue;
-                if (_isNeverScore(fw)) continue;
-                if (clean && _isProfane(fw)) continue;
-                anchors.push({
-                    anchorIdx: anchors.length,
-                    wordIdx: fi,
-                    word: fw,
-                    wordClass: 'adlib',
-                    weight: WORD_WEIGHTS.adlib || 0.25,
-                    phonetic: scoring.doubleMetaphone ? scoring.doubleMetaphone(fw) : undefined,
-                    fillerOnly: true
-                });
-            }
-        }
+        // No fallback for filler-only lines. If a phrase is entirely adlibs/fillers/
+        // short tokens (e.g. "Ah ah ah", "uh uh", "la la la"), it keeps ZERO anchors,
+        // so anchorsRequired stays 0 and the line is excluded from scoring: getHonestPct
+        // skips req<=0 phrases, and no anchor spans means no key-word red on a "miss".
+        // Adlibs are structurally unwinnable (recognizers don't reliably return them),
+        // so they must neither help nor hurt the score.
         anchors.sort(function(a, b) {
             if (b.weight !== a.weight) return b.weight - a.weight;
             return a.wordIdx - b.wordIdx;
@@ -218,11 +209,13 @@
                     anchorsRequired = anchors.length - 1;
                 }
                 // Fast-tempo recognition allowance (cheese-floored): lower the bar on
-                // high-WPS lines the recognizer can't fully transcribe, but never below
-                // FAST_RECOGNIZED_FLOOR genuinely-recognized anchors. Only lowers, never raises.
-                var chunkWps = chunk.words.length / Math.max(0.001, chunk.endSec - chunk.startSec);
-                if (anchorsRequired > 0 && chunkWps >= FAST_WPS_THRESHOLD) {
-                    var fastBar = Math.max(FAST_RECOGNIZED_FLOOR, Math.ceil(anchors.length * 0.5));
+                // high-WPS lines the recognizer can't fully transcribe, toward ~a quarter
+                // of the anchors but never below FAST_RECOGNIZED_FLOOR genuinely-recognized
+                // anchors. Only lowers, never raises.
+                var chunkDur = chunk.endSec - chunk.startSec;
+                var chunkWps = chunk.words.length / Math.max(0.001, chunkDur);
+                if (anchorsRequired > 0 && (chunkWps >= FAST_WPS_THRESHOLD || chunkDur <= FAST_WINDOW_SEC)) {
+                    var fastBar = Math.max(FAST_RECOGNIZED_FLOOR, Math.ceil(anchors.length * 0.25));
                     anchorsRequired = Math.min(anchorsRequired, fastBar);
                 }
                 phrases.push({
@@ -401,7 +394,27 @@
         });
     }
 
-    function candidateFor(session, evidence, token, state, anchor) {
+    // Compound-word bridge: a single lyric token (e.g. "throwdown") that the
+    // recognizer splits into two ("throw down") would never match its anchor. When
+    // the single token doesn't match, try it merged with the NEXT token and accept
+    // ONLY a near-exact hit (>= COMPOUND_MERGE_MIN) on a LONGER (compound) anchor --
+    // so unrelated adjacent words can't manufacture a credit. Returns the match
+    // result plus how many tokens it consumed (1 normally, 2 on a compound merge).
+    var COMPOUND_MERGE_MIN = 0.9;
+    function anchorMatchResult(token, nextToken, anchor) {
+        var single = scoring.wordsMatchScore(token.word, anchor.word, anchor.phonetic);
+        if (single && single.score >= 0.75) return { result: single, span: 1 };
+        if (nextToken && token.word && nextToken.word && anchor.word &&
+            anchor.word.length > token.word.length) {
+            var merged = scoring.wordsMatchScore(token.word + nextToken.word, anchor.word, anchor.phonetic);
+            if (merged && merged.score >= COMPOUND_MERGE_MIN) {
+                return { result: { score: merged.score, method: 'compound' }, span: 2 };
+            }
+        }
+        return { result: single || { score: 0, method: null }, span: 1 };
+    }
+
+    function candidateFor(session, evidence, token, nextToken, state, anchor) {
         var tokenId = evidence.id + ':' + token.idx;
         if (session.consumedTokenIds[tokenId]) {
             return { rejected: true, reason: 'already_consumed' };
@@ -420,18 +433,20 @@
         if (evidence.source === 'browser_interim') {
             return { rejected: true, reason: 'weak_source' };
         }
-        var result = scoring.wordsMatchScore(token.word, anchor.word, anchor.phonetic);
-        if (!result || result.score < 0.75) {
-            return { rejected: true, reason: 'low_score', score: result ? result.score : 0 };
+        var m = anchorMatchResult(token, nextToken, anchor);
+        if (!m.result || m.result.score < 0.75) {
+            return { rejected: true, reason: 'low_score', score: m.result ? m.result.score : 0 };
         }
         return {
             tokenId: tokenId,
             token: token,
+            span: m.span,
+            nextTokenIdx: (m.span === 2 && nextToken) ? nextToken.idx : null,
             state: state,
             anchor: anchor,
             source: evidence.source,
-            score: result.score,
-            method: result.method,
+            score: m.result.score,
+            method: m.result.method,
             timingDistance: timingDistance(state.phrase, evidence, token)
         };
     }
@@ -450,12 +465,14 @@
         var tokens = evidenceTokens(evidence);
         var accepted = [];
         var states = activePhraseStates(session, evidence);
-        tokens.forEach(function(token) {
+        tokens.forEach(function(token, ti) {
+            if (session.consumedTokenIds[evidence.id + ':' + token.idx]) return; // merged into a prior compound
+            var nextTok = (ti + 1 < tokens.length && !session.consumedTokenIds[evidence.id + ':' + tokens[ti + 1].idx]) ? tokens[ti + 1] : null;
             var candidates = [];
             states.forEach(function(state) {
                 var phrase = state.phrase;
                 (phrase.anchors || []).forEach(function(anchor) {
-                    var candidate = candidateFor(session, evidence, token, state, anchor);
+                    var candidate = candidateFor(session, evidence, token, nextTok, state, anchor);
                     if (candidate.rejected) {
                         if (candidate.reason !== 'low_score') reject(state, candidate.reason, evidence.source, token, anchor);
                     } else {
@@ -471,6 +488,7 @@
             });
             var best = candidates[0];
             session.consumedTokenIds[best.tokenId] = true;
+            if (best.nextTokenIdx != null) session.consumedTokenIds[evidence.id + ':' + best.nextTokenIdx] = true; // compound merge consumed two tokens
             best.state.anchorHits[best.anchor.anchorIdx] = {
                 word: best.anchor.word,
                 source: evidence.source,
@@ -571,25 +589,29 @@
             var tokenId = evidence.id + ':' + token.idx;
             if (session.consumedTokenIds[tokenId]) continue;
             var isFiller = REPEATED_FILLER[token.word] || isAdlibWord(token.word);
+            var nextTok = (ti + 1 < tokens.length && !session.consumedTokenIds[evidence.id + ':' + tokens[ti + 1].idx]) ? tokens[ti + 1] : null;
 
             for (var ci = minIdx; ci < candidates.length; ci++) {
                 var state = session.states[candidates[ci].phraseId];
                 var anchors = state.phrase.anchors || [];
                 var creditedAnchor = null;
                 var creditedScore = 0;
+                var creditedSpan = 1;
                 for (var ai = 0; ai < anchors.length; ai++) {
                     var anchor = anchors[ai];
                     if (state.anchorHits[anchor.anchorIdx]) continue;
                     if (isFiller && !anchor.fillerOnly) continue;
-                    var result = scoring.wordsMatchScore(token.word, anchor.word, anchor.phonetic);
-                    if (result && result.score >= 0.75) {
+                    var m = anchorMatchResult(token, nextTok, anchor);
+                    if (m.result && m.result.score >= 0.75) {
                         creditedAnchor = anchor;
-                        creditedScore = result.score;
+                        creditedScore = m.result.score;
+                        creditedSpan = m.span;
                         break;
                     }
                 }
                 if (creditedAnchor) {
                     session.consumedTokenIds[tokenId] = true;
+                    if (creditedSpan === 2 && nextTok) session.consumedTokenIds[evidence.id + ':' + nextTok.idx] = true; // compound merge consumed two tokens
                     state.anchorHits[creditedAnchor.anchorIdx] = {
                         word: creditedAnchor.word,
                         source: source + '_reconciled',

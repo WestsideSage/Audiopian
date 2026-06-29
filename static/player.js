@@ -163,10 +163,9 @@ class GameMode {
             lt.useVad = true; // all tempo classes get provisional VAD; slow lines use stricter energy gate in updateHotWord
             lt.vadTempoClass = relClass;
         }
-        // Restore per-song LRC offset from localStorage
+        // Restore per-song LRC offset from localStorage (internal only; no UI control)
         this.lrcOffset = parseFloat(localStorage.getItem('lrcOffset_' + _songKey()) || '0');
         if (this._session) this._session.lrcOffset = this.lrcOffset;
-        _updateOffsetDisplay();
 
         renderLyricsGameMode();
         this._setupRecognition();
@@ -180,10 +179,7 @@ class GameMode {
             : { state: 'ready', reason: null, provider: 'browser_sr', model: 'Web Speech API', checkedAt: Date.now() };
         this._renderAsrProviderStatus();
 
-        document.getElementById('score-display').style.display = 'flex';
         document.getElementById('score-pct').textContent = '0%';
-        document.getElementById('gameBtn').classList.add('active');
-        document.getElementById('lrc-offset-control').style.display = 'flex';
         if (this._arcadeState) this._renderArcadeHud(null);
     }
 
@@ -202,9 +198,6 @@ class GameMode {
         this._stopWhisperTrack();
         this.prevLine = null;
         renderLyrics(); // restore normal lyric rendering
-        document.getElementById('score-display').style.display = 'none';
-        document.getElementById('gameBtn').classList.remove('active');
-        document.getElementById('lrc-offset-control').style.display = 'none';
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
         this._hideArcadeHud();
         // Flush the session (final collect + score active line + settle/commit) before
@@ -256,6 +249,8 @@ class GameMode {
     _resetSessionCounters() {
         this._reachedEnd = false;   // set true when playback fires onEnded; feeds meta.completed
         this._endShown = false;     // idempotency latch for showEndModal (reset per song)
+        this._shownPoints = 0;       // last score value painted by the count-up (reset per song)
+        this._shownMult = 1;         // last multiplier painted (drives the tier-up beat; reset per song)
         this._lastEndCheckT = null; // end-of-song stall detector (poll-based completion)
         this._endStallTicks = 0;
         this.activeLineIdx = -1;
@@ -443,16 +438,19 @@ class GameMode {
         var provider = status.provider || 'unknown';
         var model = status.model || 'unknown';
         var state = status.state || 'unknown';
-        if (provider === 'openai_realtime') {
-            el.textContent = 'ASR: GPT Realtime Whisper (' + model + ') - ' + state;
-            el.style.color = state === 'ready' ? '#00e676' : '#f5a623';
-        } else if (provider === 'local') {
-            el.textContent = 'ASR: local Whisper (' + model + ') - ' + state;
-            el.style.color = state === 'ready' ? '#aaa' : '#f5a623';
-        } else {
-            el.textContent = 'ASR: ' + provider + ' (' + model + ') - ' + state;
-            el.style.color = '#aaa';
-        }
+        var ready = state === 'ready';
+        var error = state === 'error';
+        // User-facing: a friendly mic-status chip (a coloured status dot via the
+        // .ready/.error classes + a plain label). The technical provider/model is
+        // kept in the tooltip for the curious, not shown in the bar.
+        el.classList.toggle('ready', ready);
+        el.classList.toggle('error', error);
+        el.textContent = error ? 'Mic unavailable' : (ready ? 'Mic ready' : 'Connecting…');
+        var friendly = provider === 'openai_realtime' ? 'OpenAI Realtime'
+            : provider === 'local' ? 'On-device Whisper'
+            : provider === 'browser_sr' ? 'Browser speech recognition'
+            : provider;
+        el.title = friendly + (model && model !== 'unknown' ? ' (' + model + ')' : '') + ' — ' + state;
     }
 
     _isRealtimeWhisperProvider() {
@@ -1009,10 +1007,17 @@ class GameMode {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
         var lineEl = lines[e.lineIdx];
         if (lineEl) {
-            // Flash per-line score
+            // Flash a worded per-line verdict (PERFECT / NICE / partial) instead of the
+            // bare +matched/total fraction. score-feedback-helpers maps the ratio to a
+            // verdict; player.js only paints the label + class.
             var flash = document.createElement('div');
             flash.className = 'line-score-flash';
-            flash.textContent = '+' + e.matched + '/' + e.scoredTotal;
+            var verdict = window.KaraokeeScoreFeedback
+                ? KaraokeeScoreFeedback.lineVerdict(e.matched, e.scoredTotal)
+                : 'partial';
+            var verdictLabel = { perfect: 'PERFECT', nice: 'NICE', partial: 'partial', miss: 'miss' };
+            flash.textContent = verdictLabel[verdict] || 'partial';
+            flash.classList.add('v-' + verdict);
             flash.style.top = lineEl.offsetTop + 'px';
             document.getElementById('lyrics-container').appendChild(flash);
             setTimeout(function () { flash.remove(); }, 1300);
@@ -1025,7 +1030,7 @@ class GameMode {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
         if (lines[lineIdx]) {
             lines[lineIdx].querySelectorAll('.word-span').forEach(function (s) {
-                s.classList.remove('matched', 'matched-partial', 'missed', 'asr-confirmed');
+                s.classList.remove('matched', 'matched-partial', 'missed');
             });
         }
     }
@@ -1060,7 +1065,9 @@ class GameMode {
             var e = events[i];
             switch (e.type) {
                 case 'lineScored': this._renderLineScored(e); break;
-                case 'wordMatched': this._logMatch(e.spokenWord, e.targetWord, e.method, e.editDistance, e.phoneticMatch, e.score, e.matched, e.windowPosition); break;
+                case 'wordMatched':
+                    this._logMatch(e.spokenWord, e.targetWord, e.method, e.editDistance, e.phoneticMatch, e.score, e.matched, e.windowPosition);
+                    break;
                 case 'promotion': this._logPromotion(e.source, e.wordIndex, e.score); break;
                 case 'phraseCleared': this._paintPhraseCleared(e.phraseId); break;
                 case 'phraseMissed': this._paintPhraseMissed(e.phraseId); break;
@@ -1154,14 +1161,59 @@ class GameMode {
         var st = this._arcadeState;
         var ptsEl = document.getElementById('ahPoints');
         if (ptsEl) {
-            ptsEl.textContent = String(st.points);
-            if (evt && evt.pointsAwarded > 0) {
-                ptsEl.classList.add('bump');
-                setTimeout(function () { ptsEl.classList.remove('bump'); }, 130);
+            // Count-up from the previously-shown total to the new total instead of a hard
+            // snap. score-feedback-helpers owns the easing + duration; player.js only drives
+            // the rAF loop. prefers-reduced-motion -> snap straight to the final value.
+            var from = (typeof this._shownPoints === 'number') ? this._shownPoints : 0;
+            var to = st.points;
+            this._shownPoints = to;
+            this._animateScoreCountUp(ptsEl, from, to);
+
+            // Floating +points popup on each clear (pointsAwarded > 0).
+            if (evt && window.KaraokeeScoreFeedback) {
+                var gain = KaraokeeScoreFeedback.formatPointsGain(evt.pointsAwarded);
+                if (gain) {
+                    var popEl = document.getElementById('ahPopup');
+                    if (popEl) {
+                        popEl.textContent = gain;
+                        // Restart the CSS animation: remove, force reflow, re-add.
+                        popEl.classList.remove('show');
+                        void popEl.offsetWidth;
+                        popEl.classList.add('show');
+                    }
+                }
             }
         }
         var multEl = document.getElementById('ahMult');
-        if (multEl) multEl.textContent = st.multiplier + '×';
+        if (multEl) {
+            // One-shot tier-up beat when the multiplier crosses up. score-feedback-helpers
+            // decides if a tier-up label is warranted from prev vs new multiplier.
+            var prevMult = (typeof this._shownMult === 'number') ? this._shownMult : 1;
+            multEl.textContent = st.multiplier + '×';
+            if (window.KaraokeeScoreFeedback) {
+                var tierLabel = KaraokeeScoreFeedback.tierUpLabel(prevMult, st.multiplier);
+                if (tierLabel) {
+                    multEl.classList.remove('tierup');
+                    void multEl.offsetWidth;   // restart the animation
+                    multEl.classList.add('tierup');
+                }
+            }
+            this._shownMult = st.multiplier;
+        }
+
+        // Streak milestone callout at 10 / 25 / 50 (distinct from on-fire).
+        if (evt && window.KaraokeeScoreFeedback) {
+            var msLabel = KaraokeeScoreFeedback.milestoneForStreak(evt.streak);
+            if (msLabel) {
+                var msEl = document.getElementById('ahMilestone');
+                if (msEl) {
+                    msEl.textContent = msLabel;
+                    msEl.classList.remove('show');
+                    void msEl.offsetWidth;
+                    msEl.classList.add('show');
+                }
+            }
+        }
         var fill = document.getElementById('ahRampFill');
         if (fill) fill.style.width = Math.round(KaraokeeArcade.rampProgress(st) * 100) + '%';
 
@@ -1172,14 +1224,43 @@ class GameMode {
             streak.style.visibility = st.streak >= 2 ? 'visible' : 'hidden';
         }
         var fire = document.getElementById('ahFire');
-        if (fire) fire.style.display = st.onFire ? 'block' : 'none';
+        if (fire) fire.style.display = st.onFire ? 'inline-flex' : 'none';
+        // On-fire treatment is pure CSS (self-animating); just toggle the class.
         document.body.classList.toggle('arcade-onfire', !!st.onFire);
+    }
+
+    // Drive the score number from `from` to `to` using the pure count-up helper.
+    // Cancels any in-flight count-up so rapid clears don't stack loops. Honors
+    // prefers-reduced-motion by snapping straight to the final value.
+    _animateScoreCountUp(el, from, to) {
+        if (this._countUpRaf) { cancelAnimationFrame(this._countUpRaf); this._countUpRaf = null; }
+        if (!window.KaraokeeScoreFeedback || from === to) { el.textContent = String(to); return; }
+        var reduce = false;
+        try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+        if (reduce) { el.textContent = String(to); return; }
+        var dur = KaraokeeScoreFeedback.countUpDurationMs(to - from);
+        var start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        var self = this;
+        function frame(now) {
+            var t = dur > 0 ? Math.min(1, (now - start) / dur) : 1;
+            el.textContent = String(KaraokeeScoreFeedback.countUpValue(from, to, t));
+            if (t < 1) {
+                self._countUpRaf = requestAnimationFrame(frame);
+            } else {
+                el.textContent = String(to);
+                self._countUpRaf = null;
+            }
+        }
+        this._countUpRaf = requestAnimationFrame(frame);
     }
 
     _hideArcadeHud() {
         var hud = document.getElementById('arcadeHud');
         if (hud) hud.style.display = 'none';
         document.body.classList.remove('arcade-onfire');
+        if (this._countUpRaf) { cancelAnimationFrame(this._countUpRaf); this._countUpRaf = null; }
+        this._shownPoints = 0;
+        this._shownMult = 1;
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────
@@ -1609,7 +1690,7 @@ class GameMode {
         const wBuf    = finalWords.length;
         const wStart  = this.lineStartWordCount;
 
-        let html = '<div class="dbg-header">🎮 GAME DEBUG &mdash; press D to hide</div>';
+        let html = '<div class="dbg-header">GAME DEBUG &mdash; press D to hide</div>';
         html += `<div class="dbg-row"><span class="dbg-label">Line  </span>#${lineNum}: ${lineText}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Words </span>${wordSpans || '—'}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Final </span><span class="dbg-final">&hellip;${tail}</span></div>`;
@@ -1683,7 +1764,6 @@ class GameMode {
         this._endShown = true;
         var self = this;
         var hero = document.getElementById('gradeHero');
-        document.getElementById('lrc-offset-control').style.display = 'none';
 
         // Flush the session at song end, then persist telemetry BEFORE the hi-score write
         // below (so arcade.highScore.previous reflects the prior best). Pass duration+5
@@ -1720,14 +1800,14 @@ class GameMode {
             if (isBest) localStorage.setItem(key, String(summary.points));
 
             document.getElementById('gradeLetter').textContent = grade;
-            document.getElementById('gradePoints').textContent = String(summary.points);
+            document.getElementById('gradePoints').textContent = '0';
             document.getElementById('gradeAcc').textContent = pct + '%';
             document.getElementById('gradeCombo').textContent = summary.maxMultiplier + '×';
             document.getElementById('gradeStreak').textContent = String(summary.longestStreak);
             document.getElementById('gradePerfects').textContent = String(summary.perfects);
             document.getElementById('gradeDiff').textContent = diff.toUpperCase();
             document.getElementById('gradeHiscore').textContent = String(Math.max(prev, summary.points));
-            document.getElementById('nbRibbon').style.display = isBest ? 'block' : 'none';
+            document.getElementById('nbRibbon').setAttribute('data-best', isBest ? '1' : '0');
 
             // Share-image: wire the end-screen button to render THIS run's card.
             var _shareBtn = document.getElementById('shareImgBtn');
@@ -1747,29 +1827,102 @@ class GameMode {
             if (_shareBtnNone) _shareBtnNone.style.display = 'none';
         }
 
-        document.getElementById('gameModal').style.display = 'flex';
+        var modal = document.getElementById('gameModal');
+        modal.style.display = 'flex';
+        this._runResultsEntrance(modal, useArcade ? summary.points : 0);
     }
 
-    // Render the final grade/score/song to a 1080x1080 PNG and download it. The
-    // pure line-building (truncation, DIFF · pts · % stat) is in share-card.js
-    // (buildShareCardLines); this method only draws + triggers the download.
+    // Drive the staged results entrance via [data-stage] on the modal:
+    // overlay fade -> card scale-in -> grade pop -> points count-up -> NEW BEST -> done.
+    // Reduced-motion: jump straight to 'done' (CSS guard already makes transitions
+    // instant) and snap the grade points to final.
+    _runResultsEntrance(modal, finalPoints) {
+        var reduce = false;
+        try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+        var ptsEl = document.getElementById('gradePoints');
+
+        function setStage(s) { modal.setAttribute('data-stage', s); }
+
+        if (reduce) {
+            if (ptsEl) ptsEl.textContent = String(finalPoints);
+            setStage('done');
+            return;
+        }
+
+        // Timeline (ms): each stage is a CSS transition target.
+        setStage('overlay');
+        setTimeout(function () { setStage('card'); }, 80);
+        setTimeout(function () { setStage('grade'); }, 360);
+        setTimeout(function () {
+            setStage('points');
+            // Count the grade points up using the same helper as the in-game HUD.
+            if (ptsEl && window.KaraokeeScoreFeedback && finalPoints > 0) {
+                var dur = KaraokeeScoreFeedback.countUpDurationMs(finalPoints);
+                var start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                (function frame(now) {
+                    var t = dur > 0 ? Math.min(1, (now - start) / dur) : 1;
+                    ptsEl.textContent = String(KaraokeeScoreFeedback.countUpValue(0, finalPoints, t));
+                    if (t < 1) requestAnimationFrame(frame);
+                    else ptsEl.textContent = String(finalPoints);
+                })(start);
+            } else if (ptsEl) {
+                ptsEl.textContent = String(finalPoints);
+            }
+        }, 700);
+        setTimeout(function () { setStage('best'); }, 1300);
+        setTimeout(function () { setStage('done'); }, 1700);
+    }
+
+    // Render the final grade/score/song to a 1080x1080 PNG on the app's brand and download
+    // it. Pure line-building (truncation, DIFF · pts · % stat) stays in share-card.js
+    // (buildShareCardLines); this method only draws + triggers the download. On-brand:
+    // app backdrop, Space Grotesk display face, real cyan->magenta accent, wordmark,
+    // audiopian-score.png filename.
     _downloadShareImage(summary) {
         if (typeof buildShareCardLines !== 'function' || typeof document === 'undefined') return;
         var sd = (typeof songData !== 'undefined' && songData) ? songData : {};
         var L = buildShareCardLines(summary, sd);
+        // Best-effort: ensure the display face is decoded before drawing to canvas.
+        try { if (document.fonts && document.fonts.load) { document.fonts.load("700 64px 'Space Grotesk'"); } } catch (e) {}
         var c = document.createElement('canvas');
         c.width = 1080; c.height = 1080;
         var x = c.getContext('2d');
         if (!x) return;
+
+        // Brand display face. Falls back gracefully if Space Grotesk isn't decoded yet.
+        var DISPLAY = "700 {px}px 'Space Grotesk', 'Segoe UI', sans-serif";
+        var TEXT = "{px}px 'Inter', 'Segoe UI', sans-serif";
+        function fDisplay(px) { return DISPLAY.replace('{px}', px); }
+        function fText(px) { return TEXT.replace('{px}', px); }
+
+        // App backdrop: deep base + the brand wash (cyan/magenta radials), matching the stage.
         x.fillStyle = '#0b0b12'; x.fillRect(0, 0, 1080, 1080);
+        var g1 = x.createRadialGradient(1080, 0, 0, 1080, 0, 900);
+        g1.addColorStop(0, 'rgba(240,70,143,0.16)'); g1.addColorStop(1, 'rgba(240,70,143,0)');
+        x.fillStyle = g1; x.fillRect(0, 0, 1080, 1080);
+        var g2 = x.createRadialGradient(0, 1080, 0, 0, 1080, 900);
+        g2.addColorStop(0, 'rgba(45,212,238,0.14)'); g2.addColorStop(1, 'rgba(45,212,238,0)');
+        x.fillStyle = g2; x.fillRect(0, 0, 1080, 1080);
+
         x.textAlign = 'center';
-        x.fillStyle = '#8b5cf6'; x.font = 'bold 64px sans-serif';  x.fillText(L.brand, 540, 170);
-        x.fillStyle = '#ffffff'; x.font = 'bold 320px sans-serif'; x.fillText(L.grade, 540, 620);
-        x.fillStyle = '#e5e7eb'; x.font = '52px sans-serif';       x.fillText(L.stat, 540, 770);
-        x.fillStyle = '#9ca3af'; x.font = '40px sans-serif';       x.fillText(L.song, 540, 860);
+
+        // Wordmark - brand cyan->magenta gradient text.
+        var brandGrad = x.createLinearGradient(380, 0, 700, 0);
+        brandGrad.addColorStop(0, '#2dd4ee'); brandGrad.addColorStop(1, '#f0468f');
+        x.fillStyle = brandGrad; x.font = fDisplay(60); x.fillText(L.brand, 540, 180);
+
+        // Grade - huge brand-gradient letter (the hero).
+        var gradeGrad = x.createLinearGradient(360, 360, 720, 720);
+        gradeGrad.addColorStop(0, '#2dd4ee'); gradeGrad.addColorStop(0.6, '#f0468f'); gradeGrad.addColorStop(1, '#3ddc84');
+        x.fillStyle = gradeGrad; x.font = fDisplay(320); x.fillText(L.grade, 540, 640);
+
+        // Stat (DIFF · pts · %) and song.
+        x.fillStyle = '#e5e7eb'; x.font = fDisplay(54); x.fillText(L.stat, 540, 790);
+        x.fillStyle = '#9ca3af'; x.font = fText(40);    x.fillText(L.song, 540, 880);
+
         var a = document.createElement('a');
         a.href = c.toDataURL('image/png');
-        a.download = 'karaokee-score.png';
+        a.download = 'audiopian-score.png';
         document.body.appendChild(a); a.click(); a.remove();
     }
 }
@@ -1949,16 +2102,24 @@ function updateLyrics() {
 // Poll every 100ms for lyric sync
 setInterval(updateLyrics, 100);
 
+// Lucide play/pause glyphs for the transport button (no icon framework - raw SVG).
+var _ICON_PLAY = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+var _ICON_PAUSE = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+function _setPlayIcon(isPlaying) {
+    if (!playBtn) return;
+    playBtn.innerHTML = isPlaying ? _ICON_PAUSE : _ICON_PLAY;
+    playBtn.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+}
 // Play/pause
 function togglePlay() {
     if (!playback) return;
     if (playback.isPaused()) {
         playback.play();
-        playBtn.textContent = '⏸';
+        _setPlayIcon(true);
         if (gameMode.active) gameMode.resume();
     } else {
         playback.pause();
-        playBtn.textContent = '▶';
+        _setPlayIcon(false);
         if (gameMode.active) gameMode.suspend();
     }
 }
@@ -1996,28 +2157,6 @@ seekBar.addEventListener('input', () => {
 
 // Volume
 volumeBar.addEventListener('input', () => { if (playback) playback.setVolume(parseFloat(volumeBar.value)); });
-
-// LRC offset buttons
-function _updateOffsetDisplay() {
-    document.getElementById('offsetDisplay').textContent =
-        (gameMode ? gameMode.lrcOffset : 0).toFixed(1) + 's';
-}
-
-document.getElementById('offsetMinus').addEventListener('click', function() {
-    if (!gameMode) return;
-    gameMode.lrcOffset = Math.max(-10, gameMode.lrcOffset - 0.5);
-    if (gameMode._session) gameMode._session.lrcOffset = gameMode.lrcOffset;
-    localStorage.setItem('lrcOffset_' + _songKey(), gameMode.lrcOffset);
-    _updateOffsetDisplay();
-});
-
-document.getElementById('offsetPlus').addEventListener('click', function() {
-    if (!gameMode) return;
-    gameMode.lrcOffset = Math.min(10, gameMode.lrcOffset + 0.5);
-    if (gameMode._session) gameMode._session.lrcOffset = gameMode.lrcOffset;
-    localStorage.setItem('lrcOffset_' + _songKey(), gameMode.lrcOffset);
-    _updateOffsetDisplay();
-});
 
 // Debug HUD — press D to toggle (works any time, not just in Game Mode)
 document.addEventListener('keydown', (e) => {
@@ -2057,7 +2196,7 @@ function _wirePlaybackCallbacks() {
         var _gc = document.getElementById('diffGateCards');
         if (_gc) _gc.classList.remove('loading');
         if (overlayDismissed) {
-            Promise.resolve(playback.play()).then(function () { playBtn.textContent = '⏸'; }).catch(function () {});
+            Promise.resolve(playback.play()).then(function () { _setPlayIcon(true); }).catch(function () {});
         }
     });
     playback.onEnded(function () {
@@ -2165,7 +2304,7 @@ function openDifficultyGate() {
     var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
     if (sd) document.getElementById('prepSongTitle').textContent = sd.artist + ' \u2014 ' + sd.title;
     _markSelectedCard(localStorage.getItem('arcadeDifficulty') || 'medium');
-    try { if (playback) playback.pause(); playBtn.textContent = '\u25B6'; } catch (e) {}
+    try { if (playback) playback.pause(); _setPlayIcon(false); } catch (e) {}
     renderDifficultyPreview(localStorage.getItem('arcadeDifficulty') || 'medium');
     overlayDismissed = false;
     overlay.style.display = 'flex';
@@ -2215,7 +2354,7 @@ function _runCountIn(d) {
         // strand the song muted (volume 0 from the arm) for the rest of the run.
         try { playback.setVolume(savedVol); } catch (e) {}
         try { playback.seek(0); } catch (e) {}
-        try { Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {}); } catch (e) {}
+        try { Promise.resolve(playback.play()).then(function () { _setPlayIcon(true); }).catch(function () {}); } catch (e) {}
     }
     function onKey(e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); go(); } }
     document.addEventListener('keydown', onKey);
@@ -2247,7 +2386,7 @@ function justListen() {
     overlayDismissed = true;
     gameMode._stopMicCheck();
     document.getElementById('prepOverlay').style.display = 'none';
-    Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+    Promise.resolve(playback.play()).then(function () { _setPlayIcon(true); }).catch(function () {});
 }
 
 // Wire the gate cards once.
@@ -2278,7 +2417,8 @@ function justListen() {
     if (cleanBtn) {
         var _paintClean = function () {
             var on = localStorage.getItem('cleanMode') === '1';
-            cleanBtn.textContent = 'Clean mode: ' + (on ? 'On' : 'Off');
+            var cleanState = document.getElementById('cleanModeState');
+            if (cleanState) cleanState.textContent = on ? 'On' : 'Off';
             cleanBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
         };
         _paintClean();
@@ -2305,20 +2445,19 @@ function initPrepOverlay() {
 
 initPrepOverlay();
 
-function toggleGameMode() {
-    if (lyrics.length === 0) {
-        alert('No lyrics available for this song \u2014 game mode requires synced lyrics.');
-        return;
-    }
-    if (gameMode.active) {
-        gameMode.stop();
-    } else {
-        openDifficultyGate();   // pick difficulty, then the run starts from the top
-    }
-}
-
 function replayGame() {
-    document.getElementById('gameModal').style.display = 'none';
+    var _gm = document.getElementById('gameModal');
+    _gm.style.display = 'none';
+    _gm.removeAttribute('data-stage');
     if (gameMode.active) gameMode.stop();
     openDifficultyGate();
 }
+
+// Esc closes the end-of-song modal (goes back home - same as the Back action).
+document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var modal = document.getElementById('gameModal');
+    if (modal && modal.style.display !== 'none') {
+        window.location.href = '/';
+    }
+});

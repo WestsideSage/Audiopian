@@ -1,0 +1,9 @@
+# Pin all text files to UTF-8 so an editor/tool can't re-save them through a
+# Windows-1252 codepage and produce the double-encoded "mojibake" that corrupted
+# static/player.html and static/style.css (em-dashes/quotes/box-drawing turning
+# into "â€""-style garbage). Guarded in CI/locally by tests/test_no_mojibake.cjs.
+# root=true stops .editorconfig resolution walking above this repo.
+root = true
+
+[*]
+charset = utf-8
