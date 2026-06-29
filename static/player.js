@@ -186,11 +186,13 @@ class GameMode {
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
         if (this._arcadeState) this._renderArcadeHud(null);
+        this._startWordFillLoop();
     }
 
     stop() {
         if (!this.active) return;
         this.active = false;
+        this._stopWordFillLoop();
         if (this._watchdogInterval) {
             clearInterval(this._watchdogInterval);
             this._watchdogInterval = null;
@@ -975,6 +977,61 @@ class GameMode {
         return out;
     }
 
+    // Phase 3 word-fill paint loop. Render-only: reads the playback clock + the
+    // active line's spans and writes the per-word --fill custom property so CSS
+    // sweeps each unresolved word left-to-right as its window passes. Touches NO
+    // scoring state (no matchedSet/session/phrase engine), adds/removes NO scoring
+    // classes. Gated off under prefers-reduced-motion (discrete snap stays the
+    // fallback). Cheap: paints only the active line's spans, once per frame.
+    _startWordFillLoop() {
+        if (this._wordFillRaf != null) return;
+        if (typeof window === 'undefined' || !window.requestAnimationFrame) return;
+        if (!window.KaraokeeWordFill) return;
+        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        var self = this;
+        var step = function () {
+            self._paintWordFill();
+            self._wordFillRaf = window.requestAnimationFrame(step);
+        };
+        this._wordFillRaf = window.requestAnimationFrame(step);
+    }
+
+    _stopWordFillLoop() {
+        if (this._wordFillRaf != null && typeof window !== 'undefined' && window.cancelAnimationFrame) {
+            window.cancelAnimationFrame(this._wordFillRaf);
+        }
+        this._wordFillRaf = null;
+    }
+
+    // One frame of fill paint. Active line only; unresolved spans only.
+    _paintWordFill() {
+        if (!window.KaraokeeWordFill) return;
+        var lineIdx = this.activeLineIdx;
+        if (lineIdx == null || lineIdx < 0) return;
+        var lines = lyricsScroll.querySelectorAll('.lyric-line');
+        var lineEl = lines[lineIdx];
+        if (!lineEl) return;
+        var words = this._activeLineFillWords(lineIdx);
+        if (!words.length) return;
+        var nowSec = playback ? playback.currentTime() : 0;
+        var fills = window.KaraokeeWordFill.lineFillProgress(words, nowSec);
+        var spans = lineEl.querySelectorAll('.word-span');
+        // The DOM span list and the timing list are usually the same word
+        // sequence, but can drift if a token normalizes to empty. Bound the
+        // pairing; the sweep is render-only, so any drift is cosmetic.
+        var n = Math.min(spans.length, fills.length);
+        for (var i = 0; i < n; i++) {
+            var span = spans[i];
+            if (span.classList.contains('matched') ||
+                span.classList.contains('matched-partial') ||
+                span.classList.contains('missed')) {
+                span.style.removeProperty('--fill');
+                continue;
+            }
+            span.style.setProperty('--fill', String(fills[i]));
+        }
+    }
+
     _paintAnchorSpansLive(lineEl) {
         var states = this._phraseSession && this._phraseSession.states;
         if (!states) return;
@@ -1058,6 +1115,7 @@ class GameMode {
         if (lines[lineIdx]) {
             lines[lineIdx].querySelectorAll('.word-span').forEach(function (s) {
                 s.classList.remove('matched', 'matched-partial', 'missed');
+                s.style.removeProperty('--fill');
             });
         }
     }
@@ -1854,6 +1912,7 @@ class GameMode {
             this._renderEvents(KaraokeeScoringSession.tick(this._session, _endNow));
             this._renderEvents(KaraokeeScoringSession.endRun(this._session, _endNow));
         }
+        this._stopWordFillLoop();
         // Hide the arcade HUD AFTER the flush: tick()'s commit routes arcade events
         // (routeEvents=true) which would otherwise re-show the HUD over the end screen.
         this._hideArcadeHud();

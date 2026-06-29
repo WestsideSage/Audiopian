@@ -848,15 +848,21 @@ body.legal-page .site-footer {
 
         .word-span.matched {
             color: var(--matched);
+            background-image: none;
+            -webkit-text-fill-color: currentColor;
         }
 
         .word-span.matched-partial {
             color: var(--partial);
+            background-image: none;
+            -webkit-text-fill-color: currentColor;
             font-weight: 600;
         }
 
         .word-span.missed {
             color: var(--missed);
+            background-image: none;
+            -webkit-text-fill-color: currentColor;
         }
 
         /* Key (scored) word target cue â€” only on the ACTIVE line, until passed/missed. */
@@ -890,6 +896,24 @@ body.legal-page .site-footer {
         /* Key words sweep to the cyan key cue instead of plain text white. */
         .lyric-line.active .word-span.key-word:not(.matched):not(.matched-partial):not(.missed) {
             --fill-color: var(--key);
+        }
+
+        .lyric-line.active .word-span.matched {
+            color: var(--matched);
+            background-image: none;
+            -webkit-text-fill-color: currentColor;
+        }
+
+        .lyric-line.active .word-span.matched-partial {
+            color: var(--partial);
+            background-image: none;
+            -webkit-text-fill-color: currentColor;
+        }
+
+        .lyric-line.active .word-span.missed {
+            color: var(--missed);
+            background-image: none;
+            -webkit-text-fill-color: currentColor;
         }
 
         /* Insane difficulty â€” collapse every non-key word; only the scored key words show
