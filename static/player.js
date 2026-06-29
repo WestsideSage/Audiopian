@@ -955,6 +955,26 @@ class GameMode {
 
     // V2: green a key-word span the moment the engine credits its anchor (anchorHits).
     // Reds are applied at settle (see _commitNewlySettled). Non-key spans untouched.
+    // Render-only adapter (Phase 3 word-fill): turn the active line's interpolated
+    // word timings (scoring.js interpolateWordTimings -> windowStart/windowEnd, SECONDS)
+    // into the pure {start, end} shape KaraokeeWordFill expects. Reads render/clock
+    // state ONLY (this.allWordTimings + the line index) -- touches no scoring state.
+    // Returns [] when there is no active line or no timings (caller paints nothing).
+    _activeLineFillWords(lineIdx) {
+        var timings = (lineIdx != null && lineIdx >= 0 && this.allWordTimings &&
+            lineIdx < this.allWordTimings.length) ? this.allWordTimings[lineIdx] : null;
+        if (!timings || !timings.length) return [];
+        var out = new Array(timings.length);
+        for (var i = 0; i < timings.length; i++) {
+            var wt = timings[i];
+            // estimatedTime/windowStart/windowEnd are all in SECONDS; windowStart can be
+            // slightly before estimatedTime (lead-in), windowEnd after. Use the window so
+            // the sweep matches the scorer's own predicted timing band exactly.
+            out[i] = { start: wt.windowStart, end: wt.windowEnd };
+        }
+        return out;
+    }
+
     _paintAnchorSpansLive(lineEl) {
         var states = this._phraseSession && this._phraseSession.states;
         if (!states) return;
