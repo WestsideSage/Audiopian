@@ -1609,7 +1609,7 @@ class GameMode {
         const wBuf    = finalWords.length;
         const wStart  = this.lineStartWordCount;
 
-        let html = '<div class="dbg-header">🎮 GAME DEBUG &mdash; press D to hide</div>';
+        let html = '<div class="dbg-header">GAME DEBUG &mdash; press D to hide</div>';
         html += `<div class="dbg-row"><span class="dbg-label">Line  </span>#${lineNum}: ${lineText}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Words </span>${wordSpans || '—'}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Final </span><span class="dbg-final">&hellip;${tail}</span></div>`;
@@ -1949,16 +1949,24 @@ function updateLyrics() {
 // Poll every 100ms for lyric sync
 setInterval(updateLyrics, 100);
 
+// Lucide play/pause glyphs for the transport button (no icon framework - raw SVG).
+var _ICON_PLAY = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
+var _ICON_PAUSE = '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>';
+function _setPlayIcon(isPlaying) {
+    if (!playBtn) return;
+    playBtn.innerHTML = isPlaying ? _ICON_PAUSE : _ICON_PLAY;
+    playBtn.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+}
 // Play/pause
 function togglePlay() {
     if (!playback) return;
     if (playback.isPaused()) {
         playback.play();
-        playBtn.textContent = '⏸';
+        _setPlayIcon(true);
         if (gameMode.active) gameMode.resume();
     } else {
         playback.pause();
-        playBtn.textContent = '▶';
+        _setPlayIcon(false);
         if (gameMode.active) gameMode.suspend();
     }
 }
@@ -2057,7 +2065,7 @@ function _wirePlaybackCallbacks() {
         var _gc = document.getElementById('diffGateCards');
         if (_gc) _gc.classList.remove('loading');
         if (overlayDismissed) {
-            Promise.resolve(playback.play()).then(function () { playBtn.textContent = '⏸'; }).catch(function () {});
+            Promise.resolve(playback.play()).then(function () { _setPlayIcon(true); }).catch(function () {});
         }
     });
     playback.onEnded(function () {
@@ -2165,7 +2173,7 @@ function openDifficultyGate() {
     var sd = JSON.parse(sessionStorage.getItem('songData') || 'null');
     if (sd) document.getElementById('prepSongTitle').textContent = sd.artist + ' \u2014 ' + sd.title;
     _markSelectedCard(localStorage.getItem('arcadeDifficulty') || 'medium');
-    try { if (playback) playback.pause(); playBtn.textContent = '\u25B6'; } catch (e) {}
+    try { if (playback) playback.pause(); _setPlayIcon(false); } catch (e) {}
     renderDifficultyPreview(localStorage.getItem('arcadeDifficulty') || 'medium');
     overlayDismissed = false;
     overlay.style.display = 'flex';
@@ -2215,7 +2223,7 @@ function _runCountIn(d) {
         // strand the song muted (volume 0 from the arm) for the rest of the run.
         try { playback.setVolume(savedVol); } catch (e) {}
         try { playback.seek(0); } catch (e) {}
-        try { Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {}); } catch (e) {}
+        try { Promise.resolve(playback.play()).then(function () { _setPlayIcon(true); }).catch(function () {}); } catch (e) {}
     }
     function onKey(e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); go(); } }
     document.addEventListener('keydown', onKey);
@@ -2247,7 +2255,7 @@ function justListen() {
     overlayDismissed = true;
     gameMode._stopMicCheck();
     document.getElementById('prepOverlay').style.display = 'none';
-    Promise.resolve(playback.play()).then(function () { playBtn.textContent = '\u23F8'; }).catch(function () {});
+    Promise.resolve(playback.play()).then(function () { _setPlayIcon(true); }).catch(function () {});
 }
 
 // Wire the gate cards once.

@@ -111,20 +111,31 @@
 
     <div id="lyrics-container">
         <div id="lyrics-scroll"></div>
-        <div id="no-lyrics">â™ª No synced lyrics available â™ª</div>
+        <div id="no-lyrics"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg> No synced lyrics available</div>
     </div>
 
     <div class="controls">
-        <button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">ðŸŽ® Game</button>
-        <button class="ctrl-btn" onclick="skipBack()">â®</button>
-        <button class="ctrl-btn" id="playBtn" onclick="togglePlay()">â–¶</button>
-        <button class="ctrl-btn" onclick="skipFwd()">â­</button>
+        <button class="ctrl-btn game-btn" id="gameBtn" onclick="toggleGameMode()">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" y1="11" x2="10" y2="11"/><line x1="8" y1="9" x2="8" y2="13"/><line x1="15" y1="12" x2="15.01" y2="12"/><line x1="18" y1="10" x2="18.01" y2="10"/><rect x="2" y="6" width="20" height="12" rx="2"/></svg>
+          Game
+        </button>
+        <button class="ctrl-btn" onclick="skipBack()" aria-label="Skip back 10 seconds">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+        </button>
+        <button class="ctrl-btn" id="playBtn" onclick="togglePlay()" aria-label="Play">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+        </button>
+        <button class="ctrl-btn" onclick="skipFwd()" aria-label="Skip forward 10 seconds">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+        </button>
         <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
         <div id="time-display">0:00 / 0:00</div>
-        <span style="font-size:0.8rem;color:#aaa">ðŸ”Š</span>
+        <span class="vol-icon" aria-hidden="true">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+        </span>
         <input type="range" id="volume" min="0" max="1" step="0.05" value="1">
-        <div id="asr-provider-display" style="font-size:0.78rem;color:#aaa;min-width:190px;text-align:left;">ASR: checking...</div>
-        <div id="lrc-offset-control" style="display:none; align-items:center; gap:6px; font-size:13px; color:#aaa;">
+        <div id="asr-provider-display" class="asr-display">ASR: checking...</div>
+        <div id="lrc-offset-control" class="offset-control" style="display:none">
           <span>Lyrics offset</span>
           <button id="offsetMinus" class="offset-btn" title="Shift lyrics earlier">âˆ’0.5s</button>
           <span id="offsetDisplay">0.0s</span>
