@@ -2286,7 +2286,8 @@ function justListen() {
     if (cleanBtn) {
         var _paintClean = function () {
             var on = localStorage.getItem('cleanMode') === '1';
-            cleanBtn.textContent = 'Clean mode: ' + (on ? 'On' : 'Off');
+            var cleanState = document.getElementById('cleanModeState');
+            if (cleanState) cleanState.textContent = on ? 'On' : 'Off';
             cleanBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
         };
         _paintClean();

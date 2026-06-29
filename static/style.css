@@ -1061,12 +1061,18 @@ body.legal-page .site-footer {
 
         .diff-gate { display: flex; flex-direction: column; align-items: center; gap: 18px; }
         .diff-gate-label { font-size: 1rem; color: var(--text-dim); letter-spacing: .04em; }
-        .diff-gate-cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+        .diff-gate-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: var(--space-3);
+            justify-content: center;
+            width: min(620px, 90vw);
+        }
         .diff-card {
-            width: 150px; padding: 18px 14px; background: var(--surface); color: var(--text);
+            padding: var(--space-4) var(--space-3); background: var(--surface); color: var(--text);
             border: 1px solid var(--line); border-radius: var(--r); cursor: pointer;
-            display: flex; flex-direction: column; gap: 6px; align-items: center;
-            transition: transform .12s, border-color .12s, box-shadow .12s;
+            display: flex; flex-direction: column; gap: var(--space-1); align-items: center;
+            transition: transform var(--dur-fast), border-color var(--dur-fast), box-shadow var(--dur-fast);
         }
         .diff-card:hover, .diff-card:focus-visible {
             transform: translateY(-3px); border-color: var(--p); box-shadow: 0 0 16px rgba(45,212,238,.3); outline: none;
@@ -1191,3 +1197,24 @@ body.legal-page .site-footer {
 }
 /* the offset-control is display:none until a scored game starts; keep the toggle via JS */
 .offset-control[style*="display:none"] { display: none !important; }
+
+/* ---- prep secondary actions toolbar ---- */
+.prep-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    justify-content: center;
+    align-items: center;
+}
+.prep-toolbar .diff-gate-listen { margin: 0; }
+/* clean-mode switch dot (pressed = on) */
+#cleanModeToggle .switch-dot {
+    display: inline-block;
+    width: 9px; height: 9px; border-radius: var(--r-pill);
+    background: var(--text-faint);
+    vertical-align: middle;
+    margin-right: 2px;
+    transition: background var(--dur-fast);
+}
+#cleanModeToggle[aria-pressed="true"] .switch-dot { background: var(--matched); }
+#cleanModeToggle[aria-pressed="true"] { border-color: var(--matched); color: var(--text); }

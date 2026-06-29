@@ -55,10 +55,17 @@
                     <div class="prep-spinner"></div>
                     <span id="prepStatus">Preparing audioâ€¦</span>
                 </div>
-                <button class="diff-gate-listen ctrl-btn" onclick="justListen()">Just listen â€” no scoring</button>
-                <button class="diff-gate-listen ctrl-btn" id="cleanModeToggle" type="button" aria-pressed="false" style="margin-top:6px;">Clean mode: Off</button>
-                <button class="diff-gate-listen ctrl-btn" id="micCheckBtn" type="button" style="margin-top:6px;">ðŸŽ¤ Check your mic</button>
-                <div id="micCheckPanel" style="display:none">
+                <div class="prep-toolbar">
+                    <button class="diff-gate-listen ctrl-btn" onclick="justListen()">Just listen â€” no scoring</button>
+                    <button class="diff-gate-listen ctrl-btn" id="cleanModeToggle" type="button" aria-pressed="false">
+                      <span class="switch-dot" aria-hidden="true"></span> Clean mode: <span id="cleanModeState">Off</span>
+                    </button>
+                    <button class="diff-gate-listen ctrl-btn" id="micCheckBtn" type="button">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+                      Check your mic
+                    </button>
+                </div>
+                <div id="micCheckPanel" class="panel" style="display:none;padding:14px 16px">
                     <div class="mc-instr">Read this aloud:</div>
                     <div class="mc-phrase">â€œThe quick brown fox jumps over the lazy dogâ€</div>
                     <div class="mc-meter"><div class="mc-meter-fill" id="micMeterFill"></div></div>
