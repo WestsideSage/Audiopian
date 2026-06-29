@@ -180,7 +180,8 @@ class GameMode {
             : { state: 'ready', reason: null, provider: 'browser_sr', model: 'Web Speech API', checkedAt: Date.now() };
         this._renderAsrProviderStatus();
 
-        document.getElementById('score-display').style.display = 'flex';
+        var scoreDisplay = document.getElementById('score-display');
+        if (scoreDisplay) scoreDisplay.style.display = 'flex';
         document.getElementById('score-pct').textContent = '0%';
         document.getElementById('gameBtn').classList.add('active');
         document.getElementById('lrc-offset-control').style.display = 'flex';
@@ -202,7 +203,8 @@ class GameMode {
         this._stopWhisperTrack();
         this.prevLine = null;
         renderLyrics(); // restore normal lyric rendering
-        document.getElementById('score-display').style.display = 'none';
+        var scoreDisplay = document.getElementById('score-display');
+        if (scoreDisplay) scoreDisplay.style.display = 'none';
         document.getElementById('gameBtn').classList.remove('active');
         document.getElementById('lrc-offset-control').style.display = 'none';
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
