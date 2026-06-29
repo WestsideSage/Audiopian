@@ -617,6 +617,36 @@ button.is-loading::after {
     line-height: 1.5;
 }
 
+/* ---- picker rows with thumbnails ---- */
+.search-result-item.has-thumb {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+.sr-thumb {
+    width: 64px;
+    height: 36px;
+    border-radius: var(--r-sm);
+    object-fit: cover;
+    background: var(--surface-3);
+    flex-shrink: 0;
+}
+.sr-text { min-width: 0; flex: 1; }
+.search-result-item.has-thumb .search-result-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sr-best-pill {
+    background: var(--p-soft);
+    color: var(--p);
+    border: 1px solid var(--p-line);
+    vertical-align: middle;
+}
+.sr-best-pill .icon { width: .85em; height: .85em; }
+/* The whole-row is-best tint is enough; drop the old left-border bar treatment. */
+.search-result-item.is-best.has-thumb { background: var(--surface-3); box-shadow: none; }
+
 /* ============================================================
    Player page (extracted verbatim from player.html inline <style>
    in Phase 0; re-skinned onto tokens in Phase 1). Player is pinned
