@@ -163,10 +163,9 @@ class GameMode {
             lt.useVad = true; // all tempo classes get provisional VAD; slow lines use stricter energy gate in updateHotWord
             lt.vadTempoClass = relClass;
         }
-        // Restore per-song LRC offset from localStorage
+        // Restore per-song LRC offset from localStorage (internal only; no UI control)
         this.lrcOffset = parseFloat(localStorage.getItem('lrcOffset_' + _songKey()) || '0');
         if (this._session) this._session.lrcOffset = this.lrcOffset;
-        _updateOffsetDisplay();
 
         renderLyricsGameMode();
         this._setupRecognition();
@@ -181,16 +180,12 @@ class GameMode {
         this._renderAsrProviderStatus();
 
         document.getElementById('score-pct').textContent = '0%';
-        document.getElementById('gameBtn').classList.add('active');
-        document.getElementById('lrc-offset-control').style.display = 'flex';
         if (this._arcadeState) this._renderArcadeHud(null);
-        this._startWordFillLoop();
     }
 
     stop() {
         if (!this.active) return;
         this.active = false;
-        this._stopWordFillLoop();
         if (this._watchdogInterval) {
             clearInterval(this._watchdogInterval);
             this._watchdogInterval = null;
@@ -203,8 +198,6 @@ class GameMode {
         this._stopWhisperTrack();
         this.prevLine = null;
         renderLyrics(); // restore normal lyric rendering
-        document.getElementById('gameBtn').classList.remove('active');
-        document.getElementById('lrc-offset-control').style.display = 'none';
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
         this._hideArcadeHud();
         // Flush the session (final collect + score active line + settle/commit) before
@@ -220,7 +213,6 @@ class GameMode {
     suspend() {
         if (!this.active || this._suspended) return;
         this._suspended = true;
-        this._stopWordFillLoop(); // paused clock makes the sweep a no-op repaint; don't spin rAF
         if (this._session) this._session._suspended = true;
         if (this.recognition) {
             try { this.recognition.stop(); } catch(e) {}
@@ -235,7 +227,6 @@ class GameMode {
     resume() {
         if (!this.active || !this._suspended) return;
         this._suspended = false;
-        this._startWordFillLoop(); // restart the sweep paint loop (idempotent + reduced-motion gated)
         if (this._session) this._session._suspended = false;
         if (this.recognition) {
             try { this.recognition.start(); } catch(e) {}
@@ -448,16 +439,19 @@ class GameMode {
         var provider = status.provider || 'unknown';
         var model = status.model || 'unknown';
         var state = status.state || 'unknown';
-        if (provider === 'openai_realtime') {
-            el.textContent = 'ASR: GPT Realtime Whisper (' + model + ') - ' + state;
-            el.style.color = state === 'ready' ? '#00e676' : '#f5a623';
-        } else if (provider === 'local') {
-            el.textContent = 'ASR: local Whisper (' + model + ') - ' + state;
-            el.style.color = state === 'ready' ? '#aaa' : '#f5a623';
-        } else {
-            el.textContent = 'ASR: ' + provider + ' (' + model + ') - ' + state;
-            el.style.color = '#aaa';
-        }
+        var ready = state === 'ready';
+        var error = state === 'error';
+        // User-facing: a friendly mic-status chip (a coloured status dot via the
+        // .ready/.error classes + a plain label). The technical provider/model is
+        // kept in the tooltip for the curious, not shown in the bar.
+        el.classList.toggle('ready', ready);
+        el.classList.toggle('error', error);
+        el.textContent = error ? 'Mic unavailable' : (ready ? 'Mic ready' : 'Connecting…');
+        var friendly = provider === 'openai_realtime' ? 'OpenAI Realtime'
+            : provider === 'local' ? 'On-device Whisper'
+            : provider === 'browser_sr' ? 'Browser speech recognition'
+            : provider;
+        el.title = friendly + (model && model !== 'unknown' ? ' (' + model + ')' : '') + ' — ' + state;
     }
 
     _isRealtimeWhisperProvider() {
@@ -955,81 +949,6 @@ class GameMode {
 
     // V2: green a key-word span the moment the engine credits its anchor (anchorHits).
     // Reds are applied at settle (see _commitNewlySettled). Non-key spans untouched.
-    // Render-only adapter (Phase 3 word-fill): turn the active line's interpolated
-    // word timings (scoring.js interpolateWordTimings -> windowStart/windowEnd, SECONDS)
-    // into the pure {start, end} shape KaraokeeWordFill expects. Reads render/clock
-    // state ONLY (this.allWordTimings + the line index) -- touches no scoring state.
-    // Returns [] when there is no active line or no timings (caller paints nothing).
-    _activeLineFillWords(lineIdx) {
-        var timings = (lineIdx != null && lineIdx >= 0 && this.allWordTimings &&
-            lineIdx < this.allWordTimings.length) ? this.allWordTimings[lineIdx] : null;
-        if (!timings || !timings.length) return [];
-        var out = new Array(timings.length);
-        for (var i = 0; i < timings.length; i++) {
-            var wt = timings[i];
-            // estimatedTime/windowStart/windowEnd are all in SECONDS; windowStart can be
-            // slightly before estimatedTime (lead-in), windowEnd after. Use the window so
-            // the sweep matches the scorer's own predicted timing band exactly.
-            out[i] = { start: wt.windowStart, end: wt.windowEnd };
-        }
-        return out;
-    }
-
-    // Phase 3 word-fill paint loop. Render-only: reads the playback clock + the
-    // active line's spans and writes the per-word --fill custom property so CSS
-    // sweeps each unresolved word left-to-right as its window passes. Touches NO
-    // scoring state (no matchedSet/session/phrase engine), adds/removes NO scoring
-    // classes. Gated off under prefers-reduced-motion (discrete snap stays the
-    // fallback). Cheap: paints only the active line's spans, once per frame.
-    _startWordFillLoop() {
-        if (this._wordFillRaf != null) return;
-        if (typeof window === 'undefined' || !window.requestAnimationFrame) return;
-        if (!window.KaraokeeWordFill) return;
-        if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-        var self = this;
-        var step = function () {
-            self._paintWordFill();
-            self._wordFillRaf = window.requestAnimationFrame(step);
-        };
-        this._wordFillRaf = window.requestAnimationFrame(step);
-    }
-
-    _stopWordFillLoop() {
-        if (this._wordFillRaf != null && typeof window !== 'undefined' && window.cancelAnimationFrame) {
-            window.cancelAnimationFrame(this._wordFillRaf);
-        }
-        this._wordFillRaf = null;
-    }
-
-    // One frame of fill paint. Active line only; unresolved spans only.
-    _paintWordFill() {
-        if (!window.KaraokeeWordFill) return;
-        var lineIdx = this.activeLineIdx;
-        if (lineIdx == null || lineIdx < 0) return;
-        var lines = lyricsScroll.querySelectorAll('.lyric-line');
-        var lineEl = lines[lineIdx];
-        if (!lineEl) return;
-        var words = this._activeLineFillWords(lineIdx);
-        if (!words.length) return;
-        var nowSec = playback ? playback.currentTime() : 0;
-        var fills = window.KaraokeeWordFill.lineFillProgress(words, nowSec);
-        var spans = lineEl.querySelectorAll('.word-span');
-        // The DOM span list and the timing list are usually the same word
-        // sequence, but can drift if a token normalizes to empty. Bound the
-        // pairing; the sweep is render-only, so any drift is cosmetic.
-        var n = Math.min(spans.length, fills.length);
-        for (var i = 0; i < n; i++) {
-            var span = spans[i];
-            if (span.classList.contains('matched') ||
-                span.classList.contains('matched-partial') ||
-                span.classList.contains('missed')) {
-                span.style.removeProperty('--fill');
-                continue;
-            }
-            span.style.setProperty('--fill', String(fills[i]));
-        }
-    }
-
     _paintAnchorSpansLive(lineEl) {
         var states = this._phraseSession && this._phraseSession.states;
         if (!states) return;
@@ -1113,7 +1032,6 @@ class GameMode {
         if (lines[lineIdx]) {
             lines[lineIdx].querySelectorAll('.word-span').forEach(function (s) {
                 s.classList.remove('matched', 'matched-partial', 'missed');
-                s.style.removeProperty('--fill');
             });
         }
     }
@@ -1894,7 +1812,6 @@ class GameMode {
         this._endShown = true;
         var self = this;
         var hero = document.getElementById('gradeHero');
-        document.getElementById('lrc-offset-control').style.display = 'none';
 
         // Flush the session at song end, then persist telemetry BEFORE the hi-score write
         // below (so arcade.highScore.previous reflects the prior best). Pass duration+5
@@ -1910,7 +1827,6 @@ class GameMode {
             this._renderEvents(KaraokeeScoringSession.tick(this._session, _endNow));
             this._renderEvents(KaraokeeScoringSession.endRun(this._session, _endNow));
         }
-        this._stopWordFillLoop();
         // Hide the arcade HUD AFTER the flush: tick()'s commit routes arcade events
         // (routeEvents=true) which would otherwise re-show the HUD over the end screen.
         this._hideArcadeHud();
@@ -2290,28 +2206,6 @@ seekBar.addEventListener('input', () => {
 // Volume
 volumeBar.addEventListener('input', () => { if (playback) playback.setVolume(parseFloat(volumeBar.value)); });
 
-// LRC offset buttons
-function _updateOffsetDisplay() {
-    document.getElementById('offsetDisplay').textContent =
-        (gameMode ? gameMode.lrcOffset : 0).toFixed(1) + 's';
-}
-
-document.getElementById('offsetMinus').addEventListener('click', function() {
-    if (!gameMode) return;
-    gameMode.lrcOffset = Math.max(-10, gameMode.lrcOffset - 0.5);
-    if (gameMode._session) gameMode._session.lrcOffset = gameMode.lrcOffset;
-    localStorage.setItem('lrcOffset_' + _songKey(), gameMode.lrcOffset);
-    _updateOffsetDisplay();
-});
-
-document.getElementById('offsetPlus').addEventListener('click', function() {
-    if (!gameMode) return;
-    gameMode.lrcOffset = Math.min(10, gameMode.lrcOffset + 0.5);
-    if (gameMode._session) gameMode._session.lrcOffset = gameMode.lrcOffset;
-    localStorage.setItem('lrcOffset_' + _songKey(), gameMode.lrcOffset);
-    _updateOffsetDisplay();
-});
-
 // Debug HUD — press D to toggle (works any time, not just in Game Mode)
 document.addEventListener('keydown', (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -2598,18 +2492,6 @@ function initPrepOverlay() {
 }
 
 initPrepOverlay();
-
-function toggleGameMode() {
-    if (lyrics.length === 0) {
-        alert('No lyrics available for this song \u2014 game mode requires synced lyrics.');
-        return;
-    }
-    if (gameMode.active) {
-        gameMode.stop();
-    } else {
-        openDifficultyGate();   // pick difficulty, then the run starts from the top
-    }
-}
 
 function replayGame() {
     var _gm = document.getElementById('gameModal');

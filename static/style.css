@@ -811,8 +811,6 @@ body.legal-page .site-footer {
         }
         .ctrl-btn:hover { background: var(--surface-3); filter: none; box-shadow: inset 0 0 0 1px var(--line-strong); }
         /* compact lyric-offset chips (shown in the controls bar during a scored game) */
-        .offset-btn { width: auto; flex-shrink: 0; padding: 4px 9px; font-size: 0.8rem; font-weight: 600; background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-sm); }
-        .offset-btn:hover { background: var(--surface-3); filter: none; box-shadow: none; }
 
         #seek {
             flex: 1;
@@ -837,12 +835,6 @@ body.legal-page .site-footer {
         .word-span {
             display: inline-block;
             color: var(--text-faint);
-            /* Progressive fill: 0..1 written per-frame by player.js _paintWordFill.
-               Default 0 so a span with no fill paints exactly as before. */
-            --fill: 0;
-            /* The color the sweep reveals as a word's window passes (cyan key cue
-               for key words is overridden below; non-key words sweep to text white). */
-            --fill-color: var(--text);
             transition: color 0.15s, text-shadow 0.15s;
             cursor: default;
         }
@@ -872,31 +864,11 @@ body.legal-page .site-footer {
             text-shadow: 0 0 12px rgba(45,212,238,.45);
         }
 
-        /* Word-by-word fill (Phase 3)
-           A left-to-right color sweep across each word on the ACTIVE line
-           while its timing window passes. Purely cosmetic: applies ONLY to
-           spans the scorer has NOT resolved (no .matched/.matched-partial/
-           .missed). The instant a real scoring class lands, that rule's
-           plain color: wins and the sweep is moot. --fill (0..1) is written
-           per-frame by player.js; the filled head is --fill-color, the tail
-           stays the base grey so the whole word is always legible. */
+        /* Active line: unsung words read bright white so the line you're on stands
+           out, then snap to green/amber/red as you actually sing each one. Key
+           words keep the cyan target cue (rule above) until hit. */
         .lyric-line.active .word-span:not(.matched):not(.matched-partial):not(.missed) {
-            background-image: linear-gradient(
-                90deg,
-                var(--fill-color) 0%,
-                var(--fill-color) calc(var(--fill) * 100%),
-                var(--text-faint) calc(var(--fill) * 100%),
-                var(--text-faint) 100%
-            );
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-            color: transparent;
-        }
-
-        /* Key words sweep to the cyan key cue instead of plain text white. */
-        .lyric-line.active .word-span.key-word:not(.matched):not(.matched-partial):not(.missed) {
-            --fill-color: var(--key);
+            color: var(--text);
         }
 
         .lyric-line.active .word-span.matched {
@@ -933,13 +905,6 @@ body.legal-page .site-footer {
             transform: translateY(-50%);
         }
 
-        /* Game button active state */
-        .game-btn.active {
-            background: var(--p);
-            color: #04121a;
-            border-color: transparent;
-            box-shadow: 0 0 12px rgba(45,212,238,.5);
-        }
 
         /* ── Unified score panel ──────────────────────────────────────
            One anchored .panel container (replaces the two floating
@@ -1375,22 +1340,27 @@ body.legal-page .site-footer {
            treats the player as off-screen and pauses playback after a few seconds. */
         #ytplayer-wrap iframe { width: 100%; height: 100%; border: 0; display: block; }
 
-/* ---- controls-bar meta (icons + ASR display + offset control) ---- */
+/* ---- controls-bar meta (volume icon + ASR mic-status chip) ---- */
 .vol-icon { display: inline-flex; align-items: center; color: var(--text-dim); }
 .asr-display {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
     font-size: var(--text-xs);
     color: var(--text-dim);
-    min-width: 190px;
-    text-align: left;
+    white-space: nowrap;
 }
-.offset-control {
-    align-items: center;
-    gap: var(--space-2);
-    font-size: var(--text-sm);
-    color: var(--text-dim);
+.asr-display::before {
+    content: "";
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--text-faint);
+    transition: background var(--dur-fast), box-shadow var(--dur-fast);
 }
-/* the offset-control is display:none until a scored game starts; keep the toggle via JS */
-.offset-control[style*="display:none"] { display: none !important; }
+.asr-display.ready { color: var(--matched); }
+.asr-display.ready::before { background: var(--matched); box-shadow: 0 0 7px var(--matched); }
+.asr-display.error { color: var(--missed); }
+.asr-display.error::before { background: var(--missed); box-shadow: 0 0 7px var(--missed); }
 
 /* ---- prep secondary actions toolbar ---- */
 .prep-toolbar {
