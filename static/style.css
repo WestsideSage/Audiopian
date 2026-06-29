@@ -909,6 +909,25 @@ body.legal-page .site-footer {
             color: transparent; background: var(--grad-accent);
             -webkit-background-clip: text; background-clip: text;
         }
+        /* Floating +points reward popup (one per clear). Springs up + fades. */
+        .sp-popup {
+            position: absolute; top: -2px; right: 0;
+            font-family: var(--font-display);
+            font-size: var(--text-lg); font-weight: 700;
+            color: var(--matched);
+            opacity: 0; pointer-events: none;
+            text-shadow: 0 0 12px rgba(45,212,238,.0);
+        }
+        .sp-popup.show {
+            animation: spPopup var(--dur-slow) var(--ease-spring) forwards;
+        }
+        @keyframes spPopup {
+            0%   { opacity: 0; transform: translateY(6px) scale(.9); }
+            30%  { opacity: 1; transform: translateY(-10px) scale(1.05); }
+            100% { opacity: 0; transform: translateY(-26px) scale(1); }
+        }
+        /* On-fire, the popup burns warm instead of cyan-green. */
+        body.arcade-onfire .sp-popup { color: var(--fire-c); }
         /* The bump on each clear is kept as a subtle scale via the popup spring;
            the hero number itself no longer hard-snaps (count-up in Task 4). */
         .sp-meta {

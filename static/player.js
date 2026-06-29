@@ -258,6 +258,7 @@ class GameMode {
     _resetSessionCounters() {
         this._reachedEnd = false;   // set true when playback fires onEnded; feeds meta.completed
         this._endShown = false;     // idempotency latch for showEndModal (reset per song)
+        this._shownPoints = 0;       // last score value painted by the count-up (reset per song)
         this._lastEndCheckT = null; // end-of-song stall detector (poll-based completion)
         this._endStallTicks = 0;
         this.activeLineIdx = -1;
@@ -1156,10 +1157,27 @@ class GameMode {
         var st = this._arcadeState;
         var ptsEl = document.getElementById('ahPoints');
         if (ptsEl) {
-            ptsEl.textContent = String(st.points);
-            if (evt && evt.pointsAwarded > 0) {
-                ptsEl.classList.add('bump');
-                setTimeout(function () { ptsEl.classList.remove('bump'); }, 130);
+            // Count-up from the previously-shown total to the new total instead of a hard
+            // snap. score-feedback-helpers owns the easing + duration; player.js only drives
+            // the rAF loop. prefers-reduced-motion -> snap straight to the final value.
+            var from = (typeof this._shownPoints === 'number') ? this._shownPoints : 0;
+            var to = st.points;
+            this._shownPoints = to;
+            this._animateScoreCountUp(ptsEl, from, to);
+
+            // Floating +points popup on each clear (pointsAwarded > 0).
+            if (evt && window.KaraokeeScoreFeedback) {
+                var gain = KaraokeeScoreFeedback.formatPointsGain(evt.pointsAwarded);
+                if (gain) {
+                    var popEl = document.getElementById('ahPopup');
+                    if (popEl) {
+                        popEl.textContent = gain;
+                        // Restart the CSS animation: remove, force reflow, re-add.
+                        popEl.classList.remove('show');
+                        void popEl.offsetWidth;
+                        popEl.classList.add('show');
+                    }
+                }
             }
         }
         var multEl = document.getElementById('ahMult');
@@ -1178,10 +1196,37 @@ class GameMode {
         document.body.classList.toggle('arcade-onfire', !!st.onFire);
     }
 
+    // Drive the score number from `from` to `to` using the pure count-up helper.
+    // Cancels any in-flight count-up so rapid clears don't stack loops. Honors
+    // prefers-reduced-motion by snapping straight to the final value.
+    _animateScoreCountUp(el, from, to) {
+        if (this._countUpRaf) { cancelAnimationFrame(this._countUpRaf); this._countUpRaf = null; }
+        if (!window.KaraokeeScoreFeedback || from === to) { el.textContent = String(to); return; }
+        var reduce = false;
+        try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+        if (reduce) { el.textContent = String(to); return; }
+        var dur = KaraokeeScoreFeedback.countUpDurationMs(to - from);
+        var start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        var self = this;
+        function frame(now) {
+            var t = dur > 0 ? Math.min(1, (now - start) / dur) : 1;
+            el.textContent = String(KaraokeeScoreFeedback.countUpValue(from, to, t));
+            if (t < 1) {
+                self._countUpRaf = requestAnimationFrame(frame);
+            } else {
+                el.textContent = String(to);
+                self._countUpRaf = null;
+            }
+        }
+        this._countUpRaf = requestAnimationFrame(frame);
+    }
+
     _hideArcadeHud() {
         var hud = document.getElementById('arcadeHud');
         if (hud) hud.style.display = 'none';
         document.body.classList.remove('arcade-onfire');
+        if (this._countUpRaf) { cancelAnimationFrame(this._countUpRaf); this._countUpRaf = null; }
+        this._shownPoints = 0;
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────
