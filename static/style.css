@@ -656,6 +656,23 @@ button.is-loading::after {
 }
 .sr-thumb-ph .icon { width: 18px; height: 18px; }
 
+/* ---- desktop-only interstitial card ---- */
+.unsupported-box {
+    max-width: 30rem;
+    padding: var(--space-7) var(--space-6);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-4);
+    text-align: center;
+}
+.unsupported-box .logo-dot {
+    width: 18px; height: 18px; border-radius: var(--r-sm);
+    background: var(--grad-accent); box-shadow: 0 0 16px var(--p);
+}
+.unsupported-box h2 { font-family: var(--font-display); }
+.unsupported-box .btn { width: auto; }
+
 /* ============================================================
    Player page (extracted verbatim from player.html inline <style>
    in Phase 0; re-skinned onto tokens in Phase 1). Player is pinned
