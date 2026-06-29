@@ -16,12 +16,22 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
-    <!-- Phase 0: the player stage is not themed yet, so pin dark to keep it
-         visually unchanged. Phase 1 replaces this with the shared theme boot
-         (script src theme-helpers.js + resolveInitialTheme) once the stage is
-         token-driven. -->
+    <!-- Theme boot: set data-theme before first paint to avoid a flash. -->
+    <script src="/static/theme-helpers.js"></script>
     <script>
-      document.documentElement.setAttribute('data-theme', 'dark');
+      (function () {
+        try {
+          var stored = localStorage.getItem(window.KaraokeeTheme.THEME_STORAGE_KEY);
+          var prefersLight = window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: light)').matches;
+          document.documentElement.setAttribute(
+            'data-theme',
+            window.KaraokeeTheme.resolveInitialTheme({ stored: stored, prefersLight: prefersLight })
+          );
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
     </script>
 </head>
 <body>
@@ -74,10 +84,18 @@
     </div>
 
     <div class="player-header">
-        <button class="back-btn ctrl-btn" onclick="window.location.href='/'">&#8592; Back</button>
+        <button class="back-btn ctrl-btn" onclick="window.location.href='/'" aria-label="Back to home">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          Back
+        </button>
+        <span class="player-wordmark"><span class="logo-dot"></span>Audiopian</span>
         <div class="song-title" id="song-title">Loading...</div>
         <div class="score-display" id="score-display" style="display:none"><span class="sd-label">Accuracy</span><span id="score-pct">0%</span></div>
         <div class="diff-pill" id="diff-pill" style="display:none">MEDIUM</div>
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" title="Switch theme">
+          <svg class="ico-sun icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+          <svg class="ico-moon icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
     </div>
 
     <div class="arcade-hud" id="arcadeHud" style="display:none" aria-hidden="true">
@@ -169,6 +187,7 @@
     <script src="/static/share-card.js"></script>
     <script src="/static/alternatives.js"></script>
     <script src="/static/mic-check-helpers.js"></script>
+    <script src="/static/theme-toggle.js" defer></script>
     <script src="/static/player.js"></script>
 </body>
 </html>

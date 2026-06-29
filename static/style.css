@@ -682,6 +682,32 @@ body.legal-page .site-footer {
     margin: var(--space-7) auto 0;
 }
 
+/* ---- player header wordmark (quiet branding in-game) ---- */
+.player-wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-family: var(--font-display);
+    font-size: var(--text-sm);
+    font-weight: 700;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+.player-wordmark .logo-dot {
+    width: 11px; height: 11px; border-radius: var(--r-sm);
+    background: var(--grad-accent); box-shadow: 0 0 10px var(--p);
+}
+/* The score-display pushes everything after it to the right (margin-left:auto in the
+   player rules); keep the theme toggle inline in the header (not fixed). */
+.player-header .theme-toggle {
+    position: static;
+    top: auto;
+    right: auto;
+    margin-left: var(--space-3);
+}
+
 /* ============================================================
    Player page (extracted verbatim from player.html inline <style>
    in Phase 0; re-skinned onto tokens in Phase 1). Player is pinned
