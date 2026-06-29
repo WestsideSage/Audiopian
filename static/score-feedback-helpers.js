@@ -47,10 +47,12 @@
      * @returns {number}
      */
     function countUpValue(from, to, t) {
+        var f = Number(from) || 0;
+        var to2 = Number(to) || 0;
         var clamped = clamp(Number(t) || 0, 0, 1);
         // ease-out cubic: fast start, settling finish. eased(0)=0, eased(1)=1.
         var eased = 1 - Math.pow(1 - clamped, 3);
-        return Math.round(from + (to - from) * eased);
+        return Math.round(f + (to2 - f) * eased);
     }
 
     /**
@@ -96,7 +98,8 @@
      * @returns {string|null}
      */
     function tierUpLabel(prevMultiplier, multiplier) {
-        return (multiplier > prevMultiplier) ? (String(multiplier) + 'x') : null;
+        // Only a real multiplier (>1x) is worth a tier-up beat; a 0->1 init isn't.
+        return (multiplier > prevMultiplier && multiplier > 1) ? (String(multiplier) + 'x') : null;
     }
 
     var api = {

@@ -32,6 +32,11 @@ assert.strictEqual(BP.pulsePeriodMs('anything'), BP.DEFAULT_PERIOD_MS, 'default 
 // ── beatPhase: degenerate periods clamp to 0 ───────────────────────
 assert.strictEqual(BP.beatPhase(1000, 0, 0), 0, 'periodMs 0 -> 0');
 assert.strictEqual(BP.beatPhase(1000, -480, 0), 0, 'periodMs negative -> 0');
+assert.strictEqual(BP.beatPhase(1000, NaN, 0), 0, 'periodMs NaN -> 0 (explicit)');
+
+// ── beatPhase: non-finite clock -> 0 (never NaN out) ───────────────
+assert.strictEqual(BP.beatPhase(NaN, 480, 0), 0, 'NaN now -> 0');
+assert.strictEqual(BP.beatPhase(Infinity, 480, 0), 0, 'Infinity now -> 0');
 
 // ── beatPhase: missing anchor is treated as 0 ──────────────────────
 // nowMs=240, period=480, anchor missing -> phase = (240 mod 480)/480 = 0.5

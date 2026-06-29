@@ -49,6 +49,7 @@
      */
     function beatPhase(nowMs, periodMs, anchorMs) {
         if (!(periodMs > 0)) return 0; // 0, negative, NaN, undefined -> no pulse
+        if (!isFinite(nowMs)) return 0; // NaN/Infinity clock -> no pulse (never NaN out)
         var anchor = (typeof anchorMs === 'number' && isFinite(anchorMs)) ? anchorMs : 0;
         var rem = (nowMs - anchor) % periodMs;
         if (rem < 0) rem += periodMs; // JS % keeps dividend sign; lift into [0, periodMs)

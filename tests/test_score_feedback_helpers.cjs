@@ -55,6 +55,10 @@ for (var i = 1; i <= 10; i++) {
 // clamps t outside [0,1] back to the endpoints
 assert.strictEqual(SF.countUpValue(0, 1000, -0.5), 0, 't<0 clamps to from');
 assert.strictEqual(SF.countUpValue(0, 1000, 1.5), 1000, 't>1 clamps to to');
+// non-finite from/to coerce to 0 (never NaN out)
+assert.strictEqual(SF.countUpValue(NaN, 1000, 1), 1000, 'NaN from -> 0, t=1 -> to');
+assert.strictEqual(SF.countUpValue(0, NaN, 0.5), 0, 'NaN to -> 0');
+assert.ok(!Number.isNaN(SF.countUpValue(NaN, NaN, 0.5)), 'never returns NaN');
 
 // ── countUpDurationMs ────────────────────────────────────────────────
 assert.strictEqual(SF.countUpDurationMs(0), 300, 'delta 0 -> floor 300');
@@ -97,6 +101,8 @@ assert.strictEqual(SF.tierUpLabel(2, 4), '4x', 'increase to 4x');
 assert.strictEqual(SF.tierUpLabel(2, 2), null, 'equal -> null (no tier-up)');
 assert.strictEqual(SF.tierUpLabel(4, 2), null, 'decrease -> null');
 assert.strictEqual(SF.tierUpLabel(1, 1), null, 'equal at 1 -> null');
-assert.strictEqual(SF.tierUpLabel(0, 1), '1x', 'rise from 0 -> "1x"');
+assert.strictEqual(SF.tierUpLabel(0, 1), null, 'rise to 1x is not a tier-up (init, not a real multiplier)');
+assert.strictEqual(SF.tierUpLabel(0.5, 1), null, 'rise to 1x from a fraction -> null');
+assert.strictEqual(SF.tierUpLabel(1, 3), '3x', 'jump 1 -> 3 -> "3x"');
 
 console.log('All score-feedback-helpers tests passed.');
