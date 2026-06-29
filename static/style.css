@@ -1000,16 +1000,22 @@ body.legal-page .site-footer {
             border: 1px solid var(--p-line); border-radius: 7px; padding: 3px 10px;
             font-weight: 700; letter-spacing: .14em; text-transform: uppercase; margin-left: 10px;
         }
-        /* Per-line score flash */
+        /* Per-line verdict flash (PERFECT / NICE / partial). Worded, not a bare fraction. */
         .line-score-flash {
             position: absolute;
-            right: 24px;
-            font-size: 0.85rem;
+            right: var(--space-5);
+            font-family: var(--font-display);
+            font-size: var(--text-sm);
+            font-weight: 800;
+            letter-spacing: .1em;
+            text-transform: uppercase;
             color: var(--matched);
-            font-weight: 700;
             pointer-events: none;
             animation: fadeOut 1.2s ease forwards;
         }
+        .line-score-flash.v-perfect { color: var(--matched); }
+        .line-score-flash.v-nice    { color: var(--p); }
+        .line-score-flash.v-partial { color: var(--partial); }
 
         @keyframes fadeOut {
             0%   { opacity: 1; transform: translateY(0); }

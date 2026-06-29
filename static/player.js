@@ -1013,10 +1013,17 @@ class GameMode {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
         var lineEl = lines[e.lineIdx];
         if (lineEl) {
-            // Flash per-line score
+            // Flash a worded per-line verdict (PERFECT / NICE / partial) instead of the
+            // bare +matched/total fraction. score-feedback-helpers maps the ratio to a
+            // verdict; player.js only paints the label + class.
             var flash = document.createElement('div');
             flash.className = 'line-score-flash';
-            flash.textContent = '+' + e.matched + '/' + e.scoredTotal;
+            var verdict = window.KaraokeeScoreFeedback
+                ? KaraokeeScoreFeedback.lineVerdict(e.matched, e.scoredTotal)
+                : 'partial';
+            var verdictLabel = { perfect: 'PERFECT', nice: 'NICE', partial: 'partial', miss: 'miss' };
+            flash.textContent = verdictLabel[verdict] || 'partial';
+            flash.classList.add('v-' + verdict);
             flash.style.top = lineEl.offsetTop + 'px';
             document.getElementById('lyrics-container').appendChild(flash);
             setTimeout(function () { flash.remove(); }, 1300);
