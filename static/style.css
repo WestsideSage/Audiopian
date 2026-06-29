@@ -1048,8 +1048,9 @@ body.legal-page .site-footer {
         }
 
         .prep-song {
-            font-size: 1.3rem;
-            color: var(--text);
+            font-family: var(--font-display);
+            font-size: var(--text-lg);
+            color: var(--text-strong);
             font-weight: 700;
             max-width: 400px;
         }
@@ -1144,12 +1145,13 @@ body.legal-page .site-footer {
             border-top-color: var(--p); border-radius: 50%; animation: spin .8s linear infinite;
         }
         .countin-num {
+            font-family: var(--font-display);
             font-size: 7rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; color: transparent;
             background: linear-gradient(135deg, var(--p), var(--s)); -webkit-background-clip: text; background-clip: text;
-            filter: drop-shadow(0 0 26px rgba(45,212,238,.45)); animation: countPop .4s ease-out;
+            filter: drop-shadow(0 0 26px rgba(45,212,238,.45)); animation: countPop .4s var(--ease-out);
         }
         @keyframes countPop { 0% { transform: scale(.5); opacity: .15; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
-        .countin-label { font-size: 1.45rem; font-weight: 700; color: var(--text); }
+        .countin-label { font-family: var(--font-display); font-size: var(--text-lg); font-weight: 700; color: var(--text); }
         .countin-skip { font-size: .74rem; color: var(--text-dim); margin-top: 4px; letter-spacing: .04em; }
 
         /* â”€â”€ Debug HUD (toggle with D key) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
