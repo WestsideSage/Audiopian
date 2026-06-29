@@ -47,10 +47,12 @@ assert.strictEqual(plan.phrases[0].lineIdx, 0, 'preserves source line index');
 assert.strictEqual(plan.phrases[0].startSec, 10, 'uses lyric timestamp as phrase start');
 assert.strictEqual(plan.phrases[0].endSec, 14, 'uses next lyric timestamp as phrase end');
 assert.ok(plan.phrases[0].anchors.some(function(anchor) { return anchor.word === 'final'; }), 'selects distinctive anchors');
-// Filler-only lines ("yeah yeah", "uh uh") fall back to filler-marked anchors so the
-// phrase can still be scored when Whisper transcribes them.
-assert.ok(plan.phrases[2].anchors.some(function(anchor) { return anchor.word === 'yeah'; }), 'filler-only lines fall back to filler anchors');
-assert.ok(plan.phrases[2].anchors.every(function(anchor) { return anchor.fillerOnly === true; }), 'fallback anchors are marked fillerOnly');
+// Filler-only lines ("yeah yeah", "uh uh") are NOT scoreable: no anchors are
+// selected, so anchorsRequired is 0 and the line is excluded from scoring. Adlibs
+// are structurally unwinnable (recognizers don't return them) -- they must neither
+// help nor hurt the score.
+assert.strictEqual(plan.phrases[2].anchors.length, 0, 'filler-only lines get no anchors');
+assert.strictEqual(plan.phrases[2].anchorsRequired, 0, 'filler-only lines require no anchors');
 assert.ok(plan.phrases[0].anchors.every(function(anchor) { return !anchor.fillerOnly; }), 'normal anchors are not marked fillerOnly');
 assert.ok(plan.difficulty.requiredAnchorRatio > 0.5, 'hard profile requires meaningful anchor coverage');
 
@@ -139,11 +141,17 @@ assert.strictEqual(phrase1.rescuedByWhisper, true, 'whisper can rescue missed an
 assert.strictEqual(phrase1.liveClean, false, 'whisper rescue does not mark phrase live clean');
 assert.ok(phrase1.rejectedCandidates.some(function(item) { return item.reason === 'weak_source' && item.source === 'vad'; }), 'vad-only lyric evidence is rejected as weak source');
 
-// Filler-only line: phrase clears when Whisper transcribes the filler word
+// Filler-only line ("uh uh"): NOT scoreable. No anchors are selected, so even when
+// Whisper transcribes the filler word it credits nothing and the line is excluded
+// from the score (neither helps nor hurts the singer).
 var fillerPlan = phraseEngine.buildPhrasePlan([
     { time: 0, text: 'alpha bravo final' },
     { time: 3, text: 'uh uh' }
 ], { difficulty: 'medium', audioDuration: 7 });
+var fillerLinePhrase = fillerPlan.phrases.find(function(p) { return p.lineIdx === 1; });
+assert.ok(fillerLinePhrase, 'filler-only phrase exists in the plan');
+assert.strictEqual(fillerLinePhrase.anchors.length, 0, 'filler-only line gets no anchors');
+assert.strictEqual(fillerLinePhrase.anchorsRequired, 0, 'filler-only line requires no anchors');
 var fillerSession = phraseEngine.createPhraseSession(fillerPlan);
 phraseEngine.addEvidence(fillerSession, {
     id: 'whisper-uh',
@@ -154,11 +162,9 @@ phraseEngine.addEvidence(fillerSession, {
     audioTimeSec: 4.0
 });
 phraseEngine.settlePhrases(fillerSession, 5.5);
-var fillerTrace = phraseEngine.getPhraseTrace(fillerSession);
-var fillerPhrase = fillerTrace.find(function(item) { return item.lineIdx === 1; });
-assert.ok(fillerPhrase, 'filler-only phrase trace exists');
-assert.strictEqual(fillerPhrase.lyricStatus, 'confirmed', 'filler-only phrase confirms when whisper provides the filler word');
-assert.ok(fillerPhrase.anchorsHit > 0, 'filler-only phrase records anchor hits');
+var fillerState = fillerSession.states[fillerLinePhrase.phraseId];
+assert.strictEqual(Object.keys(fillerState.anchorHits).length, 0, 'filler-only line records no anchor hits even when the filler word is transcribed');
+assert.notStrictEqual(fillerState.lyricStatus, 'confirmed', 'filler-only line never confirms (nothing scoreable)');
 
 var longLyrics = [];
 for (var i = 0; i < 180; i++) {

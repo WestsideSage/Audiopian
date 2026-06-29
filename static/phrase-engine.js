@@ -135,27 +135,12 @@
                 phonetic: scoring.doubleMetaphone ? scoring.doubleMetaphone(word) : undefined
             });
         }
-        // Fallback: if a phrase consists entirely of filler/short words (e.g. "uh uh"),
-        // include those words as low-weight anchors so the phrase can still be scored
-        // when Whisper transcribes them. Without this, anchorsRequired stays 0 and the
-        // line is permanently unscoreable in the phrase engine.
-        if (anchors.length === 0 && words.length > 0) {
-            for (var fi = 0; fi < words.length; fi++) {
-                var fw = words[fi] ? words[fi].word : '';
-                if (!fw) continue;
-                if (_isNeverScore(fw)) continue;
-                if (clean && _isProfane(fw)) continue;
-                anchors.push({
-                    anchorIdx: anchors.length,
-                    wordIdx: fi,
-                    word: fw,
-                    wordClass: 'adlib',
-                    weight: WORD_WEIGHTS.adlib || 0.25,
-                    phonetic: scoring.doubleMetaphone ? scoring.doubleMetaphone(fw) : undefined,
-                    fillerOnly: true
-                });
-            }
-        }
+        // No fallback for filler-only lines. If a phrase is entirely adlibs/fillers/
+        // short tokens (e.g. "Ah ah ah", "uh uh", "la la la"), it keeps ZERO anchors,
+        // so anchorsRequired stays 0 and the line is excluded from scoring: getHonestPct
+        // skips req<=0 phrases, and no anchor spans means no key-word red on a "miss".
+        // Adlibs are structurally unwinnable (recognizers don't reliably return them),
+        // so they must neither help nor hurt the score.
         anchors.sort(function(a, b) {
             if (b.weight !== a.weight) return b.weight - a.weight;
             return a.wordIdx - b.wordIdx;
