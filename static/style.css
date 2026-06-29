@@ -901,8 +901,13 @@ body.legal-page .site-footer {
         /* â”€â”€ Arcade floating HUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         .arcade-hud {
             position: fixed; top: 70px; right: 18px; z-index: 90;
-            display: flex; flex-direction: column; align-items: flex-end; gap: 7px;
+            display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2);
             pointer-events: none; font-variant-numeric: tabular-nums;
+            padding: var(--space-3) var(--space-4);
+            background: color-mix(in srgb, var(--surface) 82%, transparent);
+            border: 1px solid var(--line);
+            border-radius: var(--r);
+            box-shadow: var(--shadow-card);
         }
         .ah-cap {
             font-size: 0.62rem; font-weight: 700; letter-spacing: .24em;
@@ -1156,19 +1161,19 @@ body.legal-page .site-footer {
             overflow-y: auto;
             background: rgba(7, 7, 16, 0.94);
             border-left: 2px solid var(--p);
-            font-family: 'Courier New', monospace;
-            font-size: 0.7rem;
-            color: #ccc;
-            padding: 8px 10px;
+            font-family: var(--font-mono);
+            font-size: var(--text-xs);
+            color: var(--gray-800);
+            padding: var(--space-2) var(--space-3);
             z-index: 150;
             line-height: 1.55;
         }
         #debug-hud::-webkit-scrollbar { display: none; }
         .dbg-header  { color: var(--p); font-weight: bold; margin-bottom: 4px; letter-spacing: 0.04em; }
         .dbg-row     { padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
-        .dbg-label   { color: #666; }
+        .dbg-label   { color: var(--gray-600); }
         .dbg-matched { color: var(--matched); font-weight: bold; }
-        .dbg-pending { color: #555; }
+        .dbg-pending { color: var(--gray-500); }
         .dbg-final   { color: #88aaff; }
         .dbg-interim { color: var(--partial); }
         .dbg-sep     { border-top: 1px solid var(--line); margin: 5px 0; }
