@@ -117,10 +117,17 @@
             </div>
             <div class="sp-acc"><span class="sp-acc-label">Accuracy</span><span id="score-pct">0%</span></div>
         </div>
-        <div class="ah-streak" id="ahStreak" style="visibility:hidden">&#128293; <span id="ahStreakVal">0</span></div>
-        <div class="ah-fire" id="ahFire" style="display:none">ON FIRE</div>
+        <div class="ah-streak" id="ahStreak" style="visibility:hidden"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg> <span id="ahStreakVal">0</span></div>
+        <div class="ah-fire" id="ahFire" style="display:none">
+            <span class="ah-fire-flames" aria-hidden="true">
+                <span class="ember"></span><span class="ember"></span><span class="ember"></span>
+                <span class="ember"></span><span class="ember"></span>
+            </span>
+            <span class="ah-fire-label">ON FIRE</span>
+        </div>
         <div class="sp-milestone" id="ahMilestone"></div>
     </div>
+    <div class="onfire-floor" id="onFireFloor" aria-hidden="true"></div>
 
     <div id="lyrics-container">
         <div id="lyrics-scroll"></div>
