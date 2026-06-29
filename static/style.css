@@ -1067,52 +1067,87 @@ body.legal-page .site-footer {
             100% { opacity: 0; transform: translateY(-16px); }
         }
 
-        /* End-of-song modal */
+        /* â”€â”€ End-of-song results (staged entrance) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+           Stages are driven by [data-stage] on .game-modal, advanced by
+           player.js. prefers-reduced-motion collapses the timings (Phase 0
+           global guard) so the screen still appears, just without motion. */
         .game-modal {
-            position: fixed;
-            inset: 0;
+            position: fixed; inset: 0;
             background: rgba(5,6,12,0.8);
             backdrop-filter: blur(6px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            display: flex; align-items: center; justify-content: center;
             z-index: 100;
+            opacity: 0;
+            transition: opacity var(--dur-slow) var(--ease-out);
         }
+        :root[data-theme="light"] .game-modal { background: rgba(255,255,255,0.7); }
+        .game-modal[data-stage] { opacity: 1; }
 
         .game-modal-box {
             background: var(--surface);
             border: 1px solid var(--line);
             border-radius: var(--r-lg);
-            padding: var(--space-7);
+            padding: var(--space-8);
             text-align: center;
-            min-width: 300px;
+            min-width: 320px;
             box-shadow: var(--shadow-modal);
+            transform: scale(.92); opacity: 0;
+            transition: transform var(--dur-slow) var(--ease-spring), opacity var(--dur-slow) var(--ease-out);
+        }
+        .game-modal[data-stage="card"] .game-modal-box,
+        .game-modal[data-stage="grade"] .game-modal-box,
+        .game-modal[data-stage="points"] .game-modal-box,
+        .game-modal[data-stage="best"] .game-modal-box,
+        .game-modal[data-stage="done"] .game-modal-box {
+            transform: scale(1); opacity: 1;
         }
 
-        /* â”€â”€ Grade-hero end screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-        .grade-hero { position: relative; margin-bottom: 22px; }
+        /* â”€â”€ Grade-hero scorecard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        .grade-hero { position: relative; margin-bottom: var(--space-5); }
         .grade-letter {
             font-family: var(--font-display);
             font-size: 5rem; font-weight: 700; line-height: 1; letter-spacing: -.02em;
-            background: linear-gradient(135deg,var(--p),var(--s) 60%,var(--matched));
+            background: linear-gradient(135deg, var(--p), var(--s) 60%, var(--matched));
             -webkit-background-clip: text; background-clip: text;
             -webkit-text-fill-color: transparent; color: transparent;
+            transform: scale(.6); opacity: 0;
+            transition: transform var(--dur-slow) var(--ease-spring), opacity var(--dur-base) var(--ease-out);
         }
-        .grade-points { font-size: 1.6rem; font-weight: 800; color: var(--matched); margin-top: 4px; font-variant-numeric: tabular-nums; }
-        .grade-stats { color: var(--text-dim); font-size: 0.9rem; line-height: 1.9; margin-top: 14px; }
-        .grade-stats span { color: var(--text); font-weight: 700; }
+        .game-modal[data-stage="grade"] .grade-letter,
+        .game-modal[data-stage="points"] .grade-letter,
+        .game-modal[data-stage="best"] .grade-letter,
+        .game-modal[data-stage="done"] .grade-letter { transform: scale(1); opacity: 1; }
+
+        .grade-points {
+            font-family: var(--font-display);
+            font-size: var(--text-xl); font-weight: 800; color: var(--matched);
+            margin-top: var(--space-1); font-variant-numeric: tabular-nums;
+        }
+        /* Tabular 2-col stat grid (Geist scorecard). */
+        .grade-stats {
+            display: grid; grid-template-columns: auto auto; gap: 4px var(--space-5);
+            justify-content: center; text-align: left;
+            color: var(--text-dim); font-size: var(--text-sm); margin-top: var(--space-4);
+        }
+        .grade-stats > div { display: contents; }
+        .grade-stats span { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+        /* NEW BEST - clean ribbon (drops the rotated neon-sticker idiom). */
         .nb-ribbon {
-            position: absolute; top: -10px; right: -10px; transform: rotate(8deg);
-            background: linear-gradient(95deg,var(--fire-a),var(--fire-b)); color: #fff;
-            font-weight: 800; font-size: 0.7rem; letter-spacing: .12em;
-            padding: 4px 10px; border-radius: 8px; box-shadow: 0 0 14px rgba(255,84,112,.6);
+            position: absolute; top: -14px; left: 50%; transform: translateX(-50%) translateY(-6px);
+            background: var(--grad-accent); color: #04121a;
+            font-family: var(--font-display);
+            font-weight: 800; font-size: var(--text-xs); letter-spacing: .14em;
+            padding: var(--space-1) var(--space-3); border-radius: var(--r-pill);
+            opacity: 0;
+            transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-spring);
+        }
+        .game-modal[data-stage="best"] .nb-ribbon[data-best="1"],
+        .game-modal[data-stage="done"] .nb-ribbon[data-best="1"] {
+            opacity: 1; transform: translateX(-50%) translateY(0);
         }
 
-        .game-modal-actions {
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-        }
+        .game-modal-actions { display: flex; gap: var(--space-3); justify-content: center; margin-top: var(--space-5); }
 
         /* Loading overlay */
         .prep-overlay {
