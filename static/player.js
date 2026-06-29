@@ -260,6 +260,7 @@ class GameMode {
         this._endShown = false;     // idempotency latch for showEndModal (reset per song)
         this._shownPoints = 0;       // last score value painted by the count-up (reset per song)
         this._shownMult = 1;         // last multiplier painted (drives the tier-up beat; reset per song)
+        this._lastOnsetMs = 0;       // last sung-word onset (ms) - beat anchor for on-fire pulse (reset per song)
         this._lastEndCheckT = null; // end-of-song stall detector (poll-based completion)
         this._endStallTicks = 0;
         this.activeLineIdx = -1;
@@ -1071,7 +1072,12 @@ class GameMode {
             var e = events[i];
             switch (e.type) {
                 case 'lineScored': this._renderLineScored(e); break;
-                case 'wordMatched': this._logMatch(e.spokenWord, e.targetWord, e.method, e.editDistance, e.phoneticMatch, e.score, e.matched, e.windowPosition); break;
+                case 'wordMatched':
+                    // Capture this sung word's onset (live clock, ms) as the beat anchor for
+                    // the on-fire pulse (beatPhase). Render-only; does not touch scoring.
+                    this._lastOnsetMs = this._now() * 1000;
+                    this._logMatch(e.spokenWord, e.targetWord, e.method, e.editDistance, e.phoneticMatch, e.score, e.matched, e.windowPosition);
+                    break;
                 case 'promotion': this._logPromotion(e.source, e.wordIndex, e.score); break;
                 case 'phraseCleared': this._paintPhraseCleared(e.phraseId); break;
                 case 'phraseMissed': this._paintPhraseMissed(e.phraseId); break;
