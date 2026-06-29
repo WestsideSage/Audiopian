@@ -189,3 +189,32 @@ var buildLyricVocabulary = fakeModule.exports.buildLyricVocabulary;
     assert.strictEqual(buildLyricVocabulary(null, 800), '', 'null lyrics -> empty vocab');
 })();
 console.log('buildLyricVocabulary: tests passed');
+
+// --- classifyWord: elongated vocables + laughter are adlib (weight 0) -------
+// Expressively-spelled, non-lexical sounds the recognizer can't reliably return
+// must be free, so vocable-only lines aren't scored red ("awww yeah",
+// "heeheeheehee"). Real words must stay core/function.
+var classifyWord = fakeModule.exports.classifyWord;
+(function () {
+    // elongations (a letter repeated 3+ times in a row)
+    assert.strictEqual(classifyWord('awww', false), 'adlib', 'awww -> adlib');
+    assert.strictEqual(classifyWord('ooooh', false), 'adlib', 'ooooh -> adlib');
+    assert.strictEqual(classifyWord('mmmm', false), 'adlib', 'mmmm -> adlib');
+    assert.strictEqual(classifyWord('noooo', false), 'adlib', 'noooo -> adlib');
+    assert.strictEqual(classifyWord('yeahhh', false), 'adlib', 'yeahhh -> adlib');
+    assert.strictEqual(classifyWord('soooo', false), 'adlib', 'soooo -> adlib');
+    // laughter (a laugh syllable repeated 2+ times)
+    assert.strictEqual(classifyWord('hahaha', false), 'adlib', 'hahaha -> adlib');
+    assert.strictEqual(classifyWord('hehe', false), 'adlib', 'hehe -> adlib');
+    assert.strictEqual(classifyWord('heehee', false), 'adlib', 'heehee -> adlib');
+    assert.strictEqual(classifyWord('heeheeheehee', false), 'adlib', 'heeheeheehee -> adlib');
+    // real words must NOT be misclassified as adlib
+    assert.strictEqual(classifyWord('throwdown', false), 'core', 'throwdown stays core');
+    assert.strictEqual(classifyWord('watch', false), 'core', 'watch stays core');
+    assert.strictEqual(classifyWord('cartoons', false), 'core', 'cartoons stays core');
+    assert.strictEqual(classifyWord('committee', false), 'core', 'committee (doubles, no triple) stays core');
+    assert.strictEqual(classifyWord('hello', false), 'core', 'hello (ll double) stays core');
+    assert.strictEqual(classifyWord('he', false), 'function', 'pronoun "he" stays function (not laughter)');
+    assert.strictEqual(classifyWord('so', false), 'function', '"so" stays function');
+    console.log('classifyWord elongated-vocable: tests passed');
+})();
