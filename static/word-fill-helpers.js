@@ -10,9 +10,11 @@
  *     nowSec >= end            -> 1
  *     between                  -> linear (nowSec - start) / (end - start)
  *     end <= start (0/neg dur) -> step (nowSec < start ? 0 : 1)
+ *     missing/NaN/Infinity timing or clock, or null word -> 0 (never NaN/throw)
  *     result clamped to [0, 1]
  *   lineFillProgress(words, nowSec):
  *     Array<0..1> mapping each word through wordFillProgress; [] -> [].
+ *     null/undefined words -> []; a degenerate element -> 0 in that slot.
  *
  * The live consumer (player.js, Phase 3) maps scoring.js interpolateWordTimings
  * word objects onto { start, end } in SECONDS before calling these; the helper
@@ -27,14 +29,21 @@
      * @returns {number} fill fraction in [0, 1].
      */
     function wordFillProgress(word, nowSec) {
-        var start = word.start;
-        var end = word.end;
+        if (!word) return 0;
+        var start = +word.start;
+        var end = +word.end;
+        var now = +nowSec;
+        // Missing / NaN / Infinity timing or clock: no sane sweep to compute.
+        // Return 0 (no fill) rather than letting NaN reach the caller, which would
+        // write the string "NaN" into the --fill CSS var and silently break the
+        // word's sweep (player.js _paintWordFill). Graceful degradation.
+        if (!isFinite(start) || !isFinite(end) || !isFinite(now)) return 0;
         // Zero or negative duration: no ramp to interpolate -> step at start.
-        // MUST run before the <= start guard so nowSec === start steps to 1 (per contract).
-        if (end <= start) return nowSec < start ? 0 : 1;
-        if (nowSec <= start) return 0;
-        if (nowSec >= end) return 1;
-        var p = (nowSec - start) / (end - start);
+        // MUST run before the <= start guard so now === start steps to 1 (per contract).
+        if (end <= start) return now < start ? 0 : 1;
+        if (now <= start) return 0;
+        if (now >= end) return 1;
+        var p = (now - start) / (end - start);
         if (p < 0) return 0;
         if (p > 1) return 1;
         return p;

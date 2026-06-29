@@ -99,4 +99,30 @@ var src = [{ start: 1, end: 3 }, { start: 3, end: 5 }];
 WF.lineFillProgress(src, 4);
 assert.deepStrictEqual(src, [{ start: 1, end: 3 }, { start: 3, end: 5 }], 'input line not mutated');
 
+// --- hardening: missing / non-finite timings -> 0, never NaN, never throws ---
+// (a degenerate interpolateWordTimings entry must not write the string "NaN"
+//  into the --fill CSS var, which silently kills that word's sweep — see
+//  player.js _paintWordFill.)
+assert.strictEqual(WF.wordFillProgress(null, 5), 0, 'null word -> 0 (no throw)');
+assert.strictEqual(WF.wordFillProgress(undefined, 5), 0, 'undefined word -> 0 (no throw)');
+assert.strictEqual(WF.wordFillProgress({}, 5), 0, 'no timings -> 0');
+assert.strictEqual(WF.wordFillProgress({ start: 10 }, 5), 0, 'missing end -> 0');
+assert.strictEqual(WF.wordFillProgress({ end: 10 }, 5), 0, 'missing start -> 0');
+assert.strictEqual(WF.wordFillProgress({ start: NaN, end: 10 }, 5), 0, 'NaN start -> 0');
+assert.strictEqual(WF.wordFillProgress({ start: 0, end: NaN }, 5), 0, 'NaN end -> 0');
+assert.strictEqual(WF.wordFillProgress({ start: 0, end: Infinity }, 5), 0, 'Infinity end -> 0');
+assert.strictEqual(WF.wordFillProgress(w, NaN), 0, 'NaN nowSec -> 0');
+assert.strictEqual(WF.wordFillProgress(w, undefined), 0, 'undefined nowSec -> 0');
+var bad = WF.wordFillProgress({ start: NaN, end: NaN }, NaN);
+assert.ok(!Number.isNaN(bad), 'never returns NaN');
+
+// lineFillProgress tolerates degenerate elements (each bad slot -> 0, no throw).
+assert.deepStrictEqual(
+    WF.lineFillProgress([{ start: 0, end: 2 }, null, {}], 1),
+    [0.5, 0, 0],
+    'degenerate elements -> 0 in that slot'
+);
+assert.deepStrictEqual(WF.lineFillProgress(null, 5), [], 'null words -> []');
+assert.deepStrictEqual(WF.lineFillProgress(undefined, 5), [], 'undefined words -> []');
+
 console.log('All word-fill-helpers tests passed.');
