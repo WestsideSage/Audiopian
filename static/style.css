@@ -699,8 +699,7 @@ body.legal-page .site-footer {
     width: 11px; height: 11px; border-radius: var(--r-sm);
     background: var(--grad-accent); box-shadow: 0 0 10px var(--p);
 }
-/* The score-display pushes everything after it to the right (margin-left:auto in the
-   player rules); keep the theme toggle inline in the header (not fixed). */
+/* Keep the player theme toggle inline in the header (not fixed). */
 .player-header .theme-toggle {
     position: static;
     top: auto;
@@ -884,48 +883,46 @@ body.legal-page .site-footer {
             box-shadow: 0 0 12px rgba(45,212,238,.5);
         }
 
-        /* Accuracy readout in header (the honest %, distinct from the arcade SCORE) */
-        .score-display {
-            margin-left: auto;
-            display: flex;
-            align-items: baseline;
-            gap: 7px;
-            font-variant-numeric: tabular-nums;
-        }
-        .score-display .sd-label {
-            font-size: 0.58rem; font-weight: 700; letter-spacing: .18em;
-            text-transform: uppercase; color: var(--text-dim);
-        }
-        .score-display #score-pct { font-size: 1rem; color: var(--matched); font-weight: 700; }
-
-        /* â”€â”€ Arcade floating HUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
-        .arcade-hud {
-            position: fixed; top: 70px; right: 18px; z-index: 90;
-            display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-2);
-            pointer-events: none; font-variant-numeric: tabular-nums;
+        /* â”€â”€ Unified score panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+           One anchored .panel container (replaces the two floating
+           corners). Points is the hero; accuracy + multiplier secondary.
+           Reads in both themes (token surface/border, no dark-only glow). */
+        .score-panel {
+            position: fixed; top: 64px; right: 18px; z-index: 90;
+            display: flex; flex-direction: column; align-items: stretch; gap: var(--space-2);
             padding: var(--space-3) var(--space-4);
-            background: color-mix(in srgb, var(--surface) 82%, transparent);
-            border: 1px solid var(--line);
-            border-radius: var(--r);
-            box-shadow: var(--shadow-card);
+            min-width: 180px;
+            pointer-events: none;
+            font-variant-numeric: tabular-nums;
+            font-family: var(--font-text);
+            transform-origin: 100% 0;
         }
+        .sp-hero { position: relative; text-align: right; }
         .ah-cap {
-            font-size: 0.62rem; font-weight: 700; letter-spacing: .24em;
-            text-transform: uppercase; color: var(--text-dim); line-height: 1; margin-bottom: -3px;
+            font-size: var(--text-xs); font-weight: 700; letter-spacing: .24em;
+            text-transform: uppercase; color: var(--text-faint); line-height: 1;
         }
         .ah-points {
-            font-size: 3.3rem; font-weight: 700; line-height: 1;
-            color: transparent; background: linear-gradient(96deg,var(--p),var(--s));
+            font-family: var(--font-display);
+            font-size: var(--text-3xl); font-weight: 700; line-height: 1;
+            letter-spacing: -.01em;
+            color: transparent; background: var(--grad-accent);
             -webkit-background-clip: text; background-clip: text;
-            filter: drop-shadow(0 0 14px rgba(45,212,238,.3));
-            transition: transform .12s;
         }
-        .ah-points.bump { transform: scale(1.16); }
-        .ah-mult-row { display: flex; align-items: center; gap: 8px; }
-        .ah-mult { font-size: 1.25rem; font-weight: 700; color: var(--s); }
-        .ah-ramp { width: 96px; height: 7px; background: rgba(255,255,255,.1); border-radius: 999px; overflow: hidden; }
-        .ah-ramp-fill { height: 100%; width: 0%; background: linear-gradient(90deg,var(--p),var(--s)); transition: width .2s; }
-        .ah-streak { font-size: 1rem; color: var(--fire-b); font-weight: 700; }
+        /* The bump on each clear is kept as a subtle scale via the popup spring;
+           the hero number itself no longer hard-snaps (count-up in Task 4). */
+        .sp-meta {
+            display: flex; align-items: center; justify-content: flex-end;
+            gap: var(--space-3); flex-wrap: wrap;
+        }
+        .ah-mult-row { display: flex; align-items: center; gap: var(--space-2); }
+        .ah-mult { font-family: var(--font-display); font-size: var(--text-md); font-weight: 700; color: var(--s); }
+        .ah-ramp { width: 80px; height: 6px; background: var(--surface-3); border-radius: var(--r-pill); overflow: hidden; }
+        .ah-ramp-fill { height: 100%; width: 0%; background: var(--grad-accent); transition: width var(--dur-base) var(--ease-out); }
+        .sp-acc { display: flex; align-items: baseline; gap: var(--space-1); font-size: var(--text-sm); color: var(--text-dim); }
+        .sp-acc-label { font-size: var(--text-xs); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-faint); }
+        .sp-acc #score-pct { color: var(--matched); font-weight: 700; }
+        .ah-streak { align-self: flex-end; font-size: var(--text-sm); color: var(--fire-b); font-weight: 700; }
         .ah-fire {
             font-size: 0.8rem; font-weight: 800; letter-spacing: .18em;
             color: #fff; background: linear-gradient(95deg,var(--fire-a),var(--fire-b));
