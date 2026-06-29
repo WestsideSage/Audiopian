@@ -468,6 +468,33 @@ function matchHotWordForTest(s, text, now) {
         'a partial phrase does NOT emit phraseCleared (green)');
 })();
 
+// A NON-SCORING line (all adlib/filler/parenthetical -> anchorsRequired 0) must be
+// NEUTRAL in the arcade: no clear, no miss, no streak reset, no phraseMissed. Real
+// case: "(Be a man)" in I'll Make A Man Out Of You was breaking the on-fire streak
+// and blocking a 100% run even though it was excluded from honest % and scoreLine.
+(function () {
+    var L = [lyric(0, '(be a man)'), lyric(3, 'tail filler words here')];
+    var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
+                phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 6 }), difficulty: 'medium' };
+    var s = session.createSession(cfg);
+    var p0 = cfg.phrasePlan.phrases.find(function (p) { return p.lineIdx === 0; });
+    assert.strictEqual(p0.anchorsRequired, 0, 'precondition: "(be a man)" is a non-scoring line (0 anchors)');
+    // Prime an existing on-fire streak/multiplier directly (robust, no reconcile flow).
+    s.arcadeState.streak = 5; s.arcadeState.multiplier = 4;
+    // Settle + commit the parenthetical line with NO hits (backing vocal not sung).
+    session.setActiveLine(s, 0, 0.0);
+    phrase.settlePhrases(s.phraseSession, 4.5);    // p0 (ends 3) settled
+    var events = [];
+    session.commitNewlySettled(s, 4.5, true, events);
+    assert.strictEqual(s.arcadeState.streak, 5,
+        'a non-scoring parenthetical line does NOT reset the on-fire streak');
+    assert.strictEqual(s.arcadeState.multiplier, 4, 'a non-scoring line does NOT reset the multiplier');
+    assert.strictEqual(events.filter(function (e) { return e.type === 'arcade' && e.evt && e.evt.outcome === 'miss'; }).length, 0,
+        'a non-scoring line does NOT commit an arcade miss');
+    assert.strictEqual(events.filter(function (e) { return e.type === 'phraseMissed'; }).length, 0,
+        'a non-scoring line does NOT emit phraseMissed');
+})();
+
 // routeEvents=false (the end-screen flush) suppresses the HUD arcade event but still
 // commits (arcadeRecord pushed) and still paints the phrase result.
 (function () {

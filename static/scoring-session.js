@@ -915,6 +915,11 @@
             if (!pst || pst.status !== 'settled') continue;
             if (s.committedPhrases[ph.phraseId]) continue;
             s.committedPhrases[ph.phraseId] = true;
+            // Non-scoring lines (all adlib/filler/parenthetical -> anchorsRequired 0) are
+            // NEUTRAL in the arcade: no clear, no miss, no streak/multiplier reset, no
+            // phraseMissed paint. Consistent with getHonestPct (skips req<=0) and scoreLine
+            // (skips weightedTotal===0). Marked committed above so it isn't re-checked.
+            if ((ph.anchorsRequired || 0) <= 0) continue;
             var evt = arcade.commitPhrase(s.arcadeState, {
                 phraseId: ph.phraseId,
                 anchorsRequired: ph.anchorsRequired,
