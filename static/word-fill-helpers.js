@@ -40,8 +40,23 @@
         return p;
     }
 
+    /**
+     * @param {Array<{start:number,end:number}>} words  per-word timing windows.
+     * @param {number} nowSec                            current playhead in seconds.
+     * @returns {Array<number>} per-word fill fractions in [0, 1]; [] for [].
+     */
+    function lineFillProgress(words, nowSec) {
+        if (!words || words.length === 0) return [];
+        var out = [];
+        for (var i = 0; i < words.length; i++) {
+            out.push(wordFillProgress(words[i], nowSec));
+        }
+        return out;
+    }
+
     var api = {
-        wordFillProgress: wordFillProgress
+        wordFillProgress: wordFillProgress,
+        lineFillProgress: lineFillProgress
     };
     if (root) root.KaraokeeWordFill = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -58,4 +58,45 @@ var frozen = { start: 1, end: 3 };
 WF.wordFillProgress(frozen, 2);
 assert.deepStrictEqual(frozen, { start: 1, end: 3 }, 'input word is not mutated');
 
+// --- lineFillProgress ------------------------------------------------------
+assert.strictEqual(typeof WF.lineFillProgress, 'function', 'lineFillProgress is exported');
+
+// Empty array -> empty array.
+assert.deepStrictEqual(WF.lineFillProgress([], 5), [], 'empty words -> []');
+
+// A 3-word line; each word delegates to wordFillProgress.
+var line = [
+    { start: 0, end: 2 },   // word 0: [0,2]
+    { start: 2, end: 4 },   // word 1: [2,4]
+    { start: 4, end: 6 }    // word 2: [4,6]
+];
+
+// nowSec = 3 -> word0 fully filled (1), word1 halfway (0.5), word2 not started (0).
+assert.deepStrictEqual(WF.lineFillProgress(line, 3), [1, 0.5, 0], 'mid-line: [1, 0.5, 0]');
+
+// Before the whole line -> all zeros.
+assert.deepStrictEqual(WF.lineFillProgress(line, -1), [0, 0, 0], 'before line -> all 0');
+
+// After the whole line -> all ones.
+assert.deepStrictEqual(WF.lineFillProgress(line, 100), [1, 1, 1], 'after line -> all 1');
+
+// Result length always matches input length.
+assert.strictEqual(WF.lineFillProgress(line, 3).length, line.length, 'length preserved');
+
+// Single-word line.
+assert.deepStrictEqual(WF.lineFillProgress([{ start: 10, end: 20 }], 15), [0.5], 'single word -> [0.5]');
+
+// Mixed: a zero-duration word inside the line steps, neighbors interpolate.
+var mixed = [
+    { start: 0, end: 2 },   // halfway at t=1 -> 0.5
+    { start: 2, end: 2 },   // zero-dur; at t=1 (< start) -> 0
+    { start: 1, end: 5 }    // at t=1 (== start) -> 0
+];
+assert.deepStrictEqual(WF.lineFillProgress(mixed, 1), [0.5, 0, 0], 'mixed zero-dur line at t=1');
+
+// Does not mutate the input array or its elements.
+var src = [{ start: 1, end: 3 }, { start: 3, end: 5 }];
+WF.lineFillProgress(src, 4);
+assert.deepStrictEqual(src, [{ start: 1, end: 3 }, { start: 3, end: 5 }], 'input line not mutated');
+
 console.log('All word-fill-helpers tests passed.');
