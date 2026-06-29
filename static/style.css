@@ -42,6 +42,103 @@
 
     /* gradients */
     --grad-accent:  linear-gradient(96deg, var(--p), var(--s));
+
+    /* NEW (Phase 0 foundation)
+       Additive only - existing dark values above are untouched. */
+
+    /* strong heading text (same as legacy heading color) */
+    --text-strong:  rgb(244, 245, 251);
+
+    /* neutral gray ramp (dark-oriented; light theme remaps below) */
+    --gray-50:  #101012;
+    --gray-100: #161618;
+    --gray-200: #1d1d20;
+    --gray-300: #26262a;
+    --gray-400: #3a3a40;
+    --gray-500: #52525a;
+    --gray-600: #71717a;
+    --gray-700: #a0a0a8;
+    --gray-800: #cfcfd6;
+    --gray-900: #ededed;
+
+    /* fire - third warm stop for the on-fire gradient (Phase 2) */
+    --fire-c:   #ffd24a;
+
+    /* page background wash (token so light can override the neon radials) */
+    --bg-wash:
+        radial-gradient(120% 80% at 100% 0%, rgba(240,70,143,.13), transparent 56%),
+        radial-gradient(120% 90% at 0% 100%, rgba(45,212,238,.12), transparent 56%),
+        var(--bg);
+
+    /* type families (Inter loaded in Task 5/Phase 1; falls back gracefully) */
+    --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+    --font-text:    'Inter', 'Segoe UI', system-ui, sans-serif;
+    --font-mono:    ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+    /* type scale */
+    --text-xs:   .72rem;
+    --text-sm:   .85rem;
+    --text-base: .95rem;
+    --text-md:   1.05rem;
+    --text-lg:   1.3rem;
+    --text-xl:   1.7rem;
+    --text-2xl:  2.2rem;
+    --text-3xl:  3rem;
+
+    /* spacing scale (4px base) */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 40px;
+    --space-8: 48px;
+
+    /* radius (adds the pill; --r/--r-sm/--r-lg already exist) */
+    --r-pill: 999px;
+
+    /* shadow tokens (replace copy-pasted literals in Phase 1) */
+    --shadow-card:  0 1px 2px rgba(0,0,0,.4);
+    --shadow-modal: 0 24px 60px rgba(0,0,0,.5), inset 0 0 0 1px rgba(255,255,255,.02);
+    --glow:         0 0 22px;
+}
+
+/* Light theme overrides.
+   Phase 0: functional + unbroken, not yet polished (that's Phase 1).
+   Only semantic tokens flip; brand accents stay vivid. */
+:root[data-theme="light"] {
+    --bg:           #ffffff;
+    --bg-deep:      #fafafa;
+    --surface:      #ffffff;
+    --surface-2:    #f5f5f5;
+    --surface-3:    #ededed;
+    --line:         #eaeaea;
+    --line-strong:  #d4d4d8;
+
+    --text:         #171717;
+    --text-dim:     #52525a;
+    --text-faint:   #8a8a93;
+    --text-strong:  #0a0a0a;
+
+    --gray-50:  #fafafa;
+    --gray-100: #f5f5f5;
+    --gray-200: #ededed;
+    --gray-300: #e4e4e7;
+    --gray-400: #d4d4d8;
+    --gray-500: #a1a1aa;
+    --gray-600: #71717a;
+    --gray-700: #52525a;
+    --gray-800: #27272a;
+    --gray-900: #0a0a0a;
+
+    --bg-wash:
+        radial-gradient(120% 80% at 100% 0%, rgba(240,70,143,.05), transparent 56%),
+        radial-gradient(120% 90% at 0% 100%, rgba(45,212,238,.05), transparent 56%),
+        var(--bg);
+
+    --shadow-card:  0 1px 2px rgba(0,0,0,.06);
+    --shadow-modal: 0 24px 60px rgba(0,0,0,.14), inset 0 0 0 1px rgba(0,0,0,.02);
 }
 
 * {
@@ -51,10 +148,7 @@
 }
 
 body {
-    background:
-        radial-gradient(120% 80% at 100% 0%, rgba(240,70,143,.13), transparent 56%),
-        radial-gradient(120% 90% at 0% 100%, rgba(45,212,238,.12), transparent 56%),
-        var(--bg);
+    background: var(--bg-wash);
     background-attachment: fixed;
     color: var(--text);
     font-family: var(--font);
@@ -85,7 +179,7 @@ body {
     font-weight: 700;
     letter-spacing: .14em;
     text-transform: uppercase;
-    color: #f4f5fb;
+    color: var(--text-strong);
     margin-bottom: 10px;
 }
 .wordmark .logo-dot {
@@ -97,7 +191,7 @@ body {
     flex-shrink: 0;
 }
 /* fallback for any bare h1 */
-h1 { font-size: 1.85rem; text-align: center; color: #f4f5fb; }
+h1 { font-size: 1.85rem; text-align: center; color: var(--text-strong); }
 
 .tagline {
     text-align: center;
@@ -216,7 +310,7 @@ button:disabled { background: var(--surface-2); color: var(--text-faint); cursor
     padding: 2rem;
     z-index: 9999;
 }
-.unsupported-overlay h2 { color: #f4f5fb; font-weight: 700; margin-bottom: 12px; }
+.unsupported-overlay h2 { color: var(--text-strong); font-weight: 700; margin-bottom: 12px; }
 .unsupported-overlay p { max-width: 32rem; line-height: 1.6; color: var(--text-dim); margin: 0 auto; }
 .unsupported-overlay strong { color: var(--p); }
 
@@ -303,7 +397,7 @@ body.legal-page {
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    color: #f4f5fb;
+    color: var(--text-strong);
     font-weight: 700;
     letter-spacing: .12em;
     text-transform: uppercase;
@@ -318,11 +412,11 @@ body.legal-page {
     text-align: left;
     font-size: 1.7rem;
     margin: 20px 0 4px;
-    color: #f4f5fb;
+    color: var(--text-strong);
 }
 .legal .updated { color: var(--text-faint); font-size: .8rem; margin-bottom: 10px; }
 .legal .lede { color: var(--text-dim); font-size: .95rem; line-height: 1.6; margin-bottom: 8px; }
-.legal h2 { font-size: 1.05rem; color: #f4f5fb; margin: 26px 0 9px; letter-spacing: .01em; }
+.legal h2 { font-size: 1.05rem; color: var(--text-strong); margin: 26px 0 9px; letter-spacing: .01em; }
 .legal p { color: var(--text-dim); font-size: .9rem; line-height: 1.65; margin-bottom: 12px; }
 .legal ul, .legal ol { margin: 0 0 12px 22px; }
 .legal li { color: var(--text-dim); font-size: .9rem; line-height: 1.6; margin-bottom: 6px; }
