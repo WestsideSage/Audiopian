@@ -35,10 +35,6 @@
     </script>
 </head>
 <body class="has-footer">
-    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" title="Switch theme">
-      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
-      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-    </button>
     <div id="unsupported" class="unsupported-overlay" style="display:none">
       <div>
         <h2>Audiopian needs desktop Chrome or Edge</h2>
@@ -50,16 +46,23 @@
     </div>
 
     <div class="card">
-        <h1 class="wordmark"><span class="logo-dot"></span>Audiopian</h1>
+        <div class="card-head">
+            <h1 class="wordmark"><span class="logo-dot"></span>Audiopian</h1>
+            <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" title="Switch theme">
+              <svg class="ico-sun icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+              <svg class="ico-moon icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </button>
+        </div>
 
         <p class="tagline">
-            Search for any song and sing along.
+            Search any song and sing along.
+            <span class="tagline-sub">Scored · free · any song · in your browser</span>
         </p>
 
         <label for="songSearch">Search for a song</label>
         <input type="text" id="songSearch" placeholder="e.g. Special Ed I Got It Made" autofocus autocomplete="off" />
         <button id="searchBtn" onclick="runSearch()">Search</button>
-        <div id="searchStatus"></div>
+        <div id="searchStatus" role="status" aria-live="polite"></div>
         <div id="songResults" class="search-results" style="display:none"></div>
 
         <div id="starterRow" style="display:none">
@@ -82,7 +85,7 @@
                 Retry with edited title/artist
             </button>
         </div>
-        <div id="status"></div>
+        <div id="status" role="status" aria-live="polite"></div>
 
         <div id="localUploadSection">
             <div class="search-divider">or load a local audio file</div>
@@ -257,13 +260,16 @@
         async function runSearch() {
             var q = document.getElementById('songSearch').value.trim();
             var box = document.getElementById('songResults');
+            var btn = document.getElementById('searchBtn');
             if (!q) { setSearchStatus('Type a song to search.', 'error'); return; }
             setSearchStatus('Searching…', '');
             box.style.display = 'none'; box.innerHTML = '';
+            if (btn) { btn.disabled = true; btn.classList.add('is-loading'); }
 
             var songs = [];
             try { songs = await KaraokeeLyricsClient.searchSongs(q); }
             catch (e) { songs = []; }
+            finally { if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); } }
 
             if (!songs.length) {
                 setSearchStatus('No songs found for "' + q + '".', 'error');

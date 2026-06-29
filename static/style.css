@@ -180,14 +180,14 @@ body {
 .wordmark {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 13px;
-    font-size: 1.85rem;
+    gap: var(--space-3);
+    font-family: var(--font-display);
+    font-size: var(--text-xl);
     font-weight: 700;
     letter-spacing: .14em;
     text-transform: uppercase;
     color: var(--text-strong);
-    margin-bottom: 10px;
+    margin: 0;
 }
 .wordmark .logo-dot {
     width: 15px;
@@ -199,10 +199,18 @@ body {
 }
 .tagline {
     text-align: center;
-    font-size: .85rem;
+    font-size: var(--text-base);
     color: var(--text-dim);
-    margin: 0 0 22px;
+    margin: 0 0 var(--space-5);
     line-height: 1.55;
+}
+.tagline-sub {
+    display: block;
+    margin-top: var(--space-1);
+    font-size: var(--text-xs);
+    color: var(--text-faint);
+    letter-spacing: .04em;
+    text-transform: uppercase;
 }
 label {
     display: block;
@@ -565,6 +573,41 @@ body.legal-page {
     stroke: currentColor;
     fill: none;
 }
+
+/* ---- landing card header (wordmark + theme toggle on one row) ---- */
+.card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+/* In-header toggle: override the Phase-0 fixed positioning for the landing card. */
+.card-head .theme-toggle {
+    position: static;
+    top: auto;
+    right: auto;
+}
+
+/* ---- search button loading spinner ---- */
+button.is-loading {
+    position: relative;
+    color: transparent !important;
+}
+button.is-loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 16px;
+    height: 16px;
+    margin: -8px 0 0 -8px;
+    border: 2px solid rgba(4,18,26,.35);
+    border-top-color: #04121a;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+}
+/* Spin keyframes already exist in the player section (extracted in Phase 0). */
 
 /* ============================================================
    Player page (extracted verbatim from player.html inline <style>
