@@ -529,9 +529,10 @@ assert.ok(Object.keys(uniqSession.states['p0'].anchorHits).length > 0,
 console.log('Class-2 unique-anchor reconcile: passed.');
 
 // === Fast-tempo recognition allowance (cheese-floored bar) ===
-// High-WPS lines the recognizer can't fully transcribe get a LOWER anchorsRequired,
-// floored at 2 genuinely-recognized anchors (cheese with 0-1 recognized still fails);
-// normal-tempo lines keep the full bar. The buff is fast-tempo only.
+// On dense/fast lines the browser recognizer drops most words (verified in real
+// telemetry: ~3 of 4 dropped on back-to-back bars), so the bar drops toward a
+// SINGLE genuinely-recognized anchor -- 1 confirmed word + VAD engagement is enough.
+// Cheese with 0 recognized still fails. Normal-tempo lines keep the full bar.
 var fastP = phraseEngine.buildPhrasePlan([
     { time: 0, text: 'alpha bravo charlie delta echo foxtrot golf hotel' }, // ~5 wps -> fast
     { time: 1.6, text: 'tail line words here now' }
@@ -542,10 +543,28 @@ var fastChunks = fastP.phrases.filter(function (p) {
 });
 assert.ok(fastChunks.length > 0, 'precondition: a fast chunk with >=3 anchors exists');
 fastChunks.forEach(function (p) {
-    var fastBar = Math.max(2, Math.ceil(p.anchors.length * 0.5));
-    assert.ok(p.anchorsRequired <= fastBar, 'fast chunk: bar lowered to <= max(2, ceil(anchors*0.5))');
-    assert.ok(p.anchorsRequired >= 2, 'cheese floor: fast bar is never below 2 recognized anchors');
+    var fastBar = Math.max(1, Math.ceil(p.anchors.length * 0.25));
+    assert.ok(p.anchorsRequired <= fastBar, 'fast chunk: bar lowered to <= max(1, ceil(anchors*0.25))');
+    assert.ok(p.anchorsRequired >= 1, 'cheese floor: fast bar is never below 1 recognized anchor');
 });
+// A dense line with just a few anchors drops all the way to ONE recognized anchor
+// (the recognizer-drops case from the Roots telemetry).
+var fastFew = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'darkness preach gospel' },        // 3 words in 0.7s -> very fast
+    { time: 0.7, text: 'tail words here now please' }
+], { difficulty: 'expert', audioDuration: 8 });
+var ff = fastFew.phrases.find(function (p) { return p.lineIdx === 0; });
+assert.ok(ff.anchors.length >= 2 && ff.anchors.length <= 4, 'precondition: a dense line with a few anchors');
+assert.strictEqual(ff.anchorsRequired, 1, 'a dense few-anchor line requires just 1 recognized anchor');
+// Short back-to-back lines (minimal pausing) get the allowance even at moderate
+// WPS -- the recognizer can't emit a final inside a sub-1.2s window.
+var shortP = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'preach gospel' },                  // 2 words in 0.8s -> WPS ~2.5, tiny window
+    { time: 0.8, text: 'tail words here now please' }
+], { difficulty: 'expert', audioDuration: 8 });
+var sp = shortP.phrases.find(function (p) { return p.lineIdx === 0; });
+assert.ok((sp.words.length / (sp.endSec - sp.startSec)) < 4.0, 'precondition: short line is below the WPS threshold');
+assert.strictEqual(sp.anchorsRequired, 1, 'a short back-to-back line requires just 1 anchor even at moderate WPS');
 var normP = phraseEngine.buildPhrasePlan([
     { time: 0, text: 'slow measured steady careful chosen words' }          // very low wps -> normal
 ], { difficulty: 'expert', audioDuration: 30 });

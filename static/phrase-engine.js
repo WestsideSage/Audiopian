@@ -48,13 +48,19 @@
     // one late `final`). Tunable; see the design spec §7.
     var RECONCILE_LOOKBACK_SEC = 18;
     // Fast-tempo recognition allowance: on high-WPS (>= FAST_WPS_THRESHOLD) lines the
-    // recognizer demonstrably drops words (a hard ASR limit, not a wrong performance), so
-    // demanding the full anchor ratio is unfair and frustrating. buildPhrasePlan lowers
-    // anchorsRequired on such lines toward ~half the anchors, FLOORED at FAST_RECOGNIZED_FLOOR
-    // genuinely-RECOGNIZED anchors. anchorHits only come from real recognition/reconcile
-    // (never bare VAD energy), so humming/cheese (0-1 recognized) still fails the floor.
+    // browser recognizer demonstrably drops words -- real telemetry (a dense Roots rap)
+    // showed ~3 of every 4 words dropped on back-to-back bars while VAD confirmed the
+    // singer was vocalizing throughout. Demanding the full anchor ratio there punishes a
+    // recognizer limit, not the singer. buildPhrasePlan lowers anchorsRequired on such
+    // lines toward ~a quarter of the anchors, FLOORED at FAST_RECOGNIZED_FLOOR genuinely-
+    // RECOGNIZED anchors. anchorHits only come from real recognition/reconcile (never bare
+    // VAD energy), so humming/cheese (0 recognized) still fails the floor.
     var FAST_WPS_THRESHOLD = 4.0;
-    var FAST_RECOGNIZED_FLOOR = 2;
+    // Back-to-back lines with minimal pausing: a line whose window is this short is
+    // gone before the async recognizer can emit a final for it, so it gets the same
+    // allowance as a high-WPS line even at moderate words/sec.
+    var FAST_WINDOW_SEC = 1.2;
+    var FAST_RECOGNIZED_FLOOR = 1;
     // Interim reconciliation credits a line purely by word content (a repeated hook
     // anchor from the NEXT line can match a SKIPPED middle line whose true owner has
     // not yet ended — the forward-only floor only guards lines BEFORE the last
@@ -203,11 +209,13 @@
                     anchorsRequired = anchors.length - 1;
                 }
                 // Fast-tempo recognition allowance (cheese-floored): lower the bar on
-                // high-WPS lines the recognizer can't fully transcribe, but never below
-                // FAST_RECOGNIZED_FLOOR genuinely-recognized anchors. Only lowers, never raises.
-                var chunkWps = chunk.words.length / Math.max(0.001, chunk.endSec - chunk.startSec);
-                if (anchorsRequired > 0 && chunkWps >= FAST_WPS_THRESHOLD) {
-                    var fastBar = Math.max(FAST_RECOGNIZED_FLOOR, Math.ceil(anchors.length * 0.5));
+                // high-WPS lines the recognizer can't fully transcribe, toward ~a quarter
+                // of the anchors but never below FAST_RECOGNIZED_FLOOR genuinely-recognized
+                // anchors. Only lowers, never raises.
+                var chunkDur = chunk.endSec - chunk.startSec;
+                var chunkWps = chunk.words.length / Math.max(0.001, chunkDur);
+                if (anchorsRequired > 0 && (chunkWps >= FAST_WPS_THRESHOLD || chunkDur <= FAST_WINDOW_SEC)) {
+                    var fastBar = Math.max(FAST_RECOGNIZED_FLOOR, Math.ceil(anchors.length * 0.25));
                     anchorsRequired = Math.min(anchorsRequired, fastBar);
                 }
                 phrases.push({
