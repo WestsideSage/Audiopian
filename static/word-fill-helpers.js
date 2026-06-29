@@ -1,0 +1,48 @@
+/**
+ * Pure per-word fill-progress helpers for the progressive word-by-word lyric
+ * sweep (Phase 3 of the UX redesign). DOM-free and clock-free: the caller
+ * injects nowSec, so the timing math is testable in Node.js. Browser pages
+ * also get window.KaraokeeWordFill.
+ *
+ * Contract — words are { start: seconds, end: seconds }:
+ *   wordFillProgress(word, nowSec):
+ *     nowSec <= start          -> 0
+ *     nowSec >= end            -> 1
+ *     between                  -> linear (nowSec - start) / (end - start)
+ *     end <= start (0/neg dur) -> step (nowSec < start ? 0 : 1)
+ *     result clamped to [0, 1]
+ *   lineFillProgress(words, nowSec):
+ *     Array<0..1> mapping each word through wordFillProgress; [] -> [].
+ *
+ * The live consumer (player.js, Phase 3) maps scoring.js interpolateWordTimings
+ * word objects onto { start, end } in SECONDS before calling these; the helper
+ * itself knows nothing about scoring and never touches the scoring path.
+ */
+(function (root) {
+    'use strict';
+
+    /**
+     * @param {{start:number,end:number}} word  timing window in seconds.
+     * @param {number} nowSec                    current playhead in seconds.
+     * @returns {number} fill fraction in [0, 1].
+     */
+    function wordFillProgress(word, nowSec) {
+        var start = word.start;
+        var end = word.end;
+        // Zero or negative duration: no ramp to interpolate -> step at start.
+        // MUST run before the <= start guard so nowSec === start steps to 1 (per contract).
+        if (end <= start) return nowSec < start ? 0 : 1;
+        if (nowSec <= start) return 0;
+        if (nowSec >= end) return 1;
+        var p = (nowSec - start) / (end - start);
+        if (p < 0) return 0;
+        if (p > 1) return 1;
+        return p;
+    }
+
+    var api = {
+        wordFillProgress: wordFillProgress
+    };
+    if (root) root.KaraokeeWordFill = api;
+    if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof window !== 'undefined' ? window : null);
