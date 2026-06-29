@@ -1855,14 +1855,14 @@ class GameMode {
             if (isBest) localStorage.setItem(key, String(summary.points));
 
             document.getElementById('gradeLetter').textContent = grade;
-            document.getElementById('gradePoints').textContent = String(summary.points);
+            document.getElementById('gradePoints').textContent = '0';
             document.getElementById('gradeAcc').textContent = pct + '%';
             document.getElementById('gradeCombo').textContent = summary.maxMultiplier + '×';
             document.getElementById('gradeStreak').textContent = String(summary.longestStreak);
             document.getElementById('gradePerfects').textContent = String(summary.perfects);
             document.getElementById('gradeDiff').textContent = diff.toUpperCase();
             document.getElementById('gradeHiscore').textContent = String(Math.max(prev, summary.points));
-            document.getElementById('nbRibbon').style.display = isBest ? 'block' : 'none';
+            document.getElementById('nbRibbon').setAttribute('data-best', isBest ? '1' : '0');
 
             // Share-image: wire the end-screen button to render THIS run's card.
             var _shareBtn = document.getElementById('shareImgBtn');
@@ -1882,7 +1882,50 @@ class GameMode {
             if (_shareBtnNone) _shareBtnNone.style.display = 'none';
         }
 
-        document.getElementById('gameModal').style.display = 'flex';
+        var modal = document.getElementById('gameModal');
+        modal.style.display = 'flex';
+        this._runResultsEntrance(modal, useArcade ? summary.points : 0);
+    }
+
+    // Drive the staged results entrance via [data-stage] on the modal:
+    // overlay fade -> card scale-in -> grade pop -> points count-up -> NEW BEST -> done.
+    // Reduced-motion: jump straight to 'done' (CSS guard already makes transitions
+    // instant) and snap the grade points to final.
+    _runResultsEntrance(modal, finalPoints) {
+        var reduce = false;
+        try { reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
+        var ptsEl = document.getElementById('gradePoints');
+
+        function setStage(s) { modal.setAttribute('data-stage', s); }
+
+        if (reduce) {
+            if (ptsEl) ptsEl.textContent = String(finalPoints);
+            setStage('done');
+            return;
+        }
+
+        // Timeline (ms): each stage is a CSS transition target.
+        setStage('overlay');
+        setTimeout(function () { setStage('card'); }, 80);
+        setTimeout(function () { setStage('grade'); }, 360);
+        setTimeout(function () {
+            setStage('points');
+            // Count the grade points up using the same helper as the in-game HUD.
+            if (ptsEl && window.KaraokeeScoreFeedback && finalPoints > 0) {
+                var dur = KaraokeeScoreFeedback.countUpDurationMs(finalPoints);
+                var start = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+                (function frame(now) {
+                    var t = dur > 0 ? Math.min(1, (now - start) / dur) : 1;
+                    ptsEl.textContent = String(KaraokeeScoreFeedback.countUpValue(0, finalPoints, t));
+                    if (t < 1) requestAnimationFrame(frame);
+                    else ptsEl.textContent = String(finalPoints);
+                })(start);
+            } else if (ptsEl) {
+                ptsEl.textContent = String(finalPoints);
+            }
+        }, 700);
+        setTimeout(function () { setStage('best'); }, 1300);
+        setTimeout(function () { setStage('done'); }, 1700);
     }
 
     // Render the final grade/score/song to a 1080x1080 PNG on the app's brand and download
@@ -2492,7 +2535,9 @@ function toggleGameMode() {
 }
 
 function replayGame() {
-    document.getElementById('gameModal').style.display = 'none';
+    var _gm = document.getElementById('gameModal');
+    _gm.style.display = 'none';
+    _gm.removeAttribute('data-stage');
     if (gameMode.active) gameMode.stop();
     openDifficultyGate();
 }
