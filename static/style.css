@@ -673,6 +673,12 @@ button.is-loading::after {
 .unsupported-box h2 { font-family: var(--font-display); }
 .unsupported-box .btn { width: auto; }
 
+/* ---- shared footer on the legal documents (block layout, so center it) ---- */
+body.legal-page .site-footer {
+    max-width: 760px;
+    margin: var(--space-7) auto 0;
+}
+
 /* ============================================================
    Player page (extracted verbatim from player.html inline <style>
    in Phase 0; re-skinned onto tokens in Phase 1). Player is pinned

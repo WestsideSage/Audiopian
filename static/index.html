@@ -108,7 +108,7 @@
     </div>
 
     <footer class="site-footer">
-        &copy; 2026 Audiopian
+        &copy; <span class="footer-year">2026</span> Audiopian
         <span class="sep">&middot;</span><a href="https://github.com/WestsideSage" target="_blank" rel="noopener noreferrer">GitHub</a>
         <span class="sep">&middot;</span><a href="/terms">Terms</a>
         <span class="sep">&middot;</span><a href="/privacy">Privacy</a>
@@ -536,6 +536,12 @@
                 if (ev.key === 'Enter') { ev.preventDefault(); document.getElementById('saveKeyBtn').click(); }
             });
         })();
+    </script>
+    <script>
+      (function () {
+        var els = document.querySelectorAll('.footer-year');
+        for (var i = 0; i < els.length; i++) els[i].textContent = String(new Date().getFullYear());
+      })();
     </script>
     <script src="/static/theme-toggle.js" defer></script>
 </body>
