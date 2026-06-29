@@ -259,6 +259,7 @@ class GameMode {
         this._reachedEnd = false;   // set true when playback fires onEnded; feeds meta.completed
         this._endShown = false;     // idempotency latch for showEndModal (reset per song)
         this._shownPoints = 0;       // last score value painted by the count-up (reset per song)
+        this._shownMult = 1;         // last multiplier painted (drives the tier-up beat; reset per song)
         this._lastEndCheckT = null; // end-of-song stall detector (poll-based completion)
         this._endStallTicks = 0;
         this.activeLineIdx = -1;
@@ -1181,7 +1182,35 @@ class GameMode {
             }
         }
         var multEl = document.getElementById('ahMult');
-        if (multEl) multEl.textContent = st.multiplier + '×';
+        if (multEl) {
+            // One-shot tier-up beat when the multiplier crosses up. score-feedback-helpers
+            // decides if a tier-up label is warranted from prev vs new multiplier.
+            var prevMult = (typeof this._shownMult === 'number') ? this._shownMult : 1;
+            multEl.textContent = st.multiplier + '×';
+            if (window.KaraokeeScoreFeedback) {
+                var tierLabel = KaraokeeScoreFeedback.tierUpLabel(prevMult, st.multiplier);
+                if (tierLabel) {
+                    multEl.classList.remove('tierup');
+                    void multEl.offsetWidth;   // restart the animation
+                    multEl.classList.add('tierup');
+                }
+            }
+            this._shownMult = st.multiplier;
+        }
+
+        // Streak milestone callout at 10 / 25 / 50 (distinct from on-fire).
+        if (evt && window.KaraokeeScoreFeedback) {
+            var msLabel = KaraokeeScoreFeedback.milestoneForStreak(evt.streak);
+            if (msLabel) {
+                var msEl = document.getElementById('ahMilestone');
+                if (msEl) {
+                    msEl.textContent = msLabel;
+                    msEl.classList.remove('show');
+                    void msEl.offsetWidth;
+                    msEl.classList.add('show');
+                }
+            }
+        }
         var fill = document.getElementById('ahRampFill');
         if (fill) fill.style.width = Math.round(KaraokeeArcade.rampProgress(st) * 100) + '%';
 
@@ -1227,6 +1256,7 @@ class GameMode {
         document.body.classList.remove('arcade-onfire');
         if (this._countUpRaf) { cancelAnimationFrame(this._countUpRaf); this._countUpRaf = null; }
         this._shownPoints = 0;
+        this._shownMult = 1;
     }
 
     // ── Diagnostics ───────────────────────────────────────────────────
