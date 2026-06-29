@@ -992,15 +992,16 @@ body.legal-page .site-footer {
             background: var(--surface);
             border: 1px solid var(--line);
             border-radius: var(--r-lg);
-            padding: 40px;
+            padding: var(--space-7);
             text-align: center;
             min-width: 300px;
-            box-shadow: 0 24px 70px rgba(0,0,0,.6);
+            box-shadow: var(--shadow-modal);
         }
 
         /* â”€â”€ Grade-hero end screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
         .grade-hero { position: relative; margin-bottom: 22px; }
         .grade-letter {
+            font-family: var(--font-display);
             font-size: 5rem; font-weight: 700; line-height: 1; letter-spacing: -.02em;
             background: linear-gradient(135deg,var(--p),var(--s) 60%,var(--matched));
             -webkit-background-clip: text; background-clip: text;

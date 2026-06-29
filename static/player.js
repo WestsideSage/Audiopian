@@ -1769,7 +1769,7 @@ class GameMode {
         x.fillStyle = '#9ca3af'; x.font = '40px sans-serif';       x.fillText(L.song, 540, 860);
         var a = document.createElement('a');
         a.href = c.toDataURL('image/png');
-        a.download = 'karaokee-score.png';
+        a.download = 'audiopian-score.png';
         document.body.appendChild(a); a.click(); a.remove();
     }
 }
@@ -2331,3 +2331,12 @@ function replayGame() {
     if (gameMode.active) gameMode.stop();
     openDifficultyGate();
 }
+
+// Esc closes the end-of-song modal (goes back home - same as the Back action).
+document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var modal = document.getElementById('gameModal');
+    if (modal && modal.style.display !== 'none') {
+        window.location.href = '/';
+    }
+});

@@ -161,8 +161,8 @@
     <!-- Debug HUD â€” toggle with D key while Game Mode is active -->
     <div id="debug-hud" style="display:none"></div>
 
-    <div class="game-modal" id="gameModal" style="display:none">
-        <div class="game-modal-box">
+    <div class="game-modal" id="gameModal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="gradeLetter">
+        <div class="game-modal-box panel">
             <div class="grade-hero" id="gradeHero" style="display:none">
                 <div class="nb-ribbon" id="nbRibbon" style="display:none">NEW BEST</div>
                 <div class="grade-letter" id="gradeLetter">A</div>
@@ -177,9 +177,9 @@
                 </div>
             </div>
             <div class="game-modal-actions">
-                <button class="ctrl-btn" onclick="replayGame()">Play Again</button>
-                <button class="ctrl-btn" id="shareImgBtn" style="display:none">Share image</button>
-                <button class="ctrl-btn" onclick="window.location.href='/'">Back</button>
+                <button class="btn btn--primary" onclick="replayGame()">Play Again</button>
+                <button class="btn btn--secondary" id="shareImgBtn" style="display:none">Share image</button>
+                <a class="btn btn--ghost" href="/">Back</a>
             </div>
         </div>
     </div>
