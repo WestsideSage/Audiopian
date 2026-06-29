@@ -609,6 +609,14 @@ button.is-loading::after {
 }
 /* Spin keyframes already exist in the player section (extracted in Phase 0). */
 
+/* ---- small inline form hint (token-driven) ---- */
+.form-hint {
+    font-size: var(--text-sm);
+    color: var(--text-faint);
+    margin: calc(var(--space-2) * -1) 0 var(--space-3);
+    line-height: 1.5;
+}
+
 /* ============================================================
    Player page (extracted verbatim from player.html inline <style>
    in Phase 0; re-skinned onto tokens in Phase 1). Player is pinned
