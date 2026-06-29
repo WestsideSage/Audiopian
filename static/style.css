@@ -702,20 +702,18 @@ body.legal-page .site-footer {
     width: 11px; height: 11px; border-radius: var(--r-sm);
     background: var(--grad-accent); box-shadow: 0 0 10px var(--p);
 }
-/* Keep the player theme toggle inline in the header (not fixed). */
-.player-header .theme-toggle {
-    position: static;
-    top: auto;
-    right: auto;
-    margin-left: var(--space-3);
-}
+/* Player theme toggle uses the base fixed top-right position (consistent with
+   landing/legal and above the prep overlay; the score panel sits lower at
+   top:64px, so there's no overlap). */
 
 /* ============================================================
    Player page (extracted verbatim from player.html inline <style>
    in Phase 0; re-skinned onto tokens in Phase 1). Player is pinned
    to the dark theme for now, so these dark values are correct.
    ============================================================ */
-        body { display: block; padding: 0; }
+        /* Scoped to the player page: the shared global `body` (centered flex card)
+           must NOT be clobbered here, or the landing + legal pages lose centering. */
+        body.player { display: block; padding: 0; }
 
         .player-header {
             display: flex;
@@ -1256,13 +1254,14 @@ body.legal-page .site-footer {
         .diff-gate { display: flex; flex-direction: column; align-items: center; gap: 18px; }
         .diff-gate-label { font-size: 1rem; color: var(--text-dim); letter-spacing: .04em; }
         .diff-gate-cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: var(--space-3);
+            display: flex;
+            flex-wrap: wrap;
             justify-content: center;
-            width: min(620px, 90vw);
+            gap: var(--space-3);
+            width: min(880px, 92vw);
         }
         .diff-card {
+            flex: 1 1 150px; max-width: 200px;
             padding: var(--space-4) var(--space-3); background: var(--surface); color: var(--text);
             border: 1px solid var(--line); border-radius: var(--r); cursor: pointer;
             display: flex; flex-direction: column; gap: var(--space-1); align-items: center;
