@@ -1,6 +1,6 @@
-/* ============================================================
-   Audiopian — design tokens + shared (landing) styles
-   "Neon Arcade", cyan × magenta.
+﻿/* ============================================================
+   Audiopian â€” design tokens + shared (landing) styles
+   "Neon Arcade", cyan Ã— magenta.
    See docs/superpowers/specs/2026-06-08-ux-refresh-design.md
    ============================================================ */
 :root {
@@ -19,8 +19,8 @@
     --text-faint:   #5c5f73;
 
     /* accents */
-    --p:            #2dd4ee;   /* primary  — cyan    */
-    --s:            #f0468f;   /* secondary — magenta */
+    --p:            #2dd4ee;   /* primary  â€” cyan    */
+    --s:            #f0468f;   /* secondary â€” magenta */
     --p-soft:       rgba(45,212,238,.14);
     --p-line:       rgba(45,212,238,.40);
 
@@ -30,7 +30,7 @@
     --missed:       #ff5d73;
     --key:          var(--p);
 
-    /* fire (warm, fixed — reads as "hot") */
+    /* fire (warm, fixed â€” reads as "hot") */
     --fire-a:       #ff5470;
     --fire-b:       #ff9f45;
 
@@ -300,7 +300,7 @@ button:disabled { background: var(--surface-2); color: var(--text-faint); cursor
 }
 .byok summary::-webkit-details-marker { display: none; }
 .byok summary::before { content: '+ '; color: var(--p); font-weight: 700; }
-.byok[open] summary::before { content: '– '; }
+.byok[open] summary::before { content: 'â€“ '; }
 .byok input { margin-top: 10px; }
 .byok-actions { display: flex; gap: 8px; }
 .byok-note { font-size: .75rem; color: var(--text-faint); margin-top: 8px; line-height: 1.5; }
@@ -565,3 +565,502 @@ body.legal-page {
 .theme-toggle .ico-sun  { display: block; }
 :root[data-theme="light"] .theme-toggle .ico-sun  { display: none; }
 :root[data-theme="light"] .theme-toggle .ico-moon { display: block; }
+
+/* ============================================================
+   Player page (extracted verbatim from player.html inline <style>
+   in Phase 0; re-skinned onto tokens in Phase 1). Player is pinned
+   to the dark theme for now, so these dark values are correct.
+   ============================================================ */
+        body { display: block; padding: 0; }
+
+        .player-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 24px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--line);
+        }
+
+        .back-btn {
+            width: auto;
+            padding: 8px 16px;
+            font-size: 0.85rem;
+        }
+
+        .song-title {
+            font-size: 1.05rem;
+            color: var(--text);
+            font-weight: 600;
+            letter-spacing: -.01em;
+        }
+
+        #lyrics-container {
+            height: calc(100vh - 140px);
+            overflow-y: scroll;
+            overflow-x: hidden;
+            padding: 24px;
+            position: relative;
+            scroll-behavior: smooth;
+            scrollbar-width: none; /* Firefox */
+        }
+
+        #lyrics-container::-webkit-scrollbar {
+            display: none; /* Chrome/Safari */
+        }
+
+        #lyrics-scroll {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 18px;
+        }
+
+        .lyric-line {
+            font-size: 1.6rem;
+            color: #4b4e60;
+            text-align: center;
+            transition: color 0.2s, font-size 0.2s;
+            padding: 4px 0;
+            font-weight: 500;
+        }
+
+        .lyric-line.active {
+            color: #fff;
+            font-size: 1.95rem;
+            font-weight: 700;
+            letter-spacing: -.01em;
+        }
+
+        .lyric-line.upcoming {
+            color: #6c6f82;
+        }
+
+        #no-lyrics {
+            color: var(--text-faint);
+            font-size: 1.2rem;
+            text-align: center;
+            display: none;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--surface);
+            border-top: 1px solid var(--line);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .ctrl-btn {
+            width: auto;
+            padding: 8px 14px;
+            font-size: 1rem;
+            flex-shrink: 0;
+            background: var(--surface-2);
+            color: var(--text);
+            border: 1px solid var(--line);
+            border-radius: var(--r-sm);
+            font-weight: 600;
+        }
+        .ctrl-btn:hover { background: var(--surface-3); filter: none; box-shadow: inset 0 0 0 1px var(--line-strong); }
+        /* compact lyric-offset chips (shown in the controls bar during a scored game) */
+        .offset-btn { width: auto; flex-shrink: 0; padding: 4px 9px; font-size: 0.8rem; font-weight: 600; background: var(--surface-2); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-sm); }
+        .offset-btn:hover { background: var(--surface-3); filter: none; box-shadow: none; }
+
+        #seek {
+            flex: 1;
+            accent-color: var(--p);
+        }
+
+        #volume {
+            width: 80px;
+            accent-color: var(--p);
+        }
+
+        #time-display {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            flex-shrink: 0;
+            min-width: 90px;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Game mode word spans */
+        .word-span {
+            display: inline-block;
+            color: #4b4e60;
+            transition: color 0.15s, text-shadow 0.15s;
+            cursor: default;
+        }
+
+        .word-span.matched {
+            color: var(--matched);
+        }
+
+        .word-span.matched-partial {
+            color: var(--partial);
+            font-weight: 600;
+        }
+
+        .word-span.missed {
+            color: var(--missed);
+        }
+
+        /* Key (scored) word target cue â€” only on the ACTIVE line, until passed/missed. */
+        .lyric-line.active .word-span.key-word:not(.matched):not(.matched-partial):not(.missed) {
+            color: var(--p);
+            text-shadow: 0 0 12px rgba(45,212,238,.45);
+        }
+
+        /* Insane difficulty â€” collapse every non-key word; only the scored key words show
+           (adjacent whitespace collapses, so the key words sit on a clean single-spaced line). */
+        body.insanity #lyrics-scroll .word-span:not(.key-word) { display: none; }
+        /* ...and show ONE line at a time: hide every line but the active one, so you can't
+           read ahead. visibility (not display:none) keeps each line's box so layout is stable. */
+        body.insanity #lyrics-scroll .lyric-line:not(.active) { visibility: hidden; }
+        /* Pin the active line to the middle of the screen, independent of scroll position
+           (fixed = viewport-relative), so it never drifts as the song scrolls. */
+        body.insanity #lyrics-scroll .lyric-line.active {
+            position: fixed;
+            top: 50%;
+            left: 0;
+            right: 0;
+            transform: translateY(-50%);
+        }
+
+        @keyframes confirmPulse {
+            0%   { text-shadow: 0 0 0px #fff; }
+            50%  { text-shadow: 0 0 8px #fff, 0 0 16px var(--matched); }
+            100% { text-shadow: 0 0 0px #fff; }
+        }
+
+        .word-span.asr-confirmed {
+            animation: confirmPulse 0.4s ease-out;
+        }
+
+        /* Game button active state */
+        .game-btn.active {
+            background: var(--p);
+            color: #04121a;
+            border-color: transparent;
+            box-shadow: 0 0 12px rgba(45,212,238,.5);
+        }
+
+        /* Accuracy readout in header (the honest %, distinct from the arcade SCORE) */
+        .score-display {
+            margin-left: auto;
+            display: flex;
+            align-items: baseline;
+            gap: 7px;
+            font-variant-numeric: tabular-nums;
+        }
+        .score-display .sd-label {
+            font-size: 0.58rem; font-weight: 700; letter-spacing: .18em;
+            text-transform: uppercase; color: var(--text-dim);
+        }
+        .score-display #score-pct { font-size: 1rem; color: var(--matched); font-weight: 700; }
+
+        /* â”€â”€ Arcade floating HUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        .arcade-hud {
+            position: fixed; top: 70px; right: 18px; z-index: 90;
+            display: flex; flex-direction: column; align-items: flex-end; gap: 7px;
+            pointer-events: none; font-variant-numeric: tabular-nums;
+        }
+        .ah-cap {
+            font-size: 0.62rem; font-weight: 700; letter-spacing: .24em;
+            text-transform: uppercase; color: var(--text-dim); line-height: 1; margin-bottom: -3px;
+        }
+        .ah-points {
+            font-size: 3.3rem; font-weight: 700; line-height: 1;
+            color: transparent; background: linear-gradient(96deg,var(--p),var(--s));
+            -webkit-background-clip: text; background-clip: text;
+            filter: drop-shadow(0 0 14px rgba(45,212,238,.3));
+            transition: transform .12s;
+        }
+        .ah-points.bump { transform: scale(1.16); }
+        .ah-mult-row { display: flex; align-items: center; gap: 8px; }
+        .ah-mult { font-size: 1.25rem; font-weight: 700; color: var(--s); }
+        .ah-ramp { width: 96px; height: 7px; background: rgba(255,255,255,.1); border-radius: 999px; overflow: hidden; }
+        .ah-ramp-fill { height: 100%; width: 0%; background: linear-gradient(90deg,var(--p),var(--s)); transition: width .2s; }
+        .ah-streak { font-size: 1rem; color: var(--fire-b); font-weight: 700; }
+        .ah-fire {
+            font-size: 0.8rem; font-weight: 800; letter-spacing: .18em;
+            color: #fff; background: linear-gradient(95deg,var(--fire-a),var(--fire-b));
+            padding: 3px 12px; border-radius: 8px; box-shadow: 0 0 18px rgba(255,84,112,.5);
+            animation: firePulse 0.7s ease-in-out infinite alternate;
+        }
+        @keyframes firePulse { from { box-shadow: 0 0 10px rgba(255,84,112,.5); } to { box-shadow: 0 0 22px rgba(255,159,69,.85); } }
+
+        /* On Fire â€” bold active-line treatment; lyrics stay readable. */
+        body.arcade-onfire .lyric-line.active {
+            background: linear-gradient(90deg,var(--fire-a),var(--fire-b),#ffd24a);
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent; color: transparent;
+            text-shadow: 0 0 18px rgba(255,152,0,.4);
+        }
+        /* In Game Mode the active line is per-word spans; keep each word's OWN colour
+           (key-word cyan, matched green, partial amber, missed red) during ON FIRE rather
+           than letting the line's gradient fill mask them â€” so the scoring stays readable
+           on a streak. A warm glow keeps the fire energy; the key-word cue's own cyan glow
+           still wins via specificity, so key words stay distinct. */
+        body.arcade-onfire .lyric-line.active .word-span {
+            -webkit-text-fill-color: currentColor;
+            text-shadow: 0 0 14px rgba(255,120,40,.45);
+        }
+        body.arcade-onfire #lyrics-container::after {
+            content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+            box-shadow: inset 0 -120px 120px -90px rgba(255,106,0,.6), inset 0 120px 120px -90px rgba(255,106,0,.38);
+        }
+
+        .diff-pill {
+            font-size: 0.62rem; color: var(--p); background: var(--p-soft);
+            border: 1px solid var(--p-line); border-radius: 7px; padding: 3px 10px;
+            font-weight: 700; letter-spacing: .14em; text-transform: uppercase; margin-left: 10px;
+        }
+        /* Per-line score flash */
+        .line-score-flash {
+            position: absolute;
+            right: 24px;
+            font-size: 0.85rem;
+            color: var(--matched);
+            font-weight: 700;
+            pointer-events: none;
+            animation: fadeOut 1.2s ease forwards;
+        }
+
+        @keyframes fadeOut {
+            0%   { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-16px); }
+        }
+
+        /* End-of-song modal */
+        .game-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(5,6,12,0.8);
+            backdrop-filter: blur(6px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+
+        .game-modal-box {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: var(--r-lg);
+            padding: 40px;
+            text-align: center;
+            min-width: 300px;
+            box-shadow: 0 24px 70px rgba(0,0,0,.6);
+        }
+
+        .game-modal-title {
+            font-size: 1.3rem;
+            color: var(--text);
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+
+        .game-modal-score {
+            font-size: 3rem;
+            font-weight: 800;
+            color: var(--matched);
+            margin-bottom: 20px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .game-modal-stats {
+            color: var(--text-dim);
+            font-size: 0.95rem;
+            line-height: 2;
+            margin-bottom: 28px;
+        }
+
+        /* â”€â”€ Grade-hero end screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        .grade-hero { position: relative; margin-bottom: 22px; }
+        .grade-letter {
+            font-size: 5rem; font-weight: 700; line-height: 1; letter-spacing: -.02em;
+            background: linear-gradient(135deg,var(--p),var(--s) 60%,var(--matched));
+            -webkit-background-clip: text; background-clip: text;
+            -webkit-text-fill-color: transparent; color: transparent;
+        }
+        .grade-points { font-size: 1.6rem; font-weight: 800; color: var(--matched); margin-top: 4px; font-variant-numeric: tabular-nums; }
+        .grade-stats { color: var(--text-dim); font-size: 0.9rem; line-height: 1.9; margin-top: 14px; }
+        .grade-stats span { color: var(--text); font-weight: 700; }
+        .nb-ribbon {
+            position: absolute; top: -10px; right: -10px; transform: rotate(8deg);
+            background: linear-gradient(95deg,var(--fire-a),var(--fire-b)); color: #fff;
+            font-weight: 800; font-size: 0.7rem; letter-spacing: .12em;
+            padding: 4px 10px; border-radius: 8px; box-shadow: 0 0 14px rgba(255,84,112,.6);
+        }
+
+        .game-modal-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        /* Loading overlay */
+        .prep-overlay {
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(120% 80% at 100% 0%, rgba(240,70,143,.12), transparent 56%),
+                radial-gradient(120% 90% at 0% 100%, rgba(45,212,238,.12), transparent 56%),
+                var(--bg-deep);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            transition: opacity 0.4s;
+        }
+
+        .prep-box {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 24px;
+            padding: 40px;
+        }
+
+        .prep-song {
+            font-size: 1.3rem;
+            color: var(--text);
+            font-weight: 700;
+            max-width: 400px;
+        }
+
+        .prep-legal {
+            max-width: 380px;
+            margin: 2px auto 0;
+            font-size: 0.72rem;
+            line-height: 1.5;
+            color: var(--text-faint);
+            text-align: center;
+        }
+        .prep-legal a { color: var(--text-dim); text-decoration: underline; }
+        .prep-legal a:hover { color: var(--p); }
+
+        .diff-gate { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+        .diff-gate-label { font-size: 1rem; color: var(--text-dim); letter-spacing: .04em; }
+        .diff-gate-cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+        .diff-card {
+            width: 150px; padding: 18px 14px; background: var(--surface); color: var(--text);
+            border: 1px solid var(--line); border-radius: var(--r); cursor: pointer;
+            display: flex; flex-direction: column; gap: 6px; align-items: center;
+            transition: transform .12s, border-color .12s, box-shadow .12s;
+        }
+        .diff-card:hover, .diff-card:focus-visible {
+            transform: translateY(-3px); border-color: var(--p); box-shadow: 0 0 16px rgba(45,212,238,.3); outline: none;
+        }
+        .diff-card .dc-name { font-size: 1.15rem; font-weight: 700; color: #fff; }
+        .diff-card .dc-desc { font-size: 0.75rem; color: var(--text-dim); text-align: center; line-height: 1.3; }
+        .diff-card.selected { border-color: var(--s); box-shadow: 0 0 18px rgba(240,70,143,.45); }
+        .diff-gate-listen { width: auto; padding: 8px 16px; font-size: 0.85rem; opacity: .8; }
+
+        /* â”€â”€ Mic Check panel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        #micCheckPanel { max-width: 440px; margin: 6px auto 0; text-align: center; }
+        .mc-instr { font-size: 0.82rem; color: var(--text-dim); letter-spacing: .02em; }
+        .mc-phrase { font-size: 1.05rem; color: #fff; font-weight: 600; margin: 6px 0 12px; }
+        .mc-meter { height: 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+        .mc-meter-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--p), var(--s)); transition: width .08s linear; }
+        .mc-heard { min-height: 1.3em; margin-top: 10px; font-size: 0.92rem; color: var(--text-dim); font-style: italic; }
+        .mc-heard.has-text { color: var(--matched); font-style: normal; }
+        .mc-verdict { margin-top: 8px; font-size: 0.95rem; font-weight: 600; color: var(--text-dim); }
+        .mc-verdict.ok { color: var(--matched); }
+        .mc-verdict.warn { color: var(--partial); }
+        .diff-preview { max-width: 560px; margin: 2px auto 0; text-align: center; }
+        .dp-line { font-size: 1.15rem; line-height: 1.8; }
+        .dp-word { color: #4b4e60; transition: color .15s; }
+        .dp-word.dp-anchor { color: var(--text-dim); }
+        .dp-word.dp-target { color: #fff; font-weight: 700; text-shadow: 0 0 8px var(--p), 0 0 14px rgba(45,212,238,.5); }
+        .dp-caption { margin-top: 8px; font-size: 0.78rem; color: var(--text-dim); letter-spacing: .02em; }
+
+        .prep-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-dim);
+            font-size: 0.95rem;
+        }
+
+        .prep-spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--line-strong);
+            border-top-color: var(--p);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Difficulty gate disabled while the video embed is still loading */
+        .diff-gate-cards.loading { opacity: .4; pointer-events: none; filter: grayscale(.4); }
+
+        /* â”€â”€ Loading + count-in overlay (between difficulty pick and the song) â”€â”€â”€â”€ */
+        .countin-overlay {
+            position: fixed; inset: 0; z-index: 250; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            background:
+                radial-gradient(120% 90% at 50% 32%, rgba(45,212,238,.12), transparent 60%),
+                var(--bg-deep);
+        }
+        .countin-box { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+        .countin-spinner {
+            width: 30px; height: 30px; border: 3px solid var(--line-strong);
+            border-top-color: var(--p); border-radius: 50%; animation: spin .8s linear infinite;
+        }
+        .countin-num {
+            font-size: 7rem; font-weight: 800; line-height: 1; letter-spacing: -.02em; color: transparent;
+            background: linear-gradient(135deg, var(--p), var(--s)); -webkit-background-clip: text; background-clip: text;
+            filter: drop-shadow(0 0 26px rgba(45,212,238,.45)); animation: countPop .4s ease-out;
+        }
+        @keyframes countPop { 0% { transform: scale(.5); opacity: .15; } 60% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
+        .countin-label { font-size: 1.45rem; font-weight: 700; color: var(--text); }
+        .countin-skip { font-size: .74rem; color: var(--text-dim); margin-top: 4px; letter-spacing: .04em; }
+
+        /* â”€â”€ Debug HUD (toggle with D key) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+        #debug-hud {
+            position: fixed;
+            top: 60px;
+            right: 0;
+            width: 400px;
+            max-height: calc(100vh - 80px);
+            overflow-y: auto;
+            background: rgba(7, 7, 16, 0.94);
+            border-left: 2px solid var(--p);
+            font-family: 'Courier New', monospace;
+            font-size: 0.7rem;
+            color: #ccc;
+            padding: 8px 10px;
+            z-index: 150;
+            line-height: 1.55;
+        }
+        #debug-hud::-webkit-scrollbar { display: none; }
+        .dbg-header  { color: var(--p); font-weight: bold; margin-bottom: 4px; letter-spacing: 0.04em; }
+        .dbg-row     { padding: 1px 0; white-space: pre-wrap; word-break: break-all; }
+        .dbg-label   { color: #666; }
+        .dbg-matched { color: var(--matched); font-weight: bold; }
+        .dbg-pending { color: #555; }
+        .dbg-final   { color: #88aaff; }
+        .dbg-interim { color: var(--partial); }
+        .dbg-sep     { border-top: 1px solid var(--line); margin: 5px 0; }
+        .dbg-ev-line  { color: var(--s); }
+        .dbg-ev-res   { color: #999; }
+        .dbg-ev-match { color: #5af; }
+
+        #ytplayer-wrap { border: 1px solid var(--line); box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+        /* The YouTube iframe must fill its wrap exactly â€” never overflow/clip â€” or YouTube
+           treats the player as off-screen and pauses playback after a few seconds. */
+        #ytplayer-wrap iframe { width: 100%; height: 100%; border: 0; display: block; }
