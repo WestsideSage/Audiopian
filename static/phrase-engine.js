@@ -386,7 +386,27 @@
         });
     }
 
-    function candidateFor(session, evidence, token, state, anchor) {
+    // Compound-word bridge: a single lyric token (e.g. "throwdown") that the
+    // recognizer splits into two ("throw down") would never match its anchor. When
+    // the single token doesn't match, try it merged with the NEXT token and accept
+    // ONLY a near-exact hit (>= COMPOUND_MERGE_MIN) on a LONGER (compound) anchor --
+    // so unrelated adjacent words can't manufacture a credit. Returns the match
+    // result plus how many tokens it consumed (1 normally, 2 on a compound merge).
+    var COMPOUND_MERGE_MIN = 0.9;
+    function anchorMatchResult(token, nextToken, anchor) {
+        var single = scoring.wordsMatchScore(token.word, anchor.word, anchor.phonetic);
+        if (single && single.score >= 0.75) return { result: single, span: 1 };
+        if (nextToken && token.word && nextToken.word && anchor.word &&
+            anchor.word.length > token.word.length) {
+            var merged = scoring.wordsMatchScore(token.word + nextToken.word, anchor.word, anchor.phonetic);
+            if (merged && merged.score >= COMPOUND_MERGE_MIN) {
+                return { result: { score: merged.score, method: 'compound' }, span: 2 };
+            }
+        }
+        return { result: single || { score: 0, method: null }, span: 1 };
+    }
+
+    function candidateFor(session, evidence, token, nextToken, state, anchor) {
         var tokenId = evidence.id + ':' + token.idx;
         if (session.consumedTokenIds[tokenId]) {
             return { rejected: true, reason: 'already_consumed' };
@@ -405,18 +425,20 @@
         if (evidence.source === 'browser_interim') {
             return { rejected: true, reason: 'weak_source' };
         }
-        var result = scoring.wordsMatchScore(token.word, anchor.word, anchor.phonetic);
-        if (!result || result.score < 0.75) {
-            return { rejected: true, reason: 'low_score', score: result ? result.score : 0 };
+        var m = anchorMatchResult(token, nextToken, anchor);
+        if (!m.result || m.result.score < 0.75) {
+            return { rejected: true, reason: 'low_score', score: m.result ? m.result.score : 0 };
         }
         return {
             tokenId: tokenId,
             token: token,
+            span: m.span,
+            nextTokenIdx: (m.span === 2 && nextToken) ? nextToken.idx : null,
             state: state,
             anchor: anchor,
             source: evidence.source,
-            score: result.score,
-            method: result.method,
+            score: m.result.score,
+            method: m.result.method,
             timingDistance: timingDistance(state.phrase, evidence, token)
         };
     }
@@ -435,12 +457,14 @@
         var tokens = evidenceTokens(evidence);
         var accepted = [];
         var states = activePhraseStates(session, evidence);
-        tokens.forEach(function(token) {
+        tokens.forEach(function(token, ti) {
+            if (session.consumedTokenIds[evidence.id + ':' + token.idx]) return; // merged into a prior compound
+            var nextTok = (ti + 1 < tokens.length && !session.consumedTokenIds[evidence.id + ':' + tokens[ti + 1].idx]) ? tokens[ti + 1] : null;
             var candidates = [];
             states.forEach(function(state) {
                 var phrase = state.phrase;
                 (phrase.anchors || []).forEach(function(anchor) {
-                    var candidate = candidateFor(session, evidence, token, state, anchor);
+                    var candidate = candidateFor(session, evidence, token, nextTok, state, anchor);
                     if (candidate.rejected) {
                         if (candidate.reason !== 'low_score') reject(state, candidate.reason, evidence.source, token, anchor);
                     } else {
@@ -456,6 +480,7 @@
             });
             var best = candidates[0];
             session.consumedTokenIds[best.tokenId] = true;
+            if (best.nextTokenIdx != null) session.consumedTokenIds[evidence.id + ':' + best.nextTokenIdx] = true; // compound merge consumed two tokens
             best.state.anchorHits[best.anchor.anchorIdx] = {
                 word: best.anchor.word,
                 source: evidence.source,
@@ -556,25 +581,29 @@
             var tokenId = evidence.id + ':' + token.idx;
             if (session.consumedTokenIds[tokenId]) continue;
             var isFiller = REPEATED_FILLER[token.word] || isAdlibWord(token.word);
+            var nextTok = (ti + 1 < tokens.length && !session.consumedTokenIds[evidence.id + ':' + tokens[ti + 1].idx]) ? tokens[ti + 1] : null;
 
             for (var ci = minIdx; ci < candidates.length; ci++) {
                 var state = session.states[candidates[ci].phraseId];
                 var anchors = state.phrase.anchors || [];
                 var creditedAnchor = null;
                 var creditedScore = 0;
+                var creditedSpan = 1;
                 for (var ai = 0; ai < anchors.length; ai++) {
                     var anchor = anchors[ai];
                     if (state.anchorHits[anchor.anchorIdx]) continue;
                     if (isFiller && !anchor.fillerOnly) continue;
-                    var result = scoring.wordsMatchScore(token.word, anchor.word, anchor.phonetic);
-                    if (result && result.score >= 0.75) {
+                    var m = anchorMatchResult(token, nextTok, anchor);
+                    if (m.result && m.result.score >= 0.75) {
                         creditedAnchor = anchor;
-                        creditedScore = result.score;
+                        creditedScore = m.result.score;
+                        creditedSpan = m.span;
                         break;
                     }
                 }
                 if (creditedAnchor) {
                     session.consumedTokenIds[tokenId] = true;
+                    if (creditedSpan === 2 && nextTok) session.consumedTokenIds[evidence.id + ':' + nextTok.idx] = true; // compound merge consumed two tokens
                     state.anchorHits[creditedAnchor.anchorIdx] = {
                         word: creditedAnchor.word,
                         source: source + '_reconciled',

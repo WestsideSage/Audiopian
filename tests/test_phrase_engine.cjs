@@ -166,6 +166,42 @@ var fillerState = fillerSession.states[fillerLinePhrase.phraseId];
 assert.strictEqual(Object.keys(fillerState.anchorHits).length, 0, 'filler-only line records no anchor hits even when the filler word is transcribed');
 assert.notStrictEqual(fillerState.lyricStatus, 'confirmed', 'filler-only line never confirms (nothing scoreable)');
 
+// Compound-word split: a lyric token "throwdown" that the recognizer emits as two
+// tokens ("throw down") is still credited by merging adjacent ASR tokens.
+// (Real case: Class of 3000 - Throwdown.)
+var compPlan = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'we throwdown hey' },
+    { time: 4, text: 'mountain river stone' }
+], { difficulty: 'easy', audioDuration: 8 });
+var compPhrase = compPlan.phrases.find(function (p) { return p.lineIdx === 0; });
+var throwdownAnchor = compPhrase.anchors.find(function (a) { return a.word === 'throwdown'; });
+assert.ok(throwdownAnchor, 'precondition: throwdown is selected as an anchor');
+var compSession = phraseEngine.createPhraseSession(compPlan);
+phraseEngine.addEvidence(compSession, {
+    id: 'final-td', source: 'browser_final', text: 'we throw down',
+    words: [], receivedAtSec: 1.0, audioTimeSec: 1.0
+});
+assert.ok(compSession.states[compPhrase.phraseId].anchorHits[throwdownAnchor.anchorIdx],
+    'compound anchor "throwdown" credited from the split "throw down" (addEvidence)');
+
+// Same via the late-evidence reconcile path.
+var compSession2 = phraseEngine.createPhraseSession(compPlan);
+phraseEngine.reconcileLateEvidence(compSession2, {
+    id: 'late-td', source: 'browser_final', text: 'we throw down',
+    words: [], receivedAtSec: 5.0, audioTimeSec: 3.5
+}, 5.0);
+assert.ok(compSession2.states[compPhrase.phraseId].anchorHits[throwdownAnchor.anchorIdx],
+    'compound anchor "throwdown" credited from the split "throw down" (reconcile)');
+
+// Honesty guard: unrelated adjacent words must NOT merge into a false credit.
+var negSession = phraseEngine.createPhraseSession(compPlan);
+phraseEngine.addEvidence(negSession, {
+    id: 'neg-td', source: 'browser_final', text: 'mountain river',
+    words: [], receivedAtSec: 1.0, audioTimeSec: 1.0
+});
+assert.ok(!negSession.states[compPhrase.phraseId].anchorHits[throwdownAnchor.anchorIdx],
+    'unrelated adjacent words do not merge into a false compound credit');
+
 var longLyrics = [];
 for (var i = 0; i < 180; i++) {
     longLyrics.push({ time: i * 2, text: 'alpha bravo charlie delta echo foxtrot' });
