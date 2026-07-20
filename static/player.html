@@ -33,8 +33,17 @@
     <script src="/static/theme-helpers.js"></script>
 </head>
 <body class="player">
+    <!-- Ambient stage behind the game (subtle; the overlays bring their own). -->
+    <div class="stage-bg" aria-hidden="true">
+      <div class="beam beam--p"></div>
+      <div class="beam beam--s"></div>
+      <div class="stage-floor"></div>
+      <div class="stage-vignette"></div>
+    </div>
+
     <div class="prep-overlay" id="prepOverlay">
         <div class="prep-box">
+            <div class="prep-kicker">Now on stage</div>
             <div class="prep-song" id="prepSongTitle"></div>
             <div class="diff-gate" id="diffGate" role="group" aria-label="Choose difficulty">
                 <div class="diff-gate-label">Choose your difficulty</div>
@@ -63,7 +72,7 @@
                       Check your mic
                     </button>
                 </div>
-                <div id="micCheckPanel" class="panel" style="display:none;padding:14px 16px">
+                <div id="micCheckPanel" class="panel" style="display:none">
                     <div class="mc-instr">Read this aloud:</div>
                     <div class="mc-phrase">“The quick brown fox jumps over the lazy dog”</div>
                     <div class="mc-meter"><div class="mc-meter-fill" id="micMeterFill"></div></div>
@@ -84,6 +93,9 @@
             <div class="countin-spinner" id="countInSpinner"></div>
             <div class="countin-num" id="countInNum"></div>
             <div class="countin-label" id="countInLabel">Loading…</div>
+            <div class="eq countin-eq" aria-hidden="true">
+                <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
             <div class="countin-skip">tap or press space to skip</div>
         </div>
     </div>
@@ -133,21 +145,21 @@
     </div>
 
     <div class="controls">
-        <button class="ctrl-btn" onclick="skipBack()" aria-label="Skip back 10 seconds">
+        <button class="t-btn" onclick="skipBack()" aria-label="Skip back 10 seconds">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
         </button>
-        <button class="ctrl-btn" id="playBtn" onclick="togglePlay()" aria-label="Play">
+        <button class="t-btn t-btn--play" id="playBtn" onclick="togglePlay()" aria-label="Play">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>
         </button>
-        <button class="ctrl-btn" onclick="skipFwd()" aria-label="Skip forward 10 seconds">
+        <button class="t-btn" onclick="skipFwd()" aria-label="Skip forward 10 seconds">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
         </button>
-        <input type="range" id="seek" min="0" max="100" value="0" step="0.1">
+        <input type="range" class="slider slider--seek" id="seek" min="0" max="100" value="0" step="0.1" aria-label="Seek">
         <div id="time-display">0:00 / 0:00</div>
         <span class="vol-icon" aria-hidden="true">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
         </span>
-        <input type="range" id="volume" min="0" max="1" step="0.05" value="1">
+        <input type="range" class="slider slider--vol" id="volume" min="0" max="1" step="0.05" value="1" aria-label="Volume">
         <div id="asr-provider-display" class="asr-display" title="Speech recognition status">Connecting…</div>
     </div>
 
@@ -155,7 +167,7 @@
     <!-- YouTube IFrame mount. MUST stay visible AND mostly on-screen: YouTube auto-pauses
          players that are hidden/clipped/mostly-off-screen after a few seconds. The iframe is
          forced to FILL this box (see #ytplayer-wrap iframe rule), so it never overflows/clips. -->
-    <div id="ytplayer-wrap" style="position:fixed; right:12px; bottom:72px; width:320px; height:180px; z-index:80; border-radius:8px; overflow:hidden; background:#000;">
+    <div id="ytplayer-wrap">
         <div id="ytplayer"></div>
     </div>
 
@@ -163,18 +175,23 @@
     <div id="debug-hud" style="display:none"></div>
 
     <div class="game-modal" id="gameModal" style="display:none" role="dialog" aria-modal="true" aria-label="Your results">
+        <!-- Celebration confetti (S/A tiers only, via [data-grade-tier]). -->
+        <div class="confetti" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
         <div class="game-modal-box panel">
             <div class="grade-hero" id="gradeHero" style="display:none">
                 <div class="nb-ribbon" id="nbRibbon" data-best="0">NEW BEST</div>
                 <div class="grade-letter" id="gradeLetter">A</div>
                 <div class="grade-points"><span id="gradePoints">0</span> pts</div>
                 <div class="grade-stats">
-                    <div>Accuracy <span id="gradeAcc">0%</span></div>
-                    <div>Max combo <span id="gradeCombo">1&#215;</span></div>
-                    <div>Longest streak <span id="gradeStreak">0</span></div>
-                    <div>Perfects <span id="gradePerfects">0</span></div>
-                    <div>Difficulty <span id="gradeDiff">MEDIUM</span></div>
-                    <div>High score <span id="gradeHiscore">0</span></div>
+                    <div class="grade-stat"><span class="gs-label">Accuracy</span><span class="gs-val" id="gradeAcc">0%</span></div>
+                    <div class="grade-stat"><span class="gs-label">Max combo</span><span class="gs-val" id="gradeCombo">1&#215;</span></div>
+                    <div class="grade-stat"><span class="gs-label">Longest streak</span><span class="gs-val" id="gradeStreak">0</span></div>
+                    <div class="grade-stat"><span class="gs-label">Perfects</span><span class="gs-val" id="gradePerfects">0</span></div>
+                    <div class="grade-stat"><span class="gs-label">Difficulty</span><span class="gs-val" id="gradeDiff">MEDIUM</span></div>
+                    <div class="grade-stat"><span class="gs-label">High score</span><span class="gs-val" id="gradeHiscore">0</span></div>
                 </div>
             </div>
             <div class="game-modal-actions">
@@ -208,6 +225,7 @@
     <script src="/static/mic-check-helpers.js"></script>
     <script src="/static/theme-toggle.js" defer></script>
     <script src="/static/score-feedback-helpers.js"></script>
+    <script src="/static/stage-helpers.js"></script>
     <script src="/static/player.js"></script>
 </body>
 </html>

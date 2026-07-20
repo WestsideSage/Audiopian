@@ -1828,6 +1828,9 @@ class GameMode {
         }
 
         var modal = document.getElementById('gameModal');
+        // Celebration tier for the ceremony (S/A rain confetti; B/C/D stay quiet).
+        // Pure mapping lives in stage-helpers.gradeTier (tested in Node).
+        if (window.KaraokeeStage) modal.setAttribute('data-grade-tier', KaraokeeStage.gradeTier(useArcade ? grade : ''));
         modal.style.display = 'flex';
         this._runResultsEntrance(modal, useArcade ? summary.points : 0);
     }
@@ -1849,7 +1852,9 @@ class GameMode {
             return;
         }
 
-        // Timeline (ms): each stage is a CSS transition target.
+        // Timeline (ms): each stage is a CSS transition target. Force a reflow
+        // between display:flex and the first stage so the overlay fade animates.
+        void modal.offsetWidth;
         setStage('overlay');
         setTimeout(function () { setStage('card'); }, 80);
         setTimeout(function () { setStage('grade'); }, 360);
@@ -1895,30 +1900,71 @@ class GameMode {
         function fDisplay(px) { return DISPLAY.replace('{px}', px); }
         function fText(px) { return TEXT.replace('{px}', px); }
 
-        // App backdrop: deep base + the brand wash (cyan/magenta radials), matching the stage.
-        x.fillStyle = '#0b0b12'; x.fillRect(0, 0, 1080, 1080);
-        var g1 = x.createRadialGradient(1080, 0, 0, 1080, 0, 900);
-        g1.addColorStop(0, 'rgba(240,70,143,0.16)'); g1.addColorStop(1, 'rgba(240,70,143,0)');
-        x.fillStyle = g1; x.fillRect(0, 0, 1080, 1080);
-        var g2 = x.createRadialGradient(0, 1080, 0, 0, 1080, 900);
-        g2.addColorStop(0, 'rgba(45,212,238,0.14)'); g2.addColorStop(1, 'rgba(45,212,238,0)');
-        x.fillStyle = g2; x.fillRect(0, 0, 1080, 1080);
+        // ── Neon Stage poster (1080x1080) ────────────────────────────────
+        // Deep venue base + twin spotlight beams (cyan/magenta conic wedges,
+        // matching the app's .stage-bg) + floor glow, then the brand type stack.
+        x.fillStyle = '#06060e'; x.fillRect(0, 0, 1080, 1080);
+
+        // Spotlight beams. createConicGradient is Chrome/Edge-safe (the only
+        // supported browsers); guarded so a failure still leaves a good card.
+        try {
+            var beamP = x.createConicGradient(3.55, 180, 330);
+            beamP.addColorStop(0, 'rgba(45,212,238,0)');
+            beamP.addColorStop(0.045, 'rgba(45,212,238,0.16)');
+            beamP.addColorStop(0.14, 'rgba(45,212,238,0)');
+            beamP.addColorStop(1, 'rgba(45,212,238,0)');
+            x.fillStyle = beamP; x.fillRect(0, 0, 1080, 1080);
+            var beamS = x.createConicGradient(5.85, 900, 330);
+            beamS.addColorStop(0, 'rgba(240,70,143,0)');
+            beamS.addColorStop(0.04, 'rgba(240,70,143,0.15)');
+            beamS.addColorStop(0.13, 'rgba(240,70,143,0)');
+            beamS.addColorStop(1, 'rgba(240,70,143,0)');
+            x.fillStyle = beamS; x.fillRect(0, 0, 1080, 1080);
+        } catch (e) { /* older canvas: beams skipped, radials below still carry it */ }
+
+        // Floor glow where the beams land.
+        var floor = x.createRadialGradient(540, 1180, 60, 540, 1180, 700);
+        floor.addColorStop(0, 'rgba(45,212,238,0.14)');
+        floor.addColorStop(0.55, 'rgba(240,70,143,0.07)');
+        floor.addColorStop(1, 'rgba(0,0,0,0)');
+        x.fillStyle = floor; x.fillRect(0, 0, 1080, 1080);
 
         x.textAlign = 'center';
+        // Letter-spacing for the wordmark/stat caps (Chrome 99+; harmless if ignored).
+        try { x.letterSpacing = '14px'; } catch (e) {}
 
-        // Wordmark - brand cyan->magenta gradient text.
-        var brandGrad = x.createLinearGradient(380, 0, 700, 0);
+        // Wordmark — brand cyan->magenta gradient, top center.
+        var brandGrad = x.createLinearGradient(340, 0, 740, 0);
         brandGrad.addColorStop(0, '#2dd4ee'); brandGrad.addColorStop(1, '#f0468f');
-        x.fillStyle = brandGrad; x.font = fDisplay(60); x.fillText(L.brand, 540, 180);
+        x.fillStyle = brandGrad; x.font = fDisplay(58);
+        x.fillText(L.brand, 540, 168);
 
-        // Grade - huge brand-gradient letter (the hero).
-        var gradeGrad = x.createLinearGradient(360, 360, 720, 720);
-        gradeGrad.addColorStop(0, '#2dd4ee'); gradeGrad.addColorStop(0.6, '#f0468f'); gradeGrad.addColorStop(1, '#3ddc84');
-        x.fillStyle = gradeGrad; x.font = fDisplay(320); x.fillText(L.grade, 540, 640);
+        // Thin gradient rule under the wordmark.
+        var rule = x.createLinearGradient(340, 0, 740, 0);
+        rule.addColorStop(0, 'rgba(45,212,238,0)');
+        rule.addColorStop(0.5, 'rgba(45,212,238,0.8)');
+        rule.addColorStop(1, 'rgba(240,70,143,0)');
+        x.fillStyle = rule; x.fillRect(340, 206, 400, 2);
+
+        try { x.letterSpacing = '0px'; } catch (e) {}
+
+        // Grade — the hero. Huge brand-gradient letter with a neon glow.
+        var gradeGrad = x.createLinearGradient(360, 340, 720, 720);
+        gradeGrad.addColorStop(0, '#2dd4ee'); gradeGrad.addColorStop(0.55, '#f0468f'); gradeGrad.addColorStop(1, '#34e89e');
+        x.font = fDisplay(340);
+        x.shadowColor = 'rgba(45,212,238,0.55)'; x.shadowBlur = 70;
+        x.fillStyle = gradeGrad;
+        x.fillText(L.grade, 540, 650);
+        x.shadowBlur = 0; x.shadowColor = 'transparent';
 
         // Stat (DIFF · pts · %) and song.
-        x.fillStyle = '#e5e7eb'; x.font = fDisplay(54); x.fillText(L.stat, 540, 790);
-        x.fillStyle = '#9ca3af'; x.font = fText(40);    x.fillText(L.song, 540, 880);
+        try { x.letterSpacing = '4px'; } catch (e) {}
+        x.fillStyle = '#eef0f8'; x.font = fDisplay(54); x.fillText(L.stat, 540, 800);
+        try { x.letterSpacing = '0px'; } catch (e) {}
+        x.fillStyle = '#9a9db2'; x.font = fText(40);    x.fillText(L.song, 540, 888);
+
+        // Footer mark.
+        x.fillStyle = '#64687e'; x.font = fText(28);    x.fillText('audiopian.com', 540, 990);
 
         var a = document.createElement('a');
         a.href = c.toDataURL('image/png');
@@ -2143,6 +2189,9 @@ setInterval(function () {
     if (!dur) return;
     var t = playback.currentTime();
     seekBar.value = (t / dur) * 100;
+    // Mirror the value into --fill so the custom webkit track can paint the
+    // progress gradient (pseudo-elements can't read the live value).
+    if (window.KaraokeeStage) seekBar.style.setProperty('--fill', KaraokeeStage.rangeFillPercent(seekBar.value, 100) + '%');
     timeDisplay.textContent = `${fmt(t)} / ${fmt(dur)}`;
 }, 100);
 
@@ -2156,7 +2205,13 @@ seekBar.addEventListener('input', () => {
 });
 
 // Volume
-volumeBar.addEventListener('input', () => { if (playback) playback.setVolume(parseFloat(volumeBar.value)); });
+volumeBar.addEventListener('input', () => {
+    if (playback) playback.setVolume(parseFloat(volumeBar.value));
+    // Same --fill mirror as the seek bar (see the poll above).
+    if (window.KaraokeeStage) volumeBar.style.setProperty('--fill', KaraokeeStage.rangeFillPercent(volumeBar.value, 1) + '%');
+});
+// Initial volume fill (starts at 100%).
+if (window.KaraokeeStage) volumeBar.style.setProperty('--fill', KaraokeeStage.rangeFillPercent(volumeBar.value, 1) + '%');
 
 // Debug HUD — press D to toggle (works any time, not just in Game Mode)
 document.addEventListener('keydown', (e) => {
