@@ -231,7 +231,13 @@
                 var chunkDur = chunk.endSec - chunk.startSec;
                 var chunkWps = chunk.words.length / Math.max(0.001, chunkDur);
                 if (anchorsRequired > 0 && (chunkWps >= FAST_WPS_THRESHOLD || chunkDur <= FAST_WINDOW_SEC)) {
-                    var fastBar = Math.max(FAST_RECOGNIZED_FLOOR, Math.ceil(anchors.length * 0.25));
+                    var fastFloor = FAST_RECOGNIZED_FLOOR;
+                    if (options.provider === 'openai_realtime' &&
+                            (difficultyName === 'expert' || difficultyName === 'insane') &&
+                            anchors.length >= 4) {
+                        fastFloor = 2;
+                    }
+                    var fastBar = Math.max(fastFloor, Math.ceil(anchors.length * 0.25));
                     anchorsRequired = Math.min(anchorsRequired, fastBar);
                 }
                 phrases.push({

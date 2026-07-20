@@ -563,6 +563,20 @@ var fastFew = phraseEngine.buildPhrasePlan([
 var ff = fastFew.phrases.find(function (p) { return p.lineIdx === 0; });
 assert.ok(ff.anchors.length >= 2 && ff.anchors.length <= 4, 'precondition: a dense line with a few anchors');
 assert.strictEqual(ff.anchorsRequired, 1, 'a dense few-anchor line requires just 1 recognized anchor');
+// Realtime Whisper is materially more complete than browser SR. On Expert/Insane
+// lines with at least four anchors it keeps a two-word anti-cheese floor; browser
+// SR retains the one-word relief proven necessary by the Roots run.
+var providerLyrics = [
+    { time: 0, text: 'darkness preach gospel thunder' },
+    { time: 0.8, text: 'tail words here now please' }
+];
+var browserFast = phraseEngine.buildPhrasePlan(providerLyrics,
+    { difficulty: 'expert', provider: 'browser_sr', audioDuration: 8 }).phrases[0];
+var realtimeFast = phraseEngine.buildPhrasePlan(providerLyrics,
+    { difficulty: 'expert', provider: 'openai_realtime', audioDuration: 8 }).phrases[0];
+assert.ok(realtimeFast.anchors.length >= 4, 'precondition: provider-aware line has at least four anchors');
+assert.strictEqual(browserFast.anchorsRequired, 1, 'browser SR keeps the Roots-proven one-anchor fast floor');
+assert.strictEqual(realtimeFast.anchorsRequired, 2, 'realtime Whisper fast Expert line requires two recognized anchors');
 // Short back-to-back lines (minimal pausing) get the allowance even at moderate
 // WPS -- the recognizer can't emit a final inside a sub-1.2s window.
 var shortP = phraseEngine.buildPhrasePlan([

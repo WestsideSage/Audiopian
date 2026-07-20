@@ -138,7 +138,8 @@ class GameMode {
             this._phrasePlan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
                 difficulty: this._phraseDifficulty,
                 audioDuration: playback ? (playback.duration() || null) : null,
-                clean: this._cleanMode
+                clean: this._cleanMode,
+                provider: this._isRealtimeWhisperProvider() ? 'openai_realtime' : 'browser_sr'
             });
             // The scoring session owns the per-run state machine (match -> reconcile ->
             // score -> commit). It builds its own phraseSession/arcadeState from the plan;
@@ -2391,7 +2392,8 @@ function renderDifficultyPreview(d) {
         plan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
             difficulty: d,
             audioDuration: playback ? (playback.duration() || null) : null,
-            clean: localStorage.getItem('cleanMode') === '1'
+            clean: localStorage.getItem('cleanMode') === '1',
+            provider: gameMode._isRealtimeWhisperProvider() ? 'openai_realtime' : 'browser_sr'
         });
     } catch (e) { box.style.display = 'none'; return; }
 
