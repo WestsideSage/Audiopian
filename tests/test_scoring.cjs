@@ -84,10 +84,22 @@ var matchCases = [
     { spoken: 'bee', target: 'be', method: 'slang', score: 0.9 },
     { spoken: 'hi', target: 'high', method: 'slang', score: 0.9 },
     { spoken: 'phase', target: 'faze', method: 'slang', score: 0.9 }, // moved from 'none' — true homophone
-    // Substantial-affix: recognizer transcribed a prefix/suffix of the word (>=5 chars, >=60%)
-    { spoken: 'battle', target: 'battlecry', method: 'affix', score: 1.0 },
-    { spoken: 'tasteful', target: 'distasteful', method: 'affix', score: 1.0 },
-    { spoken: 'reach', target: 'reached', method: 'affix', score: 1.0 },
+    // Substantial-affix: recognizer transcribed a prefix/suffix of the word. Scored
+    // 0.8 (not full exact credit), and the suffix direction needs >=6 chars so short
+    // common suffix-words ("other" inside "another") can't ride to a credit.
+    { spoken: 'battle', target: 'battlecry', method: 'affix', score: 0.8 },
+    { spoken: 'tasteful', target: 'distasteful', method: 'affix', score: 0.8 },
+    { spoken: 'reach', target: 'reached', method: 'affix', score: 0.8 },
+    { spoken: 'other', target: 'another', method: 'none', score: 0.0 },
+    { spoken: 'standing', target: 'understanding', method: 'affix', score: 0.8 },
+    // Repeated-unit collapse: punctuation-fused repeat lyrics ("dance-dance-dance-dance",
+    // "knock-knock") match their singable unit at 0.9 — below exact, above the anchor bar.
+    { spoken: 'dance', target: 'dancedancedancedance', method: 'repeat', score: 0.9 },
+    { spoken: 'mans', target: 'mansmansmans', method: 'repeat', score: 0.9 },
+    { spoken: 'knock', target: 'knockknock', method: 'repeat', score: 0.9 },
+    { spoken: 'bands', target: 'bandsbandsbands', method: 'repeat', score: 0.9 },
+    { spoken: 'ice', target: 'iceiceice', method: 'repeat', score: 0.9 },
+    { spoken: 'zebra', target: 'dancedancedancedance', method: 'none', score: 0.0 },
     // Affix cheese guards: short common prefixes must NOT match
     { spoken: 'ever', target: 'everything', method: 'none', score: 0.0 },
     { spoken: 'over', target: 'overcome', method: 'none', score: 0.0 },
@@ -108,6 +120,9 @@ matchCases.forEach(function(testCase) {
 var _hardR = 'nigga'.replace(/a$/, 'er');   // derived; avoid the literal slur in source
 assert.strictEqual(scoring.wordsMatch('battle', 'battlecry'), true, 'affix wordsMatch battlecry');
 assert.strictEqual(scoring.wordsMatch('ever', 'everything'), false, 'affix guard ever/everything');
+assert.strictEqual(scoring.wordsMatch('dance', 'dancedancedancedance'), true, 'repeat-unit wordsMatch dance');
+assert.strictEqual(scoring.wordsMatch('knock', 'knockknock'), true, 'repeat-unit wordsMatch knock');
+assert.strictEqual(scoring.wordsMatch('zebra', 'dancedancedancedance'), false, 'repeat-unit guard zebra');
 assert.strictEqual(scoring.wordsMatch('nigga', 'nigga'), true, 'the -a variant still matches itself');
 assert.strictEqual(scoring.wordsMatch(_hardR, _hardR), false, 'hard-R never matches');
 assert.strictEqual(scoring.wordsMatchScore(_hardR, 'signed').score, 0.0, 'hard-R never credits');

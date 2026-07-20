@@ -30,14 +30,18 @@
     }
     // Recognizer transcribed a substantial prefix/suffix of the word (e.g. "battle" for
     // "battlecry"). Guarded so short common prefixes ("ever"/"everything") never match:
-    // the shorter token must be >= 5 chars AND >= 60% of the longer.
+    // the shorter token must be >= 5 chars AND >= 60% of the longer. The suffix
+    // direction ("tasteful" for "distasteful": leading syllable dropped) additionally
+    // needs >= 6 chars, so short common suffix-words ("other" inside "another",
+    // "hers" inside "mothers") can't ride to a credit.
     function isSubstantialAffix(a, b) {
         if (!a || !b) return false;
         var shorter = a.length <= b.length ? a : b;
         var longer  = a.length <= b.length ? b : a;
         if (shorter.length < 5) return false;
         if (shorter.length / longer.length < 0.6) return false;
-        return longer.startsWith(shorter) || longer.endsWith(shorter);
+        if (longer.startsWith(shorter)) return true;
+        return shorter.length >= 6 && longer.endsWith(shorter);
     }
 
     function editDistance(a, b) {
@@ -307,6 +311,11 @@
             if (sBase && tBase && sBase.length >= 3 && sBase === tBase) return true;
         }
 
+        // Punctuation-fused repeat lyric ("dance-dance-dance" -> "dancedancedance"):
+        // credit the singable unit instead of demanding the unmatchable fused token.
+        var targetUnit = matchHelpers.repeatedUnit ? matchHelpers.repeatedUnit(target) : null;
+        if (targetUnit && wordsMatch(spoken, targetUnit)) return true;
+
         if (contractionsMatch(spoken, target)) return true;
         if (slangMatch(spoken, target)) return true;
         if (mishearingMatch(spoken, target)) return true;
@@ -350,6 +359,17 @@
             }
         }
 
+        // Punctuation-fused repeat lyric: score the spoken word against the singable
+        // unit, capped at 0.9 (below exact — the singer produced the unit, not the
+        // full fused token — but above the 0.75 anchor-credit bar).
+        var targetUnit = matchHelpers.repeatedUnit ? matchHelpers.repeatedUnit(target) : null;
+        if (targetUnit) {
+            var unitResult = wordsMatchScore(spoken, targetUnit);
+            if (unitResult.score >= 0.75) {
+                return { score: Math.min(unitResult.score, 0.9), method: 'repeat' };
+            }
+        }
+
         if (contractionsMatch(spoken, target)) return { score: 1.0, method: 'contraction' };
         if (slangMatch(spoken, target)) return { score: 0.9, method: 'slang' };
         if (mishearingMatch(spoken, target)) return { score: 0.9, method: 'mishearing' };
@@ -374,7 +394,7 @@
             if (dist === 2 && isEdit2PrefixTruncation(spoken, target)) return { score: 0.4, method: 'edit2' };
         }
 
-        if (isSubstantialAffix(spoken, target)) return { score: 1.0, method: 'affix' };
+        if (isSubstantialAffix(spoken, target)) return { score: 0.8, method: 'affix' };
 
         return { score: 0.0, method: 'none' };
     }

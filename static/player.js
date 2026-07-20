@@ -109,6 +109,12 @@ class GameMode {
         this._mcStream = null; this._mcCtx = null; this._mcAnalyser = null; this._mcBuf = null; this._mcRecog = null;
         this._commitState = null;        // KaraokeeCommitHelpers state machine
         this._vadInitError = null;       // last neural-VAD init error (telemetry/HUD)
+        // Sensor-health chip state (vad-health-helpers): warn when the recognizer is
+        // hearing words but the energy sensor never fired this run (= dead mic stream,
+        // not a quiet singer — the 2026-07-20 incident signature).
+        this._vadEverFired = false;      // sticky: energy sensor reported voice at least once this run
+        this._firstAsrTextAt = null;     // performance.now() of the first non-empty ASR text
+        this._vadHealthWarn = false;     // the chip is currently showing the sensor-dead warning
 
         this.lrcOffset = 0;   // seconds to add to all LRC timestamps (positive = delay lyrics)
         this._suspended = false;
@@ -197,6 +203,9 @@ class GameMode {
         }
         this._stopWhisperTrack();
         this.prevLine = null;
+        // Release the chip from a sensor-dead warning so the idle UI reads normally.
+        this._vadHealthWarn = false;
+        this._renderAsrProviderStatus();
         renderLyrics(); // restore normal lyric rendering
         var _dpHide = document.getElementById('diff-pill'); if (_dpHide) _dpHide.style.display = 'none';
         this._hideArcadeHud();
@@ -285,6 +294,9 @@ class GameMode {
         this._neuralVadActive = false;
         this._commitState = null;
         this._vadInitError = null;
+        this._vadEverFired = false;
+        this._firstAsrTextAt = null;
+        this._vadHealthWarn = false;
         this._energyThreshold = 0.01;
         this._whisperServerStatus = { state: 'unknown', reason: null, checkedAt: null, provider: null, model: null };
         this._whisperTrackStatus = { state: 'idle', reason: null, startAttempts: 0, startFailures: 0, provider: null };
@@ -434,6 +446,9 @@ class GameMode {
     _renderAsrProviderStatus() {
         var el = document.getElementById('asr-provider-display');
         if (!el) return;
+        // While the sensor-dead warning is showing, it owns the chip — don't let a
+        // routine provider-status refresh repaint "Mic ready" over it.
+        if (this._vadHealthWarn) return;
         var status = this._whisperServerStatus || {};
         var provider = status.provider || 'unknown';
         var model = status.model || 'unknown';
@@ -451,6 +466,44 @@ class GameMode {
             : provider === 'browser_sr' ? 'Browser speech recognition'
             : provider;
         el.title = friendly + (model && model !== 'unknown' ? ' (' + model + ')' : '') + ' — ' + state;
+    }
+
+    // Sensor-health chip (100ms poll, see updateLyrics): warn when the recognizer is
+    // producing text but the energy sensor (neural VAD / RMS fallback) has never
+    // fired this run. That combination means the game's own mic stream is dead
+    // (per-origin permission/device/AudioContext — the 2026-07-20 incident), NOT a
+    // quiet singer; the scoring engine fails open on it (phrase-engine _vadFlowSeen)
+    // and this tells the singer so the run can be fixed rather than silently
+    // degraded. Verdict logic is the pure, tested vad-health-helpers module.
+    _updateVadHealth() {
+        if (!window.KaraokeeVadHealth) return;
+        if (this.isSpeaking) this._vadEverFired = true;
+        var s = this._session;
+        var asrActive = !!(s && (s.transcript || s.latestInterim || s.whisperBuffer));
+        if (asrActive && this._firstAsrTextAt == null) this._firstAsrTextAt = performance.now();
+        var verdict = KaraokeeVadHealth.vadHealthVerdict({
+            gameActive: this.active && !this._suspended,
+            vadEverFired: this._vadEverFired,
+            asrActive: asrActive,
+            secsSinceFirstAsrText: this._firstAsrTextAt != null
+                ? (performance.now() - this._firstAsrTextAt) / 1000 : null
+        });
+        var warn = verdict === 'sensor-dead';
+        if (warn === this._vadHealthWarn) return;
+        if (warn) {
+            this._vadHealthWarn = true;
+            var el = document.getElementById('asr-provider-display');
+            if (!el) return;
+            el.classList.remove('ready');
+            el.classList.add('error');
+            el.textContent = 'Mic issue — voice not detected';
+            el.title = 'Speech recognition hears you, but the game\'s voice sensor is not ' +
+                'receiving audio. Check this site\'s microphone permission and input device, ' +
+                'then restart the song. Scoring continues in a reduced-strictness mode.';
+        } else {
+            this._vadHealthWarn = false;               // clear FIRST so the renderer repaints
+            this._renderAsrProviderStatus();           // hand the chip back to the normal state
+        }
     }
 
     _isRealtimeWhisperProvider() {
@@ -2095,6 +2148,7 @@ function updateLyrics() {
     // updateHotWord(); _tickArcade(); pair.
     if (gameMode.active) {
         gameMode.updateHotWord();
+        gameMode._updateVadHealth();
         if (gameMode._session) gameMode._renderEvents(KaraokeeScoringSession.tick(gameMode._session, gameMode._now()));
         // Robust end-of-song completion. The YouTube IFrame is unreliable here: its ENDED
         // event may not reach us, and getCurrentTime() can plateau ~1s+ short of getDuration()

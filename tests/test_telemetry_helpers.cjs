@@ -105,4 +105,31 @@ assert.strictEqual(noArcS.arcade.points, 0, 'null arcade summary -> 0 points');
 assert.strictEqual(noArcS.honesty.pointsBuilt, false);
 assert.strictEqual(noArcS.counts.transitions, 3, 'counts passthrough');
 
+// --- Review fix: real recognizer-lag stats. The legacy drift fields measure the
+// 100ms lyric-poll's scheduling jitter (transition early/late vs expected line
+// time), which says nothing about the singer or recognizer. lateCredit* derive
+// from consumed tokens landing AFTER their phrase window (needs the trace
+// startSec/endSec fields getPhraseTrace now exposes).
+(function () {
+    var lagBase = Object.assign({}, base, {
+        phraseTraces: [
+            Object.assign(trace('confirmed', []), { endSec: 10, consumedTokens: [
+                { source: 'browser_interim_reconciled', timeSec: 10.5 },   // +500ms late
+                { source: 'browser_interim_reconciled', timeSec: 9.0 }     // in-window: not late
+            ] }),
+            Object.assign(trace('confirmed', []), { endSec: 20, consumedTokens: [
+                { source: 'browser_final', timeSec: 22.5 }                 // +2500ms late
+            ] })
+        ]
+    });
+    var lagSum = T.summarizeRun(lagBase);
+    assert.strictEqual(lagSum.sync.lateCreditMedianMs, 1500, 'median of [500, 2500] late credits');
+    assert.strictEqual(lagSum.sync.lateCreditMaxMs, 2500, 'max late credit');
+    // Traces without window data (older payloads) -> null, schema-stable.
+    var noLag = T.summarizeRun(base);
+    assert.strictEqual(noLag.sync.lateCreditMedianMs, null, 'no endSec data -> null median');
+    assert.strictEqual(noLag.sync.lateCreditMaxMs, null, 'no endSec data -> null max');
+    console.log('late-credit sync stats: passed');
+})();
+
 console.log('test_telemetry_helpers.cjs: all assertions passed');

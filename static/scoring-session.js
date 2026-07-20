@@ -280,7 +280,13 @@
             phraseEngine.addEvidence(s.phraseSession, evidence);
             phraseEngine.settlePhrases(s.phraseSession, nowSec);
             if (evidence.source === 'browser_final' || evidence.source === 'whisper') {
-                var confirmed = phraseEngine.reconcileLateEvidence(s.phraseSession, evidence, nowSec);
+                // Energy gate (same 06dfde5 invariant as the interim path): a late
+                // final may only credit a line the singer vocalized DURING. Without
+                // it, staying silent through lines and then speaking their key words
+                // later (or backing-track bleed) reconciled them all — the finals
+                // path was the one unguarded reconcile route.
+                var confirmed = phraseEngine.reconcileLateEvidence(s.phraseSession, evidence, nowSec,
+                    { requireInWindowFlow: true });
                 if (confirmed && confirmed.length) {
                     for (var ci = 0; ci < confirmed.length; ci++) {
                         ev(events, 'phraseCleared', { phraseId: confirmed[ci] });
@@ -751,6 +757,22 @@
         // Settle all remaining open phrases as of now.
         if (s.phraseSession && phraseEngine) {
             try { phraseEngine.settlePhrases(s.phraseSession, nowSec); } catch (e) {}
+            // Force-settle every ENDED phrase: the run is over, so no more evidence
+            // is coming and the settlement delay has nothing left to wait for. A
+            // manual stop otherwise strands the fully-sung final line in 'settling'
+            // (or a hair before its endSec) and its commit — points and honest-%
+            // inclusion — is silently dropped. Still-active lines (endSec more than
+            // half a second away) stay open: quitting mid-line is not scored.
+            var endPhrases = (s.phrasePlan && s.phrasePlan.phrases) || [];
+            for (var epi = 0; epi < endPhrases.length; epi++) {
+                var eph = endPhrases[epi];
+                var est = s.phraseSession.states[eph.phraseId];
+                if (!est) continue;
+                if (est.status === 'settling' ||
+                    (est.status === 'open' && eph.endSec <= nowSec + 0.5)) {
+                    est.status = 'settled';
+                }
+            }
         }
 
         // Commit newly settled phrases (routeEvents=false: no HUD arcade event; end

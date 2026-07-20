@@ -572,4 +572,127 @@ assert.ok(normP.phrases[0].anchorsRequired > 2,
     'a normal-tempo expert line keeps its full (higher) bar (buff is fast-only)');
 console.log('Fast-tempo cheese-floored bar: passed.');
 
+// --- Review fix: interim reconcile look-back is capped (cross-repeat steal guard) ---
+// Repeated-hook songs: a word first surfacing in the interim ~10s+ after a line
+// ended is almost certainly a LATER repeat's performance (interims track speech
+// within a second or two). Uncapped, the monotonic pass pulled such tokens back to
+// the earliest unhit repeat: real telemetry credited line 3's "watch" from line
+// 10's singing (+10.2s) and line 14's "choppa" from line 18's (+10.8s). The
+// interim path now looks back only a short horizon; late FINALS keep the full 18s
+// (realtime-provider finals legitimately batch 13-17s of lines).
+(function () {
+    var hookLyrics = [
+        { time: 0,  text: 'hello world tonight' },     // p0: old hook repeat, ends at 2
+        { time: 2,  text: 'instrumental gap noise' },  // p1: long silent gap, ends at 12
+        { time: 12, text: 'hello world tonight' },     // p2: fresh hook repeat, ends at 14
+        { time: 14, text: 'closing words differ' }     // p3: still open at test time
+    ];
+    function freshSession() {
+        var p = phraseEngine.buildPhrasePlan(hookLyrics, { difficulty: 'medium', audioDuration: 20 });
+        var s = phraseEngine.createPhraseSession(p);
+        // The singer vocalized during BOTH hook repeats (flow gate passes for both).
+        [0.5, 1.0, 12.5, 13.0].forEach(function (t) {
+            phraseEngine.addEvidence(s, { source: 'vad', text: '', words: [], receivedAtSec: t, audioTimeSec: t });
+        });
+        return s;
+    }
+    // Interim at t=14.5: the fresh repeat (p2) just ended; the old repeat (p0)
+    // ended 12.5s ago. The tokens are p2's performance and must credit p2.
+    var s1 = freshSession();
+    phraseEngine.reconcileInterimSnapshot(s1, 'hello world tonight', 14.5);
+    var t1 = phraseEngine.getPhraseTrace(s1);
+    assert.strictEqual(t1[2].cleared, true, 'the just-sung hook repeat gets its own credit');
+    assert.strictEqual(t1[0].anchorsHit, 0, 'a hook repeat 12.5s in the past cannot steal the fresh tokens');
+    // A late FINAL keeps the full look-back: the same words as a browser_final
+    // still reach the older line (rt finals batch many lines legitimately).
+    var s2 = freshSession();
+    phraseEngine.reconcileLateEvidence(s2, {
+        id: 'f1', source: 'browser_final', text: 'hello world tonight', words: [],
+        receivedAtSec: 14.5, audioTimeSec: 14.5
+    }, 14.5, { requireInWindowFlow: true });
+    var t2 = phraseEngine.getPhraseTrace(s2);
+    assert.ok(t2[0].anchorsHit > 0, 'a late final still reaches the older line (full look-back for finals)');
+    console.log('Interim look-back cap: passed.');
+})();
+
+// --- Review fix: flowStatus classifies by ONSET, not by the latest event ---
+// The old rule ("latest event past endSec -> late") marked 39/40 lines of a real
+// continuously-sung run 'late', because singing always trails into the next line.
+// Flow now reads when the singer STARTED vocalizing relative to the line start
+// (within timing tolerance = clean).
+(function () {
+    function planOneLine() {
+        return phraseEngine.buildPhrasePlan([{ time: 10, text: 'steady vocal line' }],
+            { difficulty: 'medium', audioDuration: 12 });
+    }
+    // Continuous singing from the line start, trailing past its end (the normal case).
+    var s1 = phraseEngine.createPhraseSession(planOneLine());
+    [10.2, 10.6, 11.0, 11.4, 11.8, 12.2, 12.4].forEach(function (t) {
+        phraseEngine.addEvidence(s1, { source: 'vad', text: '', words: [], receivedAtSec: t, audioTimeSec: t });
+    });
+    var t1 = phraseEngine.getPhraseTrace(s1)[0];
+    assert.strictEqual(t1.flowStatus, 'clean',
+        'singing from the start that trails past the end is clean flow, got ' + t1.flowStatus);
+    // Joining the line well after its start (past the timing tolerance) is late.
+    var s2 = phraseEngine.createPhraseSession(planOneLine());
+    [11.5, 11.8].forEach(function (t) {
+        phraseEngine.addEvidence(s2, { source: 'vad', text: '', words: [], receivedAtSec: t, audioTimeSec: t });
+    });
+    var t2 = phraseEngine.getPhraseTrace(s2)[0];
+    assert.strictEqual(t2.flowStatus, 'late',
+        'first vocalizing 1.5s into the line (tolerance 1.0s) is late, got ' + t2.flowStatus);
+    console.log('Onset-based flowStatus: passed.');
+})();
+
+// getPhraseTrace exposes the phrase window (startSec/endSec) so telemetry can
+// derive real recognizer-lag stats (consumed-token time vs line end).
+(function () {
+    var p = phraseEngine.buildPhrasePlan([{ time: 3, text: 'window check line' }],
+        { difficulty: 'medium', audioDuration: 9 });
+    var s = phraseEngine.createPhraseSession(p);
+    var tr = phraseEngine.getPhraseTrace(s)[0];
+    assert.strictEqual(tr.startSec, 3, 'trace exposes startSec');
+    assert.strictEqual(tr.endSec, 9, 'trace exposes endSec');
+    console.log('trace window fields: passed.');
+})();
+
+// --- Review fix: the flow gate fails OPEN when the VAD sensor is dead ---
+// Real incident (2026-07-20 22:01 run): the game's mic/VAD path produced no energy
+// all session (new-origin mic permission/device issue) while Web Speech transcribed
+// fine. Both reconcile paths hard-required per-line VAD flow, so an honest singer
+// with a 92% baseline scored 31%. The gate now enforces only when the session has
+// seen VAD fire at all (_vadFlowSeen). Honesty holds because a cheeser's spoken
+// burst itself trips a LIVE sensor — you cannot produce ASR content silently — so
+// by the time burst evidence reconciles, the gate is armed and the skipped lines
+// (no in-window flow) stay blocked. A dead sensor degrades to ungated reconcile
+// instead of zeroing the run.
+(function () {
+    var L = [
+        { time: 0, text: 'crimson tide rises' },
+        { time: 3, text: 'velvet morning glow' },
+        { time: 6, text: 'quiet outro segment' }
+    ];
+    // (A) DEAD sensor: no vad evidence ever -> a late final still credits.
+    var dead = phraseEngine.createPhraseSession(phraseEngine.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 12 }));
+    phraseEngine.reconcileLateEvidence(dead, {
+        id: 'df1', source: 'browser_final', text: 'crimson tide rises velvet morning glow',
+        words: [], receivedAtSec: 9, audioTimeSec: 9
+    }, 9, { requireInWindowFlow: true });
+    var deadTr = phraseEngine.getPhraseTrace(dead);
+    assert.ok(deadTr[0].anchorsHit > 0 && deadTr[1].anchorsHit > 0,
+        'dead VAD sensor -> flow gate fails open, late final credits the sung lines');
+    // (B) ALIVE sensor (vad fired during line 1 only): silent line 0 stays blocked.
+    var alive = phraseEngine.createPhraseSession(phraseEngine.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 12 }));
+    phraseEngine.addEvidence(alive, { source: 'vad', text: '', words: [], receivedAtSec: 4, audioTimeSec: 4 });
+    phraseEngine.reconcileLateEvidence(alive, {
+        id: 'af1', source: 'browser_final', text: 'crimson tide rises velvet morning glow',
+        words: [], receivedAtSec: 9, audioTimeSec: 9
+    }, 9, { requireInWindowFlow: true });
+    var aliveTr = phraseEngine.getPhraseTrace(alive);
+    assert.strictEqual(aliveTr[0].anchorsHit, 0,
+        'alive sensor + silent line 0 -> per-line flow gate still blocks');
+    assert.ok(aliveTr[1].anchorsHit > 0, 'the vocalized line 1 still credits');
+    console.log('Sensor-health fail-open: passed.');
+})();
+
 console.log('Phrase engine tests passed.');

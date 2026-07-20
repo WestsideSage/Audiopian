@@ -433,6 +433,22 @@ function isEdit2PrefixTruncation(spoken, target) {
     return target.startsWith(spoken);
 }
 
+// Punctuation-fused repeat lyrics: normalizeWord strips hyphens/commas without a
+// separator, so "bands-bands-bands" becomes the single token "bandsbandsbands" —
+// an anchor no recognizer output can ever match (real telemetry: every missed
+// anchor in a Comethazine "Bands" run was one of these). Detect a token that is
+// one unit repeated 2+ times and return the unit ("bands") so the matcher can
+// credit the singable word. The lazy quantifier finds the SHORTEST unit
+// ("hahahaha" -> "haha"). The unit must be >=3 chars: 2-char repeats ("mama",
+// "riri") are real words the recognizer returns whole, and collapsing them would
+// misfire.
+var REPEATED_UNIT_RE = /^(\w{3,}?)\1+$/;
+function repeatedUnit(word) {
+    if (!word || typeof word !== 'string' || word.length < 6) return null;
+    var m = REPEATED_UNIT_RE.exec(word);
+    return m ? m[1] : null;
+}
+
 // Build a deduplicated vocabulary string from lyric lines, for biasing the realtime
 // recognizer toward the song's words (a spelling hint). Deduped and stripped of short
 // common words, and NOT the lyric sequence — it nudges spelling of uncommon words without
@@ -470,6 +486,7 @@ if (typeof module !== 'undefined' && module.exports) {
         maxEditDistance: maxEditDistance,
         skipFuzzyMatch: skipFuzzyMatch,
         MetaphoneLRU: MetaphoneLRU,
+        repeatedUnit: repeatedUnit,
         SLANG_MAP: SLANG_MAP,
         slangMatch: slangMatch,
         ASR_MISHEARINGS: ASR_MISHEARINGS,

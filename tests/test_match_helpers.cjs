@@ -218,3 +218,26 @@ var classifyWord = fakeModule.exports.classifyWord;
     assert.strictEqual(classifyWord('so', false), 'function', '"so" stays function');
     console.log('classifyWord elongated-vocable: tests passed');
 })();
+
+// --- repeatedUnit: detect punctuation-fused repeat tokens ("bands-bands-bands" ->
+// "bandsbandsbands") so the matcher can credit the singable unit. Unit must be >=3
+// chars: 2-char repeats ("mama", "riri") are real words the recognizer returns
+// whole, and collapsing them would misfire.
+(function () {
+    var repeatedUnit = fakeModule.exports.repeatedUnit;
+    assert.strictEqual(typeof repeatedUnit, 'function', 'repeatedUnit is exported');
+    assert.strictEqual(repeatedUnit('dancedancedancedance'), 'dance', 'dance x4 collapses to dance');
+    assert.strictEqual(repeatedUnit('mansmansmans'), 'mans', 'mans x3 collapses to mans');
+    assert.strictEqual(repeatedUnit('bandsbandsbands'), 'bands', 'bands x3 collapses to bands');
+    assert.strictEqual(repeatedUnit('knockknock'), 'knock', 'knock-knock collapses to knock');
+    assert.strictEqual(repeatedUnit('baowbaowbaow'), 'baow', 'baow x3 collapses to baow');
+    assert.strictEqual(repeatedUnit('iceiceice'), 'ice', '3-char unit is allowed');
+    assert.strictEqual(repeatedUnit('hahahaha'), 'haha', 'lazy match finds the SHORTEST >=3 unit');
+    assert.strictEqual(repeatedUnit('mama'), null, '2-char unit (real word mama) is not collapsed');
+    assert.strictEqual(repeatedUnit('riri'), null, '2-char unit (riri) is not collapsed');
+    assert.strictEqual(repeatedUnit('dance'), null, 'non-repeated word returns null');
+    assert.strictEqual(repeatedUnit('bandsbandbands'), null, 'impure repetition (lyric typo) returns null');
+    assert.strictEqual(repeatedUnit(''), null, 'empty string returns null');
+    assert.strictEqual(repeatedUnit(null), null, 'null returns null');
+    console.log('repeatedUnit: tests passed');
+})();

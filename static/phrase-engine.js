@@ -47,6 +47,15 @@
     // speech-rec batch latency observed in telemetry (it can batch ~8 lines into
     // one late `final`). Tunable; see the design spec §7.
     var RECONCILE_LOOKBACK_SEC = 18;
+    // Shorter monotonic-pass horizon for the INTERIM path. Interims track speech
+    // within a second or two, so a word first surfacing ~10s+ after a line ended is
+    // almost certainly a LATER repeat of the same hook — uncapped, the monotonic
+    // pass pulled it back to the earliest unhit repeat (real telemetry: line 3's
+    // "watch" credited from line 10's singing at +10.2s, line 14's "choppa" from
+    // line 18's at +10.8s). Finals keep the full look-back: realtime-provider
+    // finals legitimately batch 13-17s of lines. The unique-anchor catch-up pass
+    // also keeps the full look-back — uniqueness already removes the ambiguity.
+    var RECONCILE_INTERIM_LOOKBACK_SEC = 8;
     // Fast-tempo recognition allowance: on high-WPS (>= FAST_WPS_THRESHOLD) lines the
     // browser recognizer demonstrably drops words -- real telemetry (a dense Roots rap)
     // showed ~3 of every 4 words dropped on back-to-back bars while VAD confirmed the
@@ -272,7 +281,15 @@
             plan: phrasePlan,
             states: states,
             consumedTokenIds: {},
-            evidenceCount: 0
+            evidenceCount: 0,
+            // Sensor health: flips true on the first vad evidence. The reconcile
+            // flow gates enforce only when this is true — a session whose VAD path
+            // never fired (mic permission/device/AudioContext failure while the
+            // recognizer still hears) must not zero an honest run (real incident:
+            // 92%-baseline singer scored 31% with a dead sensor). Honesty holds
+            // because vocalizing at all trips a LIVE sensor, so cheese evidence
+            // always arrives with the gate armed.
+            _vadFlowSeen: false
         };
     }
 
@@ -335,16 +352,21 @@
         state.cleared = state.lyricStatus === 'confirmed';
 
         if (state.flowEvents.length > 0 || state.consumedTokens.length > 0) {
-            var latest = null;
+            // Classify by ONSET: when did the singer START vocalizing relative to
+            // the line start? The old latest-event rule ("past endSec -> late")
+            // marked essentially every line of a continuously-sung run 'late',
+            // because singing always trails into the next line.
+            var earliest = null;
             state.consumedTokens.forEach(function(token) {
-                if (latest == null || token.timeSec > latest) latest = token.timeSec;
+                if (earliest == null || token.timeSec < earliest) earliest = token.timeSec;
             });
             state.flowEvents.forEach(function(event) {
-                if (latest == null || event.timeSec > latest) latest = event.timeSec;
+                if (earliest == null || event.timeSec < earliest) earliest = event.timeSec;
             });
-            if (latest != null) {
-                if (latest < phrase.startSec - (session.plan.difficulty.timingToleranceMs / 1000)) state.flowStatus = 'early';
-                else if (latest > phrase.endSec) state.flowStatus = 'late';
+            if (earliest != null) {
+                var flowTol = session.plan.difficulty.timingToleranceMs / 1000;
+                if (earliest < phrase.startSec - flowTol) state.flowStatus = 'early';
+                else if (earliest > phrase.startSec + flowTol) state.flowStatus = 'late';
                 else state.flowStatus = 'clean';
             }
         }
@@ -382,6 +404,7 @@
     }
 
     function addVadEvidence(session, evidence) {
+        session._vadFlowSeen = true;
         var states = activePhraseStates(session, evidence);
         states.forEach(function(state) {
             pushBounded(state, 'flowEvents', {
@@ -551,13 +574,20 @@
         var tokens = evidenceTokens(evidence);
         if (tokens.length === 0) return [];
 
-        var lookbackStart = nowSec - RECONCILE_LOOKBACK_SEC;
+        // Monotonic-pass horizon: overridable per evidence path (the interim path
+        // passes a shorter one). The unique-anchor pass below keeps the full one.
+        var monotonicLookbackSec = (options && isFinite(options.lookbackSec))
+            ? Number(options.lookbackSec) : RECONCILE_LOOKBACK_SEC;
+        var lookbackStart = nowSec - monotonicLookbackSec;
+        var uniqueLookbackStart = nowSec - RECONCILE_LOOKBACK_SEC;
         // Optional forward-only floor (interim path): never credit a line that starts
         // before the latest line interim has already confirmed, so a browser-SR
         // revision re-presenting an already-credited word can't reach back to an
         // earlier, un-sung line. The late-final path passes no floor (unchanged).
         var minStartSec = (options && options.minStartSec != null) ? options.minStartSec : -Infinity;
-        var requireInWindowFlow = !!(options && options.requireInWindowFlow);
+        // Flow gate arms only when the session's VAD sensor has demonstrably fired
+        // (fail-open on a dead sensor — see createPhraseSession._vadFlowSeen).
+        var requireInWindowFlow = !!(options && options.requireInWindowFlow) && !!session._vadFlowSeen;
         var candidates = (session.plan.phrases || []).filter(function(phrase) {
             var state = session.states[phrase.phraseId];
             if (!state || state.cleared) return false;
@@ -579,7 +609,7 @@
             if (!st || st.cleared) return false;
             if (!(phrase.anchorsRequired > 0)) return false;
             if (requireInWindowFlow && !hasInWindowFlow(st, phrase)) return false;
-            return phrase.endSec >= lookbackStart && phrase.endSec <= nowSec;
+            return phrase.endSec >= uniqueLookbackStart && phrase.endSec <= nowSec;
         });
         if (candidates.length === 0 && flowCandidates.length === 0) return [];
 
@@ -744,7 +774,8 @@
             words: [],
             receivedAtSec: nowSec,
             audioTimeSec: nowSec
-        }, nowSec, { minStartSec: floor, requireInWindowFlow: true });
+        }, nowSec, { minStartSec: floor, requireInWindowFlow: true,
+                     lookbackSec: RECONCILE_INTERIM_LOOKBACK_SEC });
         // Advance the forward-only floor past every line interim just confirmed, so a
         // later snapshot (esp. a revision that mints a fresh segment id) cannot reach
         // back and re-credit an earlier line the singer skipped.
@@ -805,7 +836,12 @@
                 else if (state.lyricStatus === 'partial') { engagedCount++; }
             });
             lyrics = sumReq > 0 ? clamp01(sumHit / sumReq) : 1;
-            conviction = engagedCount > 0 ? confirmedCount / engagedCount : 1;
+            // Vacuous conviction (1.0) only when there was nothing to engage WITH
+            // (sumReq 0, e.g. an all-adlib sheet). If required phrases exist and the
+            // singer engaged none of them, conviction is 0 — otherwise total silence
+            // floored the composite at 0.25.
+            conviction = engagedCount > 0 ? confirmedCount / engagedCount
+                : (sumReq > 0 ? 0 : 1);
         }
         var composite = 0.75 * lyrics + 0.25 * conviction;
         return {
@@ -824,6 +860,8 @@
                 phraseId: phrase.phraseId,
                 lineIdx: phrase.lineIdx,
                 text: phrase.text,
+                startSec: phrase.startSec,
+                endSec: phrase.endSec,
                 status: state.status,
                 lyricStatus: state.lyricStatus,
                 accuracyStatus: state.accuracyStatus,

@@ -193,15 +193,18 @@ function matchHotWordForTest(s, text, now) {
 // Drive a tick INSIDE line 0's window while SILENT (the real cheese case: the words
 // appear in the interim via boundary-bleed from an adjacent line, but the singer
 // produced no in-window energy), so this exercises the energy gate itself rather
-// than merely the absence of any in-window tick.
+// than merely the absence of any in-window tick. The singer IS audible on line 1
+// (sensor alive): the flow gate only arms once the session has seen VAD fire at
+// all — a fully-dead sensor fails open instead (see the sensor-health tests).
 (function () {
     var s = session.createSession(twoLineCfg());
     session.setActiveLine(s, 0, 0.0);
-    session.setEnergy(s, false);                  // silent
+    session.setEnergy(s, false);                  // silent through line 0
     session.tick(s, 0.5);                         // in-window tick, but silent -> NO vad flowEvent
     session.ingestInterim(s, 'first line words'); // words present but no energy
     session.setActiveLine(s, 1, 2.0);             // line 0 ends
-    var out = session.tick(s, 2.1);
+    session.setEnergy(s, true);                   // vocalizing on line 1 -> sensor alive
+    var out = session.tick(s, 2.1);               // vad fires (line 1) BEFORE the reconcile
     var cleared = out.filter(function (e) { return e.type === 'phraseCleared'; });
     assert.strictEqual(cleared.length, 0, 'silent interim must NOT reconcile/clear the ended line');
 })();
@@ -829,6 +832,86 @@ function matchHotWordForTest(s, text, now) {
     } } };
     assert.strictEqual(session.getHonestPct(sSettlingOnly), null,
         'a session with only settling/open phrases has no settled denominator -> null');
+})();
+
+// --- Review fix (P0): the finals/whisper reconcile path is energy-gated ---
+// A late browser_final containing the words of lines the singer was SILENT through
+// must NOT reconcile/clear them — the same 06dfde5 invariant the interim path
+// already enforces (cases A/B above). Without the gate, staying silent for a few
+// lines and then speaking their key words over the outro cleared them all.
+(function () {
+    function gateCfg() {
+        var L = [lyric(0, 'crimson tide rises'), lyric(3, 'velvet morning glow'), lyric(6, 'quiet outro segment')];
+        return { lyrics: L, allWordTimings: buildAllWordTimings(L),
+                 phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 12 }),
+                 difficulty: 'medium' };
+    }
+    // (A) Silent through lines 0 and 1, then the cheeser SPEAKS the skipped words
+    // during line 2 — the spoken burst itself trips the (live) VAD sensor, so the
+    // flow gate is armed when the late final reconciles, and the silent lines stay
+    // blocked. (A fully-dead sensor instead fails open — see the sensor-health
+    // fail-open tests; a cheeser cannot produce ASR content without vocalizing.)
+    var s = session.createSession(gateCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, false);
+    session.tick(s, 1.0);
+    session.setActiveLine(s, 1, 3.0);
+    session.tick(s, 4.0);
+    session.setActiveLine(s, 2, 6.0);
+    session.setEnergy(s, true);                   // the burst is vocalized -> vad fires on line 2
+    session.tick(s, 6.5);
+    session.ingestFinal(s, 'crimson tide rises velvet morning glow', 'browser_sr');
+    var out = session.tick(s, 9.0);
+    var cleared = out.filter(function (e) { return e.type === 'phraseCleared'; });
+    assert.strictEqual(cleared.length, 0,
+        'a late final must NOT clear lines the singer was silent through (finals-path energy gate)');
+    // (B) Same late final with in-window energy -> both lines clear (honest late batch preserved).
+    var s2 = session.createSession(gateCfg());
+    session.setActiveLine(s2, 0, 0.0);
+    session.setEnergy(s2, true);
+    session.tick(s2, 1.0);                        // vad flowEvent inside p0 [0,3]
+    session.setActiveLine(s2, 1, 3.0);
+    session.tick(s2, 4.0);                        // vad flowEvent inside p1 [3,6]
+    session.setActiveLine(s2, 2, 6.0);
+    session.setEnergy(s2, false);
+    session.ingestFinal(s2, 'crimson tide rises velvet morning glow', 'browser_sr');
+    var out2 = session.tick(s2, 9.0);
+    var clearedIds2 = out2.filter(function (e) { return e.type === 'phraseCleared'; })
+                          .map(function (e) { return e.phraseId; });
+    assert.ok(clearedIds2.indexOf('p0') >= 0, 'energized line 0 still clears from the late final');
+    assert.ok(clearedIds2.indexOf('p1') >= 0, 'energized line 1 still clears from the late final');
+})();
+
+// --- Review fix: endRun force-settles ENDED phrases (manual-stop last line) ---
+// Manual stop passes the current media time, so a fully-sung final line sitting in
+// its settlement window (or a hair before its endSec) was never committed: real
+// telemetry lost a cleared 2/2 line (and its points) to this. After the run there
+// is no more evidence coming, so every line that has ENDED settles immediately.
+// A still-active (unfinished) line stays open — quitting mid-line is not punished.
+(function () {
+    var s = session.createSession(twoLineCfg());   // p1 endSec = audioDuration (8)
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    session.tick(s, 1.0);
+    session.setActiveLine(s, 1, 2.0);
+    session.ingestFinal(s, 'second line words', 'browser_sr');
+    session.tick(s, 3.0);
+    session.endRun(s, 8.05);                       // stop just past the last line's end
+    var committed = s.arcadeEvents.map(function (r) { return r.phraseId; });
+    assert.ok(committed.indexOf('p1') >= 0,
+        'manual stop just past the final line commits it (was: dropped while settling)');
+    assert.ok(session.getHonestPct(s) !== null,
+        'force-settled lines give the honest % a denominator after a manual stop');
+})();
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    session.tick(s, 1.0);
+    session.endRun(s, 1.0);                        // stop MID-line-0 (endSec 2.0)
+    var committed = s.arcadeEvents.map(function (r) { return r.phraseId; });
+    assert.strictEqual(committed.indexOf('p0'), -1,
+        'stopping mid-line does not commit the unfinished active line');
 })();
 
 console.log('Scoring session tests passed.');

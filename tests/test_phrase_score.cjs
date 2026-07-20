@@ -217,4 +217,27 @@ function buildCleanSession(difficulty) {
     assert.ok(p0.anchorsHit >= 1, 'late-but-within-grace whisper evidence credits the anchor, got ' + p0.anchorsHit);
 })();
 
+// --- Review fix: total silence scores 0, not a free 25 ---
+// With zero engaged phrases, conviction was vacuously 1.0, flooring the composite
+// at 0.25 for a run where the singer never made a sound. When there ARE required
+// phrases and none were engaged, conviction is 0. A plan with nothing scoreable
+// (sumReq 0, e.g. an all-adlib sheet) keeps the vacuous 1.0 — there was nothing
+// to fail.
+(function silentRunScoresZero() {
+    var plan = phraseEngine.buildPhrasePlan(FIXTURE, { difficulty: 'expert', audioDuration: 6 });
+    var session = phraseEngine.createPhraseSession(plan);
+    var score = phraseEngine.getLiveScore(session);   // zero evidence of any kind
+    approx(score.lyrics, 0, 'silent run: lyrics 0');
+    approx(score.conviction, 0, 'silent run: conviction 0 (not vacuous 1)');
+    approx(score.composite, 0, 'silent run: composite 0 (not a free 25%)');
+})();
+(function nothingScoreableKeepsVacuousConviction() {
+    var plan = phraseEngine.buildPhrasePlan([{ time: 0, text: 'ooh ah yeah' }],
+        { difficulty: 'expert', audioDuration: 6 });
+    var session = phraseEngine.createPhraseSession(plan);
+    var score = phraseEngine.getLiveScore(session);
+    approx(score.lyrics, 1, 'no required anchors: lyrics vacuously 1');
+    approx(score.conviction, 1, 'no required anchors: conviction vacuously 1');
+})();
+
 console.log('Phrase score tests passed.');

@@ -80,6 +80,20 @@
             else if (t.lateMs != null) { drifts.push(Math.abs(t.lateMs)); late++; }
         });
 
+        // Real recognizer lag: how long after a phrase's window did its credited
+        // tokens land? (The drift fields above only measure the lyric-poll's
+        // scheduling jitter — they always look good and say nothing about the
+        // recognizer.) Needs traces that carry endSec (getPhraseTrace).
+        var lateLags = [];
+        traces.forEach(function (tr) {
+            if (tr == null || tr.endSec == null) return;
+            (tr.consumedTokens || []).forEach(function (c) {
+                if (c && c.timeSec != null && c.timeSec > tr.endSec) {
+                    lateLags.push(Math.round((c.timeSec - tr.endSec) * 1000));
+                }
+            });
+        });
+
         var pointsBuilt = (arc.points || 0) > 0;
         var maxMult = arc.maxMultiplier || 1;
         var intent = inputs.benchmarkIntent || '';
@@ -104,7 +118,9 @@
             sync: {
                 medianLineDriftMs: median(drifts),
                 linesEarly: early,
-                linesLate: late
+                linesLate: late,
+                lateCreditMedianMs: median(lateLags),
+                lateCreditMaxMs: lateLags.length ? Math.max.apply(null, lateLags) : null
             },
             honesty: {
                 benchmarkIntent: intent,
