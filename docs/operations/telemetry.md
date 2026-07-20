@@ -17,6 +17,11 @@ does this while retaining older untagged runs.
 
 `meta.schemaVersion` is `2`. The file is **lean by default**, with two always-on digests:
 
+As of 2026-07-20, new phrase plans omit the unused `difficulty.minFlowCoverage`
+property, and new transition records omit the always-zero `weightedMatched` and
+`totalComparisons` diagnostics. Readers should continue accepting those fields in
+older saved payloads.
+
 - **`summary`** — the at-a-glance digest: final scores, the arcade outcome, which recognizer earned the credit, sync drift, and a cheese-vs-honesty correlation. Built by the pure helper `summarizeRun` in `static/telemetry-helpers.js` (golden-tested in `tests/test_telemetry_helpers.cjs`).
 - **`arcade`** — per-phrase commit events and the high score.
 

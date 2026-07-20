@@ -25,13 +25,13 @@
     function _isNeverScore(w) { var p = _profanity(); return !!(p && p.isNeverScore && p.isNeverScore(w)); }
 
     var DIFFICULTY = {
-        easy:   { requiredAnchorRatio: 0.20, timingToleranceMs: 1400, settlementMs: 1800, minFlowCoverage: 0.20 },
-        medium: { requiredAnchorRatio: 0.45, timingToleranceMs: 1000, settlementMs: 1400, minFlowCoverage: 0.45 },
-        hard:   { requiredAnchorRatio: 0.65, timingToleranceMs: 750,  settlementMs: 1100, minFlowCoverage: 0.65 },
-        expert: { requiredAnchorRatio: 0.80, timingToleranceMs: 500,  settlementMs: 900,  minFlowCoverage: 0.80 },
+        easy:   { requiredAnchorRatio: 0.20, timingToleranceMs: 1400, settlementMs: 1800 },
+        medium: { requiredAnchorRatio: 0.45, timingToleranceMs: 1000, settlementMs: 1400 },
+        hard:   { requiredAnchorRatio: 0.65, timingToleranceMs: 750,  settlementMs: 1100 },
+        expert: { requiredAnchorRatio: 0.80, timingToleranceMs: 500,  settlementMs: 900 },
         // Insane: a 5th tier, strictly harder than expert (more required key words, tighter
         // timing). Paired with the collapsed-lyrics display (player.js gates on 'insane').
-        insane: { requiredAnchorRatio: 0.90, timingToleranceMs: 400,  settlementMs: 800,  minFlowCoverage: 0.90 }
+        insane: { requiredAnchorRatio: 0.90, timingToleranceMs: 400,  settlementMs: 800 }
     };
     var REPEATED_FILLER = {
         yeah: true, uh: true, oh: true, ay: true, aye: true, la: true,
@@ -97,8 +97,7 @@
         return {
             requiredAnchorRatio: profile.requiredAnchorRatio,
             timingToleranceMs: profile.timingToleranceMs,
-            settlementMs: profile.settlementMs,
-            minFlowCoverage: profile.minFlowCoverage
+            settlementMs: profile.settlementMs
         };
     }
 
@@ -486,14 +485,14 @@
     function candidateFor(session, evidence, token, nextToken, state, anchor) {
         var tokenId = evidence.id + ':' + token.idx;
         if (session.consumedTokenIds[tokenId]) {
-            return { rejected: true, reason: 'already_consumed' };
+            return { rejected: true, reason: 'token_consumed' };
         }
         if (state.anchorHits[anchor.anchorIdx]) {
-            return { rejected: true, reason: 'already_consumed' };
+            return { rejected: true, reason: 'anchor_already_hit' };
         }
-        // Generic filler tokens are normally rejected as evidence — but if the anchor
-        // itself is a filler-only fallback ("uh uh" lines), we need to accept them.
-        if ((REPEATED_FILLER[token.word] || isAdlibWord(token.word)) && !anchor.fillerOnly) {
+        // Generic filler/ad-lib tokens never satisfy anchors; filler-only lines have
+        // no anchors and remain neutral instead of manufacturing a score target.
+        if (REPEATED_FILLER[token.word] || isAdlibWord(token.word)) {
             return { rejected: true, reason: 'generic_word' };
         }
         if (!isInsideReviewWindow(session, state.phrase, evidence, token)) {
@@ -535,7 +534,6 @@
         var accepted = [];
         var states = activePhraseStates(session, evidence);
         tokens.forEach(function(token, ti) {
-            if (session.consumedTokenIds[evidence.id + ':' + token.idx]) return; // merged into a prior compound
             var nextTok = (ti + 1 < tokens.length && !session.consumedTokenIds[evidence.id + ':' + tokens[ti + 1].idx]) ? tokens[ti + 1] : null;
             var candidates = [];
             states.forEach(function(state) {
@@ -676,7 +674,7 @@
                 for (var ai = 0; ai < anchors.length; ai++) {
                     var anchor = anchors[ai];
                     if (state.anchorHits[anchor.anchorIdx]) continue;
-                    if (isFiller && !anchor.fillerOnly) continue;
+                    if (isFiller) continue;
                     var m = anchorMatchResult(token, nextTok, anchor);
                     if (m.result && m.result.score >= 0.75) {
                         creditedAnchor = anchor;

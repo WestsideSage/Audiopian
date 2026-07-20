@@ -62,6 +62,8 @@ assert.strictEqual(plan.phrases[2].anchors.length, 0, 'filler-only lines get no 
 assert.strictEqual(plan.phrases[2].anchorsRequired, 0, 'filler-only lines require no anchors');
 assert.ok(plan.phrases[0].anchors.every(function(anchor) { return !anchor.fillerOnly; }), 'normal anchors are not marked fillerOnly');
 assert.ok(plan.difficulty.requiredAnchorRatio > 0.5, 'hard profile requires meaningful anchor coverage');
+assert.ok(!Object.prototype.hasOwnProperty.call(plan.difficulty, 'minFlowCoverage'),
+    'phrase plan no longer exports the unused minFlowCoverage field');
 
 // Insane difficulty: a 5th tier strictly harder than expert.
 (function () {
@@ -227,6 +229,28 @@ assert.ok(!negSession.states[compPhrase.phraseId].anchorHits[throwdownAnchor.anc
     });
     assert.ok(equivSession.states[equivPhrase.phraseId].anchorHits[alright.anchorIdx],
         'spoken "all right" credits the "alright" anchor through the canonical matcher');
+})();
+
+// Rejection diagnostics distinguish an evidence token already spent elsewhere
+// from a fresh token aimed at an anchor that is already satisfied.
+(function () {
+    var rejectPlan = phraseEngine.buildPhrasePlan([
+        { time: 0, text: 'mountain river stone' },
+        { time: 4, text: 'tail words here' }
+    ], { difficulty: 'easy', audioDuration: 8 });
+    var rejectSession = phraseEngine.createPhraseSession(rejectPlan);
+    var first = { id: 'reject-token', source: 'browser_final', text: 'mountain', words: [],
+        receivedAtSec: 1, audioTimeSec: 1 };
+    phraseEngine.addEvidence(rejectSession, first);
+    phraseEngine.addEvidence(rejectSession, first);
+    phraseEngine.addEvidence(rejectSession, {
+        id: 'reject-anchor', source: 'browser_final', text: 'mountain', words: [],
+        receivedAtSec: 1.2, audioTimeSec: 1.2
+    });
+    var reasons = phraseEngine.getPhraseTrace(rejectSession)[0].rejectedCandidates.map(function (r) { return r.reason; });
+    assert.ok(reasons.indexOf('token_consumed') >= 0, 'reused evidence reports token_consumed');
+    assert.ok(reasons.indexOf('anchor_already_hit') >= 0, 'fresh evidence for a hit anchor reports anchor_already_hit');
+    assert.strictEqual(reasons.indexOf('already_consumed'), -1, 'ambiguous legacy rejection label is gone');
 })();
 
 var longLyrics = [];

@@ -1457,17 +1457,6 @@ class GameMode {
         return parseFloat(total.toFixed(2));
     }
 
-    _computeLineWeightedMatched(lineIdx) {
-        var timings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
-            ? this.allWordTimings[lineIdx] : [];
-        var matched = 0;
-        for (var i = 0; i < timings.length; i++) {
-            var score = this.matchedSet.get ? this.matchedSet.get(i) : (this.matchedSet.has(i) ? 1.0 : 0);
-            if (score > 0) matched += (timings[i].weight || 1.0) * score;
-        }
-        return parseFloat(matched.toFixed(2));
-    }
-
     /**
      * Record a line advance event to the telemetry log.
      * @param {number} fromIdx
@@ -1513,7 +1502,6 @@ class GameMode {
                 trigger:      trigger,
                 matchedWords:    matchedWords,
                 totalWords:      totalWords,
-                weightedMatched: this._computeLineWeightedMatched(fromIdx),
                 weightedTotal:   this._computeLineWeightedTotal(fromIdx),
                 missedWords:  missedWords || [],
                 timeSpentMs:  timeSpentMs,
@@ -1521,7 +1509,6 @@ class GameMode {
                 expectedTimeMs: expectedMs,
                 earlyMs:      earlyMs,
                 lateMs:       lateMs,
-                totalComparisons: this._lineComparisonCount,
                 sourceCounts: sourceCounts || { vad: 0, browser_sr: 0, whisper: 0, unknown: 0 },
             });
         } catch (e) { /* telemetry must never crash the game */ }
