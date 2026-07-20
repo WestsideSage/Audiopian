@@ -14,6 +14,16 @@ function loadBrowserCommonJs(filePath, extraArgs) {
 
 var T = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'telemetry-helpers.js'));
 
+// --- benchmark run intent ---
+assert.strictEqual(T.normalizeBenchmarkIntent('ui_test'), 'ui_test', 'ui_test is a supported run label');
+assert.strictEqual(T.normalizeBenchmarkIntent('good_expert_run'), 'good_expert_run', 'expert benchmark label is supported');
+assert.strictEqual(T.normalizeBenchmarkIntent('not-a-real-intent'), '', 'unknown labels cannot leak into telemetry');
+assert.strictEqual(T.shouldAnalyzeRun({ summary: { honesty: { benchmarkIntent: 'ui_test' } } }), false,
+    'UI-only runs are excluded from corpus analysis');
+assert.strictEqual(T.shouldAnalyzeRun({ phraseEngine: { benchmark: { intent: 'good_expert_run' } } }), true,
+    'benchmark runs remain eligible for corpus analysis');
+assert.strictEqual(T.shouldAnalyzeRun({}), true, 'legacy untagged runs remain eligible');
+
 // --- median ---
 assert.strictEqual(T.median([]), null, 'empty median is null');
 assert.strictEqual(T.median([5]), 5, 'single');

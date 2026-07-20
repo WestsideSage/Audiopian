@@ -1576,9 +1576,16 @@ class GameMode {
         // so also honor the onEnded-set flag — a full playthrough is "completed" either way.
         meta.completed     = !!(this._reachedEnd || (_cDur && this._now() >= _cDur - 0.5));
 
-        // (Run-intent / fairness / notes feedback inputs were removed from the end screen;
-        // keep an empty benchmark so the telemetry shape is unchanged.)
-        var benchmark = { intent: '', fairness: '', notes: '' };
+        // D-HUD lets a tester label the next saved run without adding benchmark
+        // controls to the player-facing end screen. Unknown/stale values collapse
+        // to the backwards-compatible empty label.
+        var storedIntent = localStorage.getItem('karaokee_benchmark_intent') || '';
+        var benchmark = {
+            intent: window.KaraokeeTelemetry
+                ? KaraokeeTelemetry.normalizeBenchmarkIntent(storedIntent) : '',
+            fairness: '',
+            notes: ''
+        };
 
         var traces = [];
         if (this._phraseSession && window.KaraokeePhraseEngine) {
@@ -1750,6 +1757,16 @@ class GameMode {
         const wStart  = this.lineStartWordCount;
 
         let html = '<div class="dbg-header">GAME DEBUG &mdash; press D to hide</div>';
+        const intent = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.normalizeBenchmarkIntent(localStorage.getItem('karaokee_benchmark_intent')) : '';
+        const intentOptions = [
+            ['', 'untagged'],
+            ['good_expert_run', 'good expert run'],
+            ['humming_cheese', 'humming cheese'],
+            ['silent_section_test', 'silent section'],
+            ['ui_test', 'UI test (skip analysis)']
+        ].map(([value, label]) => `<option value="${value}"${intent === value ? ' selected' : ''}>${label}</option>`).join('');
+        html += `<div class="dbg-row"><label><span class="dbg-label">Intent</span> <select class="dbg-intent" onchange="localStorage.setItem('karaokee_benchmark_intent', this.value)">${intentOptions}</select></label></div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Line  </span>#${lineNum}: ${lineText}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Words </span>${wordSpans || '—'}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Final </span><span class="dbg-final">&hellip;${tail}</span></div>`;

@@ -8,6 +8,11 @@ After each playthrough, the browser saves a JSON file describing what happened â
 
 The browser builds the JSON (`player.js`, `_buildTelemetryPayload`) at song-end or stop and POSTs it to `/telemetry`, which writes it under `output_telemetry/<date>/`. (Those files are git-ignored.)
 
+Press **D** during local testing to label the next saved run. Supported intents are
+`good_expert_run`, `humming_cheese`, `silent_section_test`, and `ui_test`.
+Corpus analysis must exclude `ui_test`; `node scripts/summarize-telemetry.cjs`
+does this while retaining older untagged runs.
+
 ## What's in it (schema v2)
 
 `meta.schemaVersion` is `2`. The file is **lean by default**, with two always-on digests:

@@ -9,7 +9,30 @@
 
     // Benchmark intent labels that mean "this run was deliberate cheese" — used to
     // flag runs where the arcade nonetheless built credit (a validation failure).
+    var BENCHMARK_INTENTS = {
+        '': true,
+        good_expert_run: true,
+        humming_cheese: true,
+        silent_section_test: true,
+        ui_test: true
+    };
     var CHEESE_INTENTS = { humming_cheese: true, silent_section_test: true };
+
+    function normalizeBenchmarkIntent(value) {
+        var intent = value == null ? '' : String(value).trim();
+        return BENCHMARK_INTENTS[intent] ? intent : '';
+    }
+
+    // Corpus reports should ignore runs whose purpose was exercising UI controls,
+    // while retaining old untagged payloads for backwards compatibility.
+    function shouldAnalyzeRun(payload) {
+        payload = payload || {};
+        var summaryIntent = payload.summary && payload.summary.honesty
+            ? payload.summary.honesty.benchmarkIntent : null;
+        var benchmarkIntent = payload.phraseEngine && payload.phraseEngine.benchmark
+            ? payload.phraseEngine.benchmark.intent : null;
+        return normalizeBenchmarkIntent(summaryIntent != null ? summaryIntent : benchmarkIntent) !== 'ui_test';
+    }
 
     // Source preference for breaking clearsBySource ties.
     var SOURCE_RANK = { whisper: 3, browser_sr: 2, vad: 1 };
@@ -96,7 +119,7 @@
 
         var pointsBuilt = (arc.points || 0) > 0;
         var maxMult = arc.maxMultiplier || 1;
-        var intent = inputs.benchmarkIntent || '';
+        var intent = normalizeBenchmarkIntent(inputs.benchmarkIntent);
         var isCheeseIntent = !!CHEESE_INTENTS[intent];
 
         return {
@@ -133,8 +156,11 @@
     }
 
     return {
+        BENCHMARK_INTENTS: BENCHMARK_INTENTS,
         CHEESE_INTENTS: CHEESE_INTENTS,
         median: median,
+        normalizeBenchmarkIntent: normalizeBenchmarkIntent,
+        shouldAnalyzeRun: shouldAnalyzeRun,
         summarizeRun: summarizeRun
     };
 });
