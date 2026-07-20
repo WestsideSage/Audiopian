@@ -152,6 +152,26 @@ function matchHotWordForTest(s, text, now) {
     assert.ok(matched.length >= 3, 'emits a wordMatched for each present word');
 })();
 
+// Score anchors, lyric paint, and matches[] telemetry share the phrase-engine
+// matcher. The same phrase-equivalence decision must appear on both surfaces.
+(function () {
+    var L = [lyric(0, 'alright people listen'), lyric(4, 'tail words here')];
+    var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
+                phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'easy', audioDuration: 8 }),
+                difficulty: 'easy' };
+    var s = session.createSession(cfg);
+    session.setActiveLine(s, 0, 0);
+    session.ingestFinal(s, 'all right', 'browser_sr');
+    var out = session.tick(s, 2);
+    var ph = cfg.phrasePlan.phrases[0];
+    var anchor = ph.anchors.find(function (a) { return a.word === 'alright'; });
+    assert.ok(s.phraseSession.states[ph.phraseId].anchorHits[anchor.anchorIdx],
+        'canonical matcher credits the scoring anchor');
+    assert.ok(s.matchedSet.has(anchor.wordIdx), 'the paint read model credits the same displayed word');
+    assert.ok(out.some(function (e) { return e.type === 'wordMatched' && e.method === 'phrase'; }),
+        'matches telemetry reports the canonical phrase-equivalence method');
+})();
+
 // Whisper final path: accumulates into whisperBuffer and matches via collectMatchesWhisper.
 (function () {
     var s = session.createSession(twoLineCfg());

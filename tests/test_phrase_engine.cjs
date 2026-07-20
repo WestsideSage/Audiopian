@@ -209,6 +209,26 @@ phraseEngine.addEvidence(negSession, {
 assert.ok(!negSession.states[compPhrase.phraseId].anchorHits[throwdownAnchor.anchorIdx],
     'unrelated adjacent words do not merge into a false compound credit');
 
+// The phrase engine is the canonical matcher for both score anchors and lyric
+// paint. A spoken multi-word equivalent must therefore hit the anchor too, not
+// merely turn the old paint stack green (the historical "alright" divergence).
+(function () {
+    var equivPlan = phraseEngine.buildPhrasePlan([
+        { time: 0, text: 'alright people listen' },
+        { time: 4, text: 'tail words here' }
+    ], { difficulty: 'easy', audioDuration: 8 });
+    var equivPhrase = equivPlan.phrases[0];
+    var alright = equivPhrase.anchors.find(function (a) { return a.word === 'alright'; });
+    assert.ok(alright, 'precondition: alright is a scoring anchor');
+    var equivSession = phraseEngine.createPhraseSession(equivPlan);
+    phraseEngine.addEvidence(equivSession, {
+        id: 'phrase-equiv', source: 'browser_final', text: 'all right', words: [],
+        receivedAtSec: 2, audioTimeSec: 2
+    });
+    assert.ok(equivSession.states[equivPhrase.phraseId].anchorHits[alright.anchorIdx],
+        'spoken "all right" credits the "alright" anchor through the canonical matcher');
+})();
+
 var longLyrics = [];
 for (var i = 0; i < 180; i++) {
     longLyrics.push({ time: i * 2, text: 'alpha bravo charlie delta echo foxtrot' });

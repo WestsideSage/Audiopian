@@ -10,6 +10,8 @@
     var classifyWord = matchHelpers.classifyWord || root.classifyWord;
     var WORD_WEIGHTS = matchHelpers.WORD_WEIGHTS || root.WORD_WEIGHTS || { core: 1.0, function: 0.5, adlib: 0.25 };
     var ADLIB_WORDS = matchHelpers.ADLIB_WORDS || root.ADLIB_WORDS;
+    var multiWordContractionMatch = matchHelpers.multiWordContractionMatch || root.multiWordContractionMatch;
+    var phraseMatch = matchHelpers.phraseMatch || root.phraseMatch;
     var alignPhonemeLattice = lattice && lattice.alignPhonemeLattice;
 
     // Lazy profanity resolver (load-order robust): require() in Node, window global in browser.
@@ -430,24 +432,55 @@
         });
     }
 
+    // Canonical token matcher used by both phrase scoring and the lenient word-paint
+    // pass. Keeping phrase equivalence, contractions, compounds and ordinary word
+    // similarity here prevents display/telemetry from disagreeing with score anchors.
+    var COMPOUND_MERGE_MIN = 0.9;
+    function matchWordSequence(spokenWords, spokenIdx, targetWords, targetIdx, targetPhonetic) {
+        spokenWords = spokenWords || [];
+        targetWords = targetWords || [];
+        var target = targetWords[targetIdx];
+        if (!target || spokenIdx >= spokenWords.length) return null;
+
+        var contractionSpan = multiWordContractionMatch
+            ? multiWordContractionMatch(spokenWords, spokenIdx, target) : 0;
+        if (contractionSpan > 0) {
+            return { score: 1, method: 'contraction', spokenConsumed: contractionSpan, targetConsumed: 1 };
+        }
+        var equivalent = phraseMatch
+            ? phraseMatch(spokenWords, spokenIdx, targetWords, targetIdx) : null;
+        if (equivalent) {
+            return { score: 1, method: 'phrase', spokenConsumed: equivalent.spokenConsumed,
+                targetConsumed: equivalent.targetConsumed };
+        }
+
+        var single = scoring.wordsMatchScore(spokenWords[spokenIdx], target, targetPhonetic);
+        if (single && single.score > 0) {
+            return { score: single.score, method: single.method, spokenConsumed: 1, targetConsumed: 1 };
+        }
+        if (spokenIdx + 1 < spokenWords.length && target.length > spokenWords[spokenIdx].length) {
+            var merged = scoring.wordsMatchScore(
+                spokenWords[spokenIdx] + spokenWords[spokenIdx + 1], target, targetPhonetic);
+            if (merged && merged.score >= COMPOUND_MERGE_MIN) {
+                return { score: merged.score, method: 'compound', spokenConsumed: 2, targetConsumed: 1 };
+            }
+        }
+        return single ? { score: single.score, method: single.method, spokenConsumed: 1, targetConsumed: 1 } : null;
+    }
+
     // Compound-word bridge: a single lyric token (e.g. "throwdown") that the
     // recognizer splits into two ("throw down") would never match its anchor. When
     // the single token doesn't match, try it merged with the NEXT token and accept
     // ONLY a near-exact hit (>= COMPOUND_MERGE_MIN) on a LONGER (compound) anchor --
     // so unrelated adjacent words can't manufacture a credit. Returns the match
     // result plus how many tokens it consumed (1 normally, 2 on a compound merge).
-    var COMPOUND_MERGE_MIN = 0.9;
     function anchorMatchResult(token, nextToken, anchor) {
-        var single = scoring.wordsMatchScore(token.word, anchor.word, anchor.phonetic);
-        if (single && single.score >= 0.75) return { result: single, span: 1 };
-        if (nextToken && token.word && nextToken.word && anchor.word &&
-            anchor.word.length > token.word.length) {
-            var merged = scoring.wordsMatchScore(token.word + nextToken.word, anchor.word, anchor.phonetic);
-            if (merged && merged.score >= COMPOUND_MERGE_MIN) {
-                return { result: { score: merged.score, method: 'compound' }, span: 2 };
-            }
-        }
-        return { result: single || { score: 0, method: null }, span: 1 };
+        var spoken = nextToken ? [token.word, nextToken.word] : [token.word];
+        var match = matchWordSequence(spoken, 0, [anchor.word], 0, anchor.phonetic);
+        return {
+            result: match ? { score: match.score, method: match.method } : { score: 0, method: null },
+            span: match ? match.spokenConsumed : 1
+        };
     }
 
     function candidateFor(session, evidence, token, nextToken, state, anchor) {
@@ -971,6 +1004,7 @@
 
     return {
         buildPhrasePlan: buildPhrasePlan,
+        matchWordSequence: matchWordSequence,
         splitLyricWordsWithParens: splitLyricWordsWithParens,
         getDifficultyProfile: getDifficultyProfile,
         selectAnchors: selectAnchors,

@@ -26,13 +26,12 @@
     var normalizeWords = pick(scoring, 'normalizeWords');
     var wordsMatch = pick(scoring, 'wordsMatch');
     var doubleMetaphone = pick(scoring, 'doubleMetaphone');
-    var wordsMatchScore = pick(scoring, 'wordsMatchScore');
     var mergeConfirmedMatches = pick(scoring, 'mergeConfirmedMatches');
     var findMatchInWindow = pick(scoring, 'findMatchInWindow');
     var computeLineScore = pick(scoring, 'computeLineScore');
+    // Phrase-engine canonical matcher; paint and telemetry consume its decisions.
+    var matchWordSequence = pick(phraseEngine, 'matchWordSequence');
     // match-helpers exports (browser bare globals).
-    var multiWordContractionMatch = pick(match, 'multiWordContractionMatch');
-    var phraseMatch = pick(match, 'phraseMatch');
     var FILLER_WORDS = (match && match.FILLER_WORDS) || (root && root.FILLER_WORDS) || new Set();
     // sync-helpers exports (browser bare globals).
     var getSpokenWindowSize = pick(sync, 'getSpokenWindowSize');
@@ -425,41 +424,19 @@
                 }
                 s._lineComparisonCount++;
 
-                var consumed = multiWordContractionMatch(spoken, si, target);
-                if (consumed > 0) {
-                    resultMap.set(li, 1.0);
-                    ev(events, 'wordMatched', { lineIdx: s.activeLineIdx, wordIndex: li,
-                        spokenWord: spoken[si], targetWord: target, method: 'contraction',
-                        editDistance: 0, phoneticMatch: false, score: 1.0, matched: true,
-                        windowPosition: si, source: 'browser_sr' });
-                    spokenIdx = si + consumed;
-                    break;
-                }
-
-                var pm = phraseMatch(spoken, si, s.lineWords, li);
-                if (pm) {
-                    for (var pt = 0; pt < pm.targetConsumed; pt++) { resultMap.set(li + pt, 1.0); }
-                    ev(events, 'wordMatched', { lineIdx: s.activeLineIdx, wordIndex: li,
-                        spokenWord: spoken[si], targetWord: s.lineWords[li], method: 'phrase',
-                        editDistance: 0, phoneticMatch: false, score: 1.0, matched: true,
-                        windowPosition: si, source: 'browser_sr' });
-                    spokenIdx = si + pm.spokenConsumed;
-                    li += pm.targetConsumed - 1;
-                    break;
-                }
-
-                var result = wordsMatchScore(spoken[si], target, targetPhonetic);
-                if (result.score > 0) {
-                    var prev = resultMap.get(li);
-                    if (prev === undefined || result.score > prev) {
-                        resultMap.set(li, result.score);
+                var result = matchWordSequence(spoken, si, s.lineWords, li, targetPhonetic);
+                if (result && result.score > 0) {
+                    for (var mt = 0; mt < result.targetConsumed; mt++) {
+                        var prev = resultMap.get(li + mt);
+                        if (prev === undefined || result.score > prev) resultMap.set(li + mt, result.score);
                     }
                     ev(events, 'wordMatched', { lineIdx: s.activeLineIdx, wordIndex: li,
                         spokenWord: spoken[si], targetWord: target, method: result.method,
                         editDistance: result.method === 'edit1' ? 1 : result.method === 'edit2' ? 2 : 0,
                         phoneticMatch: result.method === 'phonetic', score: result.score, matched: true,
                         windowPosition: si, source: 'browser_sr' });
-                    spokenIdx = si + 1;
+                    spokenIdx = si + result.spokenConsumed;
+                    li += result.targetConsumed - 1;
                     break;
                 }
 
@@ -494,23 +471,11 @@
                 if (FILLER_WORDS.has(spoken[si]) && !FILLER_WORDS.has(target)) {
                     spokenIdx = si + 1; si = spokenIdx - 1; continue;
                 }
-                var consumed = multiWordContractionMatch(spoken, si, target);
-                if (consumed > 0) {
-                    whisperMap.set(li, 1.0);
-                    spokenIdx = si + consumed;
-                    break;
-                }
-                var pm = phraseMatch(spoken, si, s.lineWords, li);
-                if (pm) {
-                    for (var pt = 0; pt < pm.targetConsumed; pt++) { whisperMap.set(li + pt, 1.0); }
-                    spokenIdx = si + pm.spokenConsumed;
-                    li += pm.targetConsumed - 1;
-                    break;
-                }
-                var result = wordsMatchScore(spoken[si], target, targetPhonetic);
-                if (result.score > 0) {
-                    whisperMap.set(li, result.score);
-                    spokenIdx = si + 1;
+                var result = matchWordSequence(spoken, si, s.lineWords, li, targetPhonetic);
+                if (result && result.score > 0) {
+                    for (var mt = 0; mt < result.targetConsumed; mt++) whisperMap.set(li + mt, result.score);
+                    spokenIdx = si + result.spokenConsumed;
+                    li += result.targetConsumed - 1;
                     break;
                 }
             }
@@ -898,21 +863,22 @@
             var target = lineWords[li];
             var targetPhonetic = lateWordTimings && lateWordTimings[li] ? lateWordTimings[li].phonetic : undefined;
             for (var si = spokenIdx; si < Math.min(spokenIdx + 20, spokenNow.length); si++) {
-                var result = wordsMatchScore(spokenNow[si], target, targetPhonetic);
-                if (result.score > 0) {
-                    var existing = matchedSet.get ? matchedSet.get(li) : undefined;
-                    if (existing === undefined || result.score > existing) {
-                        if (matchedSet.set) {
-                            matchedSet.set(li, result.score);
-                        } else {
-                            matchedSet.add(li); // fallback for Set
+                var result = matchWordSequence(spokenNow, si, lineWords, li, targetPhonetic);
+                if (result && result.score > 0) {
+                    for (var mt = 0; mt < result.targetConsumed; mt++) {
+                        var matchIdx = li + mt;
+                        var existing = matchedSet.get ? matchedSet.get(matchIdx) : undefined;
+                        if (existing === undefined || result.score > existing) {
+                            if (matchedSet.set) matchedSet.set(matchIdx, result.score);
+                            else matchedSet.add(matchIdx); // fallback for Set
                         }
                     }
                     // Promote VAD word to ASR-confirmed if late ASR just matched it
                     if (vadMatchedSet && vadMatchedSet.has(li) && asrConfirmedSet && !asrConfirmedSet.has(li)) {
                         asrConfirmedSet.add(li);
                     }
-                    spokenIdx = si + 1;
+                    spokenIdx = si + result.spokenConsumed;
+                    li += result.targetConsumed - 1;
                     // Light the span — this word just arrived late (DOM -> render hint).
                     lit = true;
                     break;
