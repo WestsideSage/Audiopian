@@ -24,10 +24,17 @@ var scoring = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'scoring.
     },
     globalThis: globalThis
 });
+var lattice = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'lattice-align.js'), {
+    require: function(specifier) {
+        if (specifier === './scoring.js') return scoring;
+        throw new Error('Unexpected require: ' + specifier);
+    }
+});
 var phraseEngine = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'phrase-engine.js'), {
     require: function(specifier) {
         if (specifier === './scoring.js') return scoring;
         if (specifier === './match-helpers.js') return matchHelpers;
+        if (specifier === './lattice-align.js') return lattice;
         if (specifier === './profanity.js') return profanity;
         throw new Error('Unexpected require: ' + specifier);
     },
@@ -693,6 +700,95 @@ console.log('Fast-tempo cheese-floored bar: passed.');
         'alive sensor + silent line 0 -> per-line flow gate still blocks');
     assert.ok(aliveTr[1].anchorsHit > 0, 'the vocalized line 1 still credits');
     console.log('Sensor-health fail-open: passed.');
+})();
+
+// Phoneme-lattice fallback runs only after the word matcher, recovering an unhit
+// anchor from a whole-line-supported ASR substitution and recording its evidence.
+(function () {
+    var L = [
+        { time: 0, text: 'shiny gold' },
+        { time: 3, text: 'tail words here' }
+    ];
+    var p = phraseEngine.buildPhrasePlan(L, { difficulty: 'expert', audioDuration: 6 });
+    var s = phraseEngine.createPhraseSession(p);
+    phraseEngine.addEvidence(s, {
+        id: 'lat-vad', source: 'vad', text: '', words: [], receivedAtSec: 1, audioTimeSec: 1
+    });
+    phraseEngine.reconcileLateEvidence(s, {
+        id: 'lat-final', source: 'browser_final', text: 'shiny goat', words: [],
+        receivedAtSec: 3.4, audioTimeSec: 3.4
+    }, 3.4, { requireInWindowFlow: true });
+    var state = s.states.p0;
+    assert.ok(state.anchorHits[1], 'gold anchor is recovered from shiny goat');
+    assert.strictEqual(state.anchorHits[1].method, 'lattice');
+    assert.strictEqual(state.anchorHits[1].score, 0.85);
+    assert.ok(state.consumedTokens.some(function (token) {
+        return token.source === 'browser_final_lattice' && token.word === 'goat';
+    }), 'lattice records and consumes the supporting ASR token');
+})();
+
+// Cheese gates: a later burst cannot lattice-credit a line that had no in-window
+// flow, and humming during a line cannot bank eligibility for a much later phrase.
+(function () {
+    var L = [
+        { time: 0, text: 'shiny gold' },
+        { time: 3, text: 'velvet morning' },
+        { time: 6, text: 'quiet tail words' }
+    ];
+    function make() {
+        return phraseEngine.createPhraseSession(
+            phraseEngine.buildPhrasePlan(L, { difficulty: 'expert', audioDuration: 10 }));
+    }
+
+    var silent = make();
+    phraseEngine.addEvidence(silent, {
+        id: 'silent-vad-later', source: 'vad', text: '', words: [], receivedAtSec: 4, audioTimeSec: 4
+    });
+    phraseEngine.reconcileLateEvidence(silent, {
+        id: 'silent-burst', source: 'browser_final', text: 'shiny goat', words: [],
+        receivedAtSec: 6.5, audioTimeSec: 6.5
+    }, 6.5, { requireInWindowFlow: true });
+    assert.strictEqual(Object.keys(silent.states.p0.anchorHits).length, 0,
+        'silent line gains zero lattice anchors from a later burst');
+
+    var hum = make();
+    phraseEngine.addEvidence(hum, {
+        id: 'hum-flow', source: 'vad', text: '', words: [], receivedAtSec: 1, audioTimeSec: 1
+    });
+    phraseEngine.reconcileLateEvidence(hum, {
+        id: 'hum-burst', source: 'browser_final', text: 'shiny goat', words: [],
+        receivedAtSec: 9, audioTimeSec: 9
+    }, 9, { requireInWindowFlow: true });
+    assert.strictEqual(hum.states.p0.cleared, false,
+        'hum plus a much later matching burst does not gain a lattice clear');
+})();
+
+(function () {
+    var L = [
+        { time: 0, text: 'shiny gold' },
+        { time: 3, text: 'shiny gold' },
+        { time: 6, text: 'tail words here' }
+    ];
+    var s = phraseEngine.createPhraseSession(
+        phraseEngine.buildPhrasePlan(L, { difficulty: 'expert', audioDuration: 9 }));
+    [1, 4].forEach(function (time) {
+        phraseEngine.addEvidence(s, {
+            id: 'reuse-vad-' + time, source: 'vad', text: '', words: [],
+            receivedAtSec: time, audioTimeSec: time
+        });
+    });
+    phraseEngine.reconcileLateEvidence(s, {
+        id: 'reuse-final', source: 'browser_final', text: 'shiny goat', words: [],
+        receivedAtSec: 6.5, audioTimeSec: 6.5
+    }, 6.5, { requireInWindowFlow: true });
+    var latticeHits = Object.keys(s.states).reduce(function (count, phraseId) {
+        var hits = s.states[phraseId].anchorHits || {};
+        return count + Object.keys(hits).filter(function (idx) {
+            return hits[idx].method === 'lattice';
+        }).length;
+    }, 0);
+    assert.strictEqual(latticeHits, 1,
+        'one aligned ASR token span cannot lattice-credit two phrases');
 })();
 
 console.log('Phrase engine tests passed.');

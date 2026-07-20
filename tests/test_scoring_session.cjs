@@ -22,7 +22,7 @@ function load(name, deps) {
         require: function (spec) {
             var m = { './match-helpers.js': mh, './sync-helpers.js': sh,
                       './scoring.js': scoring, './phrase-engine.js': phrase,
-                      './scoring-arcade.js': arcade }[spec];
+                      './scoring-arcade.js': arcade, './lattice-align.js': lattice }[spec];
             if (!m) throw new Error('Unexpected require: ' + spec);
             return m;
         }, globalThis: globalThis
@@ -31,6 +31,7 @@ function load(name, deps) {
 var mh = loadBrowserCommonJs(path.join(S, 'match-helpers.js'));
 var sh = loadBrowserCommonJs(path.join(S, 'sync-helpers.js'));
 var scoring = load('scoring.js');
+var lattice = load('lattice-align.js');
 var phrase = load('phrase-engine.js');
 var arcade = loadBrowserCommonJs(path.join(S, 'scoring-arcade.js'));
 var session = load('scoring-session.js');

@@ -1,13 +1,16 @@
 (function(root, factory) {
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = factory(require('./scoring.js'), require('./match-helpers.js'), root || globalThis);
+        module.exports = factory(require('./scoring.js'), require('./match-helpers.js'),
+                                 require('./lattice-align.js'), root || globalThis);
     } else {
-        root.KaraokeePhraseEngine = factory(root.KaraokeeScoring, root, root);
+        root.KaraokeePhraseEngine = factory(root.KaraokeeScoring, root,
+                                            root.KaraokeeLatticeAlign, root);
     }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(scoring, matchHelpers, root) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(scoring, matchHelpers, lattice, root) {
     var classifyWord = matchHelpers.classifyWord || root.classifyWord;
     var WORD_WEIGHTS = matchHelpers.WORD_WEIGHTS || root.WORD_WEIGHTS || { core: 1.0, function: 0.5, adlib: 0.25 };
     var ADLIB_WORDS = matchHelpers.ADLIB_WORDS || root.ADLIB_WORDS;
+    var alignPhonemeLattice = lattice && lattice.alignPhonemeLattice;
 
     // Lazy profanity resolver (load-order robust): require() in Node, window global in browser.
     function _profanity() {
@@ -56,6 +59,10 @@
     // finals legitimately batch 13-17s of lines. The unique-anchor catch-up pass
     // also keeps the full look-back — uniqueness already removes the ambiguity.
     var RECONCILE_INTERIM_LOOKBACK_SEC = 8;
+    // The general lattice is more permissive than token matching, so it gets a
+    // tighter rescue horizon. This blocks "hum now, speak the answer much later"
+    // while still covering ordinary settle/final batching around a line boundary.
+    var LATTICE_LOOKBACK_SEC = 4;
     // Fast-tempo recognition allowance: on high-WPS (>= FAST_WPS_THRESHOLD) lines the
     // browser recognizer demonstrably drops words -- real telemetry (a dense Roots rap)
     // showed ~3 of every 4 words dropped on back-to-back bars while VAD confirmed the
@@ -726,6 +733,74 @@
                         updatePhraseResult(session, ustate);
                         break;
                     }
+                }
+            }
+        }
+
+        // General fallback for ASR word-segmentation drift. The fast token matcher
+        // above stays first; the lattice only sees still-unhit anchors and must pass
+        // both its whole-line and per-anchor phoneme guards. Flow eligibility is
+        // inherited from flowCandidates, so this never bypasses the cheese gate.
+        if (alignPhonemeLattice && flowCandidates.length > 0) {
+            for (var lci = 0; lci < flowCandidates.length; lci++) {
+                var lphrase = flowCandidates[lci];
+                var lstate = session.states[lphrase.phraseId];
+                if (nowSec - lphrase.endSec > LATTICE_LOOKBACK_SEC) continue;
+                var unhit = (lphrase.anchors || []).filter(function(anchor) {
+                    return !lstate.anchorHits[anchor.anchorIdx];
+                });
+                if (unhit.length === 0) continue;
+                var lresult = alignPhonemeLattice({
+                    lyricWords: lphrase.words || [],
+                    spokenWords: tokens.map(function(token) { return token.word; }),
+                    anchors: unhit
+                });
+                if (!lresult.accepted || !lresult.credits.length) continue;
+
+                for (var lri = 0; lri < lresult.credits.length; lri++) {
+                    var credit = lresult.credits[lri];
+                    var lanchor = null;
+                    for (var lai = 0; lai < unhit.length; lai++) {
+                        if (unhit[lai].anchorIdx === credit.anchorIdx) { lanchor = unhit[lai]; break; }
+                    }
+                    if (!lanchor || lstate.anchorHits[lanchor.anchorIdx]) continue;
+                    var supporting = (credit.tokenIndices || []).map(function(tokenPos) {
+                        return tokens[tokenPos];
+                    }).filter(function(token) {
+                        return token && !session.consumedTokenIds[evidence.id + ':' + token.idx];
+                    });
+                    if (supporting.length === 0) continue;
+
+                    supporting.forEach(function(token) {
+                        session.consumedTokenIds[evidence.id + ':' + token.idx] = true;
+                    });
+                    lstate.anchorHits[lanchor.anchorIdx] = {
+                        word: lanchor.word,
+                        source: source + '_lattice',
+                        evidenceId: evidence.id,
+                        score: 0.85,
+                        method: 'lattice'
+                    };
+                    pushBounded(lstate, 'evidence', {
+                        evidenceId: evidence.id,
+                        source: source + '_lattice',
+                        text: evidence.text || '',
+                        score: 0.85,
+                        method: 'lattice',
+                        lineScore: lresult.lineScore
+                    }, MAX_EVIDENCE_PER_PHRASE);
+                    supporting.forEach(function(token) {
+                        pushBounded(lstate, 'consumedTokens', {
+                            evidenceId: evidence.id,
+                            tokenIdx: token.idx,
+                            word: token.word,
+                            anchor: lanchor.word,
+                            source: source + '_lattice',
+                            timeSec: tokenTime(evidence, token),
+                            score: 0.85
+                        }, MAX_TOKENS_PER_PHRASE);
+                    });
+                    updatePhraseResult(session, lstate);
                 }
             }
         }
