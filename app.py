@@ -414,7 +414,10 @@ def save_telemetry():
     fname = "karaokee-telemetry-" + ts + ".json"
     path = os.path.join(out_dir, fname)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2)
+        if meta.get("schemaVersion") == 3:
+            json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+        else:
+            json.dump(payload, f, indent=2)
     return jsonify({"ok": True, "path": os.path.relpath(path, _HERE)})
 
 

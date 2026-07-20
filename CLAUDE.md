@@ -126,7 +126,7 @@ The helper modules above (`scoring.js`, `lattice-align.js`, `phrase-engine.js`, 
 
 ### Telemetry
 
-Each completed run auto-saves a JSON to `output_telemetry/<date>/` via `POST /telemetry` (Flask writes it; the client builds it in `player.js` `_buildTelemetryPayload`, called on song-end and on stop). Schema v2 (`meta.schemaVersion: 2`) adds a `summary` block (final scores, arcade outcome, recognizer attribution, sync drift, and a cheese/honesty correlation) and an `arcade` block (per-phrase commit events + high score). Lean by default; the heavy raw arrays (`asr`/`matches`/`promotions`/`phraseEngine.traces`) are included only when debug is on (press `D`). The `summary` digest is derived by the pure `static/telemetry-helpers.js` (`summarizeRun`, golden-tested in `tests/test_telemetry_helpers.cjs`). For offline analysis of scoring honesty/economy and timing drift — not part of the production serving path.
+Each completed run auto-saves a JSON to `output_telemetry/<date>/` via `POST /telemetry` (Flask writes it; the client builds it in `player.js` `_buildTelemetryPayload`, called on song-end and on stop). Schema v3 (`meta.schemaVersion: 3`) keeps `summary` + `arcade` and adds an analysis-first phrase digest. Press `D` before a run to select `compact` (default), `recognition`, or `full`; raw arrays live under `diagnostics` only in the two diagnostic profiles. The pure `static/telemetry-helpers.js` derives both the summary and compact analysis block, and `scripts/summarize-telemetry.cjs` normalizes v2/v3 corpora to JSON or CSV. For offline analysis of scoring honesty/economy and timing drift — not part of the production serving path.
 
 ## Key constraints
 

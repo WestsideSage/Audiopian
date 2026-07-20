@@ -384,8 +384,8 @@ class GameMode {
                     finalText: finalText || null,
                     interim:   interim   || null,
                 });
-                self._logAsr(finalText ? 'final' : 'interim', finalText || interim, [], 'browser_sr');
             }
+            self._logAsr(finalText ? 'final' : 'interim', finalText || interim, [], 'browser_sr');
         };
 
         // Auto-restart so recognition doesn't stop on silence
@@ -1327,13 +1327,18 @@ class GameMode {
 
     /**
      * Initialise the telemetry log for this session.
-     * Called from startGame() when debug mode is active.
+     * Called from startGame() for every run; the selected capture profile
+     * decides which optional diagnostics are retained.
      */
     _initTelemetry() {
         var sd = {};
         try { sd = JSON.parse(sessionStorage.getItem('songData') || '{}'); } catch (e) {}
         var title = (sd.artist && sd.title) ? sd.artist + ' — ' + sd.title : (document.title || 'unknown');
+        var captureProfile = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.normalizeTelemetryProfile(localStorage.getItem('karaokee_telemetry_profile'))
+            : 'compact';
         this._telemetry = {
+            captureProfile: captureProfile,
             meta: {
                 songTitle:        title,
                 songDurationMs:   playback && playback.duration() ? Math.round(playback.duration() * 1000) : null,
@@ -1366,6 +1371,7 @@ class GameMode {
      */
     _logAsr(type, text, wordTimestamps, source) {
         if (!this._telemetry) return;
+        if (this._telemetry.captureProfile === 'compact') return;
         try {
             var tempoClass = 'medium';
             if (this.activeLineIdx >= 0 && this.allWordTimings[this.activeLineIdx]) {
@@ -1394,6 +1400,7 @@ class GameMode {
      */
     _logPromotion(source, wordIndex, score) {
         if (!this._telemetry) return;
+        if (this._telemetry.captureProfile === 'compact') return;
         try {
             this._telemetry.promotions.push({
                 ts:        parseFloat((performance.now() / 1000).toFixed(3)),
@@ -1410,7 +1417,7 @@ class GameMode {
      */
     _logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
         if (!this._telemetry) return;
-        if (!window._kDebug) return;
+        if (this._telemetry.captureProfile === 'compact') return;
         if (score <= 0) return;   // suppress noise — log only successful matches
 
         // Smart filtering: only log first-time matches for words already confirmed matched.
@@ -1521,6 +1528,8 @@ class GameMode {
     _buildTelemetryPayload(endReason) {
         if (!this._telemetry) return null;
         var meta = this._telemetry.meta;
+        var captureProfile = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.normalizeTelemetryProfile(this._telemetry.captureProfile) : 'compact';
         if (!meta.songDurationMs && playback && playback.duration()) {
             meta.songDurationMs = Math.round(playback.duration() * 1000);
         }
@@ -1552,9 +1561,10 @@ class GameMode {
         meta.whisperRealtimeLastError  = this._whisperRealtimeLastError   || '';
         meta.finalWordSourceCounts     = this._countWordSources(this.wordSourceMap);
 
-        // v2 meta additions
-        meta.schemaVersion = 2;
+        // v3: analysis-first by default; raw diagnostics are capture-profile gated.
+        meta.schemaVersion = 3;
         meta.gameVersion   = '2.0';
+        meta.telemetryProfile = captureProfile;
         meta.neuralVadActive = !!this._neuralVadActive;       // did Silero VAD init this run?
         meta.vadInitError    = this._vadInitError || null;    // why not, if it didn't
         meta.endedAt       = new Date().toISOString();
@@ -1620,6 +1630,9 @@ class GameMode {
             counts: counts
         }) : null;
 
+        var phrasePlan = this._telemetry.phraseEngine ? this._telemetry.phraseEngine.plan : null;
+        var analysis = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.buildAnalysisDigest(traces) : null;
         var payload = {
             meta: meta,
             summary: summary,
@@ -1635,17 +1648,24 @@ class GameMode {
                 mode: 'headline',
                 difficulty: difficulty,
                 benchmark: benchmark,
-                plan: this._telemetry.phraseEngine ? this._telemetry.phraseEngine.plan : null
+                planSummary: {
+                    version: phrasePlan ? phrasePlan.version : null,
+                    phraseCount: phrasePlan && phrasePlan.phrases ? phrasePlan.phrases.length : 0
+                }
             },
+            analysis: analysis,
             transitions: this._telemetry.transitions
         };
 
-        // Heavy data only under debug (press D).
-        if (window._kDebug) {
-            payload.phraseEngine.traces = traces;
-            payload.asr = this._telemetry.asr;
-            payload.matches = this._telemetry.matches;
-            payload.promotions = this._telemetry.promotions;
+        var diagnostics = window.KaraokeeTelemetry ? KaraokeeTelemetry.selectDiagnostics(captureProfile, {
+            asr: this._telemetry.asr,
+            matches: this._telemetry.matches,
+            promotions: this._telemetry.promotions,
+            phrasePlan: phrasePlan,
+            phraseTraces: traces
+        }) : null;
+        if (diagnostics) {
+            payload.diagnostics = diagnostics;
         }
         return payload;
     }
@@ -1755,6 +1775,15 @@ class GameMode {
             ['ui_test', 'UI test (skip analysis)']
         ].map(([value, label]) => `<option value="${value}"${intent === value ? ' selected' : ''}>${label}</option>`).join('');
         html += `<div class="dbg-row"><label><span class="dbg-label">Intent</span> <select class="dbg-intent" onchange="localStorage.setItem('karaokee_benchmark_intent', this.value)">${intentOptions}</select></label></div>`;
+        const telemetryProfile = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.normalizeTelemetryProfile(localStorage.getItem('karaokee_telemetry_profile')) : 'compact';
+        const profileOptions = [
+            ['compact', 'compact analysis (recommended)'],
+            ['recognition', 'recognition diagnostics'],
+            ['full', 'full engine diagnostics']
+        ].map(([value, label]) => `<option value="${value}"${telemetryProfile === value ? ' selected' : ''}>${label}</option>`).join('');
+        const activeProfile = this._telemetry ? this._telemetry.captureProfile : 'not started';
+        html += `<div class="dbg-row"><label><span class="dbg-label">Capture</span> <select class="dbg-profile" onchange="localStorage.setItem('karaokee_telemetry_profile', this.value)">${profileOptions}</select></label> <span class="dbg-label">next run · active:${activeProfile}</span></div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Line  </span>#${lineNum}: ${lineText}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Words </span>${wordSpans || '—'}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Final </span><span class="dbg-final">&hellip;${tail}</span></div>`;

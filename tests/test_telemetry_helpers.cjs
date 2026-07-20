@@ -24,6 +24,71 @@ assert.strictEqual(T.shouldAnalyzeRun({ phraseEngine: { benchmark: { intent: 'go
     'benchmark runs remain eligible for corpus analysis');
 assert.strictEqual(T.shouldAnalyzeRun({}), true, 'legacy untagged runs remain eligible');
 
+// --- telemetry v3 capture profiles ---
+assert.strictEqual(T.normalizeTelemetryProfile(), 'compact', 'compact analysis is the default');
+assert.strictEqual(T.normalizeTelemetryProfile('recognition'), 'recognition', 'recognition diagnostics are supported');
+assert.strictEqual(T.normalizeTelemetryProfile('full'), 'full', 'full engine diagnostics are supported');
+assert.strictEqual(T.normalizeTelemetryProfile('unknown'), 'compact', 'unknown profiles fail closed to compact');
+var diagnosticFixture = { asr: [{ text: 'hello' }], matches: [{ method: 'exact' }], promotions: [{ source: 'browser_sr' }],
+    phrasePlan: { phrases: [{ phraseId: 'p0' }] }, phraseTraces: [{ phraseId: 'p0' }] };
+assert.strictEqual(T.selectDiagnostics('compact', diagnosticFixture), null,
+    'compact runs contain no forensic diagnostic arrays');
+assert.deepStrictEqual(T.selectDiagnostics('recognition', diagnosticFixture), {
+    asr: diagnosticFixture.asr, matches: diagnosticFixture.matches, promotions: diagnosticFixture.promotions
+}, 'recognition profile keeps recognizer evidence without raw engine state');
+assert.deepStrictEqual(T.selectDiagnostics('full', diagnosticFixture), diagnosticFixture,
+    'full profile retains all forensic inputs');
+
+// --- telemetry v3 analysis-first phrase digest ---
+(function () {
+    var digest = T.buildAnalysisDigest([
+        {
+            phraseId: 'p0', lineIdx: 4, text: 'shiny gold', startSec: 10, endSec: 12,
+            lyricStatus: 'partial', flowStatus: 'clean', anchorsHit: 1, anchorsRequired: 2,
+            anchors: [{ word: 'shiny', hit: true }, { word: 'gold', hit: false }],
+            evidence: [
+                { evidenceId: 'e1', method: 'exact', source: 'browser_final' },
+                { evidenceId: 'e2', method: 'lattice', source: 'browser_final_lattice' }
+            ],
+            consumedTokens: [
+                { word: 'shiny', anchor: 'shiny', source: 'browser_final', timeSec: 11, score: 1 },
+                { word: 'goat', anchor: 'gold', source: 'browser_final_lattice', timeSec: 12.75, score: 0.85 }
+            ],
+            rejectedCandidates: [
+                { reason: 'low_score', source: 'browser_final' },
+                { reason: 'low_score', source: 'browser_final' },
+                { reason: 'token_consumed', source: 'browser_final' }
+            ],
+            flowEvents: [{ timeSec: 10.2 }, { timeSec: 11.8 }],
+            overflow: { evidence: 0, consumedTokens: 0, rejectedCandidates: 1, flowEvents: 0 }
+        },
+        {
+            phraseId: 'p1', lineIdx: 5, text: 'uh uh', startSec: 12, endSec: 13,
+            lyricStatus: 'missing', flowStatus: 'silent', anchorsHit: 0, anchorsRequired: 0,
+            anchors: [], evidence: [], consumedTokens: [], rejectedCandidates: [], flowEvents: [],
+            overflow: { evidence: 0, consumedTokens: 0, rejectedCandidates: 0, flowEvents: 0 }
+        }
+    ]);
+    assert.deepStrictEqual(digest.phraseOutcomes, { clear: 0, partial: 1, miss: 0, neutral: 1 },
+        'neutral phrases are not mislabeled as misses');
+    assert.deepStrictEqual(digest.methodCounts, { exact: 1, lattice: 1 }, 'methods aggregate across compact rows');
+    assert.deepStrictEqual(digest.rejectionCounts, { low_score: 2, token_consumed: 1 },
+        'repeated rejection objects collapse to counts');
+    assert.deepStrictEqual(digest.sourceCounts, { browser_sr: 2 }, 'lattice suffix normalizes to browser source');
+    assert.deepStrictEqual(digest.flagCounts, { voiced_partial: 1, late_credit: 1, trace_overflow: 1 });
+    assert.deepStrictEqual(digest.phrases[0].missedAnchors, ['gold'], 'missed anchors stay analyst-visible');
+    assert.strictEqual(digest.phrases[0].credits[1].lateMs, 750, 'credit timing becomes direct recognizer lag');
+    assert.deepStrictEqual(digest.phrases[0].flow, { status: 'clean', events: 2, firstSec: 10.2, lastSec: 11.8 });
+    assert.deepStrictEqual(digest.phrases[0].overflow, { rejectedCandidates: 1 }, 'zero overflow counters are omitted');
+    assert.strictEqual(digest.phrases[0].rejectedCandidates, undefined, 'raw rejection objects are absent from compact rows');
+    var frameDrift = T.compactPhraseTrace({
+        endSec: 4, anchorsRequired: 1, lyricStatus: 'confirmed',
+        consumedTokens: [{ word: 'near', timeSec: 4.1 }]
+    });
+    assert.strictEqual(frameDrift.credits[0].lateMs, 100, 'small timing drift remains measurable');
+    assert.ok(!frameDrift.flags.includes('late_credit'), 'sub-250ms drift is not an analyst attention flag');
+})();
+
 // --- median ---
 assert.strictEqual(T.median([]), null, 'empty median is null');
 assert.strictEqual(T.median([5]), 5, 'single');
