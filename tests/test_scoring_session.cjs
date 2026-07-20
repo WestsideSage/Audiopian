@@ -446,6 +446,63 @@ function matchHotWordForTest(s, text, now) {
         'a missed phrase does NOT emit phraseCleared');
 })();
 
+// A recognizer final arriving shortly after a committed miss upgrades the arcade
+// outcome instead of leaving the singer with a false streak break. The rescue is a
+// first-class HUD + telemetry event and the phrase repaint follows the final judgment.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);
+    session.tick(s, 1.0);                          // in-window flow, but no lyric hits
+    session.setEnergy(s, false);
+    var missEvents = session.tick(s, 3.5);         // p0 settles and commits MISS
+    assert.ok(missEvents.some(function (e) {
+        return e.type === 'arcade' && e.evt.phraseId === 'p0' && e.evt.outcome === 'miss';
+    }), 'precondition: p0 committed as a miss');
+
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    var rescued = session.tick(s, 4.0);            // 0.5s after commit, inside rescue window
+    var rescueHud = rescued.find(function (e) {
+        return e.type === 'arcade' && e.evt.phraseId === 'p0' && e.evt.outcome === 'rescue';
+    });
+    var rescueRecord = rescued.find(function (e) {
+        return e.type === 'arcadeRecord' && e.record.kind === 'lateRescue';
+    });
+    assert.ok(rescueHud, 'late final emits a LATE RESCUE arcade event');
+    assert.strictEqual(rescueHud.evt.previousOutcome, 'miss');
+    assert.strictEqual(rescueHud.evt.rescuedOutcome, 'clear');
+    assert.ok(rescueRecord, 'late rescue is appended to arcade telemetry events');
+    assert.strictEqual(rescueRecord.record.phraseId, 'p0');
+    assert.ok(rescued.some(function (e) { return e.type === 'phraseCleared' && e.phraseId === 'p0'; }),
+        'the rescued phrase repaints to its corrected clear outcome');
+    assert.strictEqual(s.arcadeEvents.filter(function (e) { return e.kind === 'lateRescue'; }).length, 1,
+        'telemetry stores exactly one rescue record');
+})();
+
+// The rescue window is bounded but long enough for the validated browser-SR batch
+// lag in Bands (line 32 landed 11.6s after its original arcade settlement).
+(function () {
+    function rescueAt(nowSec) {
+        var s = session.createSession(twoLineCfg());
+        session.setActiveLine(s, 0, 0.0);
+        session.setEnergy(s, true);
+        session.tick(s, 1.0);
+        session.setEnergy(s, false);
+        session.tick(s, 3.5);
+        session.ingestFinal(s, 'first line words', 'browser_sr');
+        return session.tick(s, nowSec);
+    }
+    var within = rescueAt(15.0);                    // 11.5s after commit
+    assert.ok(within.some(function (e) {
+        return e.type === 'arcade' && e.evt.outcome === 'rescue';
+    }), 'validated 11.6s browser-SR batching remains rescuable');
+
+    var expired = rescueAt(15.6);                   // 12.1s after commit
+    assert.strictEqual(expired.filter(function (e) {
+        return e.type === 'arcade' && e.evt.outcome === 'rescue';
+    }).length, 0, 'late evidence beyond the bounded rescue window does not mutate the arcade');
+})();
+
 // A settled phrase with SOME anchors hit but not confirmed commits as a PARTIAL and emits
 // phrasePartial (amber), NOT phraseMissed (red): the lenient streak survives a partial, so
 // the paint must match it rather than read as a total failure.

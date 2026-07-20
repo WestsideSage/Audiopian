@@ -39,6 +39,11 @@
     var getWindowParams = pick(sync, 'getWindowParams');
     var getAdjustedOverlapDuration = pick(sync, 'getAdjustedOverlapDuration');
     var getScoreDelay = pick(sync, 'getScoreDelay');
+    // Bounded by observed provider behavior rather than an arbitrary short timer:
+    // the validated Bands browser-SR run delivered its line-32 confirmation 11.6s
+    // after the original arcade settlement. Twelve seconds admits that real batch
+    // while remaining well below the engine's general 18s final-reconcile horizon.
+    var LATE_RESCUE_WINDOW_SEC = 12;
 
     function createSession(config) {
         var s = {
@@ -61,7 +66,8 @@
             whisperBuffer: '', _lineComparisonCount: 0,
             weightedTotal: 0, weightedMatched: 0, totalWords: 0, matchedWords: 0,
             linesScored: 0, perfectLines: 0, currentStreak: 0, bestStreak: 0,
-            committedPhrases: {}, arcadeEvents: [], prevLine: null, _lineStartAudioTime: null
+            committedPhrases: {}, committedPhraseStats: {}, arcadeEvents: [],
+            prevLine: null, _lineStartAudioTime: null
         };
         if (s.phrasePlan && phraseEngine && phraseEngine.createPhraseSession) {
             s.phraseSession = phraseEngine.createPhraseSession(s.phrasePlan);
@@ -108,6 +114,7 @@
             s.arcadeState = arcade.createArcadeState(s.difficulty);
         }
         s.committedPhrases = {};
+        s.committedPhraseStats = {};
         s.arcadeEvents = [];
         s.linesScored = 0;
         s.perfectLines = 0;
@@ -725,6 +732,7 @@
         if (s.phraseSession && phraseEngine) {
             try { phraseEngine.settlePhrases(s.phraseSession, nowSec); } catch (e) {}
             reconcileInterim(s, nowSec, events);
+            rescueCommittedPhrases(s, nowSec, true, events);
             commitNewlySettled(s, nowSec, true, events);
             ev(events, 'honestPct', { pct: getHonestPct(s) });
         }
@@ -927,6 +935,61 @@
     // s.arcadeEvents (for endRun/telemetry) AND emitted as an arcadeRecord event;
     // _onArcadeEvent(evt) -> arcade event (same evt && routeEvents && V2 gate); the V2
     // paint block -> phraseCleared (confirmed) / phraseMissed (else), same V2 gate.
+    function rescueCommittedPhrases(s, now, routeEvents, events) {
+        if (!s.arcadeState || !arcade || !arcade.upgradePhrase || !s.phrasePlan ||
+            !s.phraseSession || !s.committedPhraseStats) return;
+        var nowSec = isFinite(now) ? now : 0;
+        var phrases = s.phrasePlan.phrases || [];
+        for (var pi = 0; pi < phrases.length; pi++) {
+            var ph = phrases[pi];
+            var prior = s.committedPhraseStats[ph.phraseId];
+            var pst = s.phraseSession.states[ph.phraseId];
+            if (!prior || !pst) continue;
+            if (nowSec - prior.settledAtSec > LATE_RESCUE_WINDOW_SEC) continue;
+            var anchorsHit = Object.keys(pst.anchorHits || {}).length;
+            if (anchorsHit <= prior.anchorsHit) continue;
+
+            var evt = arcade.upgradePhrase(s.arcadeState, ph.phraseId, {
+                anchorsRequired: ph.anchorsRequired,
+                anchorsTotal: (ph.anchors || []).length,
+                anchorsHit: anchorsHit,
+                rescuedByWhisper: pst.rescuedByWhisper
+            });
+            // Remember non-outcome-changing improvements so the same evidence is not
+            // reconsidered every 100ms. The arcade ledger keeps its original count
+            // until a later improvement actually crosses an outcome boundary.
+            prior.anchorsHit = anchorsHit;
+            if (!evt) continue;
+
+            prior.outcome = evt.rescuedOutcome;
+            var record = {
+                kind: 'lateRescue',
+                phraseId: ph.phraseId,
+                lineIdx: ph.lineIdx,
+                rescuedAtSec: parseFloat(nowSec.toFixed(2)),
+                previousOutcome: evt.previousOutcome,
+                outcome: 'rescue',
+                rescuedOutcome: evt.rescuedOutcome,
+                perfect: evt.perfect,
+                anchorsRequired: ph.anchorsRequired,
+                anchorsTotal: (ph.anchors || []).length,
+                anchorsHit: anchorsHit,
+                pointsAwarded: evt.pointsAwarded,
+                multiplierAfter: evt.multiplier,
+                streakAfter: evt.streak,
+                onFire: evt.onFire
+            };
+            s.arcadeEvents.push(record);
+            ev(events, 'arcadeRecord', { record: record });
+            if (routeEvents) ev(events, 'arcade', { evt: evt });
+            if (evt.rescuedOutcome === 'clear') {
+                ev(events, 'phraseCleared', { phraseId: ph.phraseId });
+            } else {
+                ev(events, 'phrasePartial', { phraseId: ph.phraseId });
+            }
+        }
+    }
+
     function commitNewlySettled(s, now, routeEvents, events) {
         if (!s.arcadeState || !arcade || !s.phrasePlan || !s.phraseSession) return;
         var nowSec = isFinite(now) ? now : 0;
@@ -966,6 +1029,11 @@
                     onFire: evt.onFire
                 };
                 s.arcadeEvents.push(record);
+                s.committedPhraseStats[ph.phraseId] = {
+                    settledAtSec: nowSec,
+                    anchorsHit: Object.keys(pst.anchorHits).length,
+                    outcome: evt.outcome
+                };
                 ev(events, 'arcadeRecord', { record: record });
             }
             if (evt && routeEvents) ev(events, 'arcade', { evt: evt });

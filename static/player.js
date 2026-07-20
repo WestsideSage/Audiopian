@@ -1254,13 +1254,19 @@ class GameMode {
             this._shownMult = st.multiplier;
         }
 
-        // Streak milestone callout at 10 / 25 / 50 (distinct from on-fire).
-        if (evt && window.KaraokeeScoreFeedback) {
-            var msLabel = KaraokeeScoreFeedback.milestoneForStreak(evt.streak);
+        // A corrected post-settlement outcome is a celebration, not a quiet score
+        // mutation: show an explicit LATE RESCUE callout. Ordinary streak milestones
+        // keep using the same presentation slot on non-rescue events.
+        if (evt) {
+            var isRescue = evt.outcome === 'rescue';
+            var msLabel = isRescue ? 'LATE RESCUE'
+                : (window.KaraokeeScoreFeedback
+                    ? KaraokeeScoreFeedback.milestoneForStreak(evt.streak) : null);
             if (msLabel) {
                 var msEl = document.getElementById('ahMilestone');
                 if (msEl) {
                     msEl.textContent = msLabel;
+                    msEl.classList.toggle('rescue', isRescue);
                     msEl.classList.remove('show');
                     void msEl.offsetWidth;
                     msEl.classList.add('show');

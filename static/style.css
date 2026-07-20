@@ -1222,11 +1222,26 @@ body.arcade-onfire .sp-popup { color: var(--fire-c); text-shadow: 0 0 14px rgba(
     opacity: 0; pointer-events: none;
 }
 .sp-milestone.show { animation: spMilestone 1.1s var(--ease-out) forwards; }
+.sp-milestone.rescue {
+    padding: 6px 12px;
+    border: 1px solid color-mix(in srgb, var(--matched) 60%, transparent);
+    border-radius: var(--r-pill);
+    background: color-mix(in srgb, var(--matched) 15%, var(--surface-2));
+    -webkit-text-fill-color: var(--matched); color: var(--matched);
+    box-shadow: 0 0 22px color-mix(in srgb, var(--matched) 35%, transparent);
+}
+.sp-milestone.rescue.show { animation: lateRescue 1.45s var(--ease-spring) forwards; }
 @keyframes spMilestone {
     0%   { opacity: 0; transform: translateY(8px) scale(.8); }
     20%  { opacity: 1; transform: translateY(0) scale(1.12); }
     80%  { opacity: 1; transform: translateY(0) scale(1); }
     100% { opacity: 0; transform: translateY(-6px) scale(1); }
+}
+@keyframes lateRescue {
+    0%   { opacity: 0; transform: translateY(10px) scale(.72) rotate(-2deg); }
+    22%  { opacity: 1; transform: translateY(0) scale(1.16) rotate(1deg); }
+    72%  { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-8px) scale(1.03); }
 }
 
 /* -- ON FIRE — the spectacle players chase. Pure CSS (self-animating), so

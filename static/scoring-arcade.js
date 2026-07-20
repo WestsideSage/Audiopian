@@ -43,7 +43,11 @@
             perfects: 0,
             clears: 0,
             onFire: false,
-            committed: {}
+            committed: {},
+            // Ordered inputs let a late rescue replay the exact commit sequence.
+            // That keeps points, streak, ramp, and multiplier identical to a run in
+            // which the recognizer had delivered the evidence before settlement.
+            _commitLog: []
         };
     }
 
@@ -55,14 +59,26 @@
         return hit >= total; // 'all'
     }
 
-    // Commit a phrase exactly once at its settled boundary. `o` =
-    // {phraseId, anchorsRequired, anchorsTotal, anchorsHit, rescuedByWhisper?}.
-    // Returns the event for the HUD, or null if already committed / invalid.
-    function commitPhrase(state, o) {
-        if (!state || !o || o.phraseId == null) return null;
-        if (state.committed[o.phraseId]) return null;
-        state.committed[o.phraseId] = true;
+    function outcomeFor(o) {
+        var required = o.anchorsRequired || 0;
+        var hit = o.anchorsHit || 0;
+        if (required > 0 && hit >= required) return 'clear';
+        return hit === 0 ? 'miss' : 'partial';
+    }
 
+    function copyCommit(o) {
+        return {
+            phraseId: o.phraseId,
+            anchorsRequired: o.anchorsRequired || 0,
+            anchorsTotal: o.anchorsTotal || 0,
+            anchorsHit: o.anchorsHit || 0,
+            rescuedByWhisper: !!o.rescuedByWhisper
+        };
+    }
+
+    // Apply one already-validated commit input to the running state. Keeping this
+    // separate from the commit-once ledger makes deterministic rescue replay cheap.
+    function applyPhrase(state, o) {
         var required = o.anchorsRequired || 0;
         var total = o.anchorsTotal || 0;
         var hit = o.anchorsHit || 0;
@@ -116,6 +132,84 @@
         };
     }
 
+    // Commit a phrase exactly once at its settled boundary. `o` =
+    // {phraseId, anchorsRequired, anchorsTotal, anchorsHit, rescuedByWhisper?}.
+    // Returns the event for the HUD, or null if already committed / invalid.
+    function commitPhrase(state, o) {
+        if (!state || !o || o.phraseId == null) return null;
+        if (state.committed[o.phraseId]) return null;
+        var input = copyCommit(o);
+        state.committed[input.phraseId] = true;
+        state._commitLog.push(input);
+        return applyPhrase(state, input);
+    }
+
+    function resetTotalsForReplay(state) {
+        state.points = 0;
+        state.multiplier = 1;
+        state.ramp = 0;
+        state.streak = 0;
+        state.longestStreak = 0;
+        state.maxMultiplier = 1;
+        state.perfects = 0;
+        state.clears = 0;
+        state.onFire = false;
+    }
+
+    // Upgrade a committed phrase when bounded late evidence changes its outcome.
+    // Replays every committed input so downstream clears receive the multiplier and
+    // streak they would have had if the corrected outcome arrived at settlement.
+    function upgradePhrase(state, phraseId, newCounts) {
+        if (!state || phraseId == null || !newCounts || !state.committed[phraseId]) return null;
+        var log = state._commitLog || [];
+        var idx = -1;
+        for (var i = 0; i < log.length; i++) {
+            if (log[i].phraseId === phraseId) { idx = i; break; }
+        }
+        if (idx < 0) return null;
+
+        var previous = log[idx];
+        var next = copyCommit({
+            phraseId: previous.phraseId,
+            anchorsRequired: newCounts.anchorsRequired != null
+                ? newCounts.anchorsRequired : previous.anchorsRequired,
+            anchorsTotal: newCounts.anchorsTotal != null
+                ? newCounts.anchorsTotal : previous.anchorsTotal,
+            anchorsHit: newCounts.anchorsHit != null
+                ? newCounts.anchorsHit : previous.anchorsHit,
+            rescuedByWhisper: newCounts.rescuedByWhisper != null
+                ? newCounts.rescuedByWhisper : previous.rescuedByWhisper
+        });
+        var previousOutcome = outcomeFor(previous);
+        var rescuedOutcome = outcomeFor(next);
+        var rank = { miss: 0, partial: 1, clear: 2 };
+        if (next.anchorsHit <= previous.anchorsHit || rank[rescuedOutcome] <= rank[previousOutcome]) return null;
+
+        var oldPoints = state.points;
+        log[idx] = next;
+        resetTotalsForReplay(state);
+        var upgradedResult = null;
+        for (var ri = 0; ri < log.length; ri++) {
+            var replayed = applyPhrase(state, log[ri]);
+            if (ri === idx) upgradedResult = replayed;
+        }
+
+        return {
+            phraseId: phraseId,
+            outcome: 'rescue',
+            previousOutcome: previousOutcome,
+            rescuedOutcome: rescuedOutcome,
+            perfect: upgradedResult ? upgradedResult.perfect : false,
+            pointsAwarded: state.points - oldPoints,
+            points: state.points,
+            multiplier: state.multiplier,
+            ramp: state.ramp,
+            rampPerTier: RAMP_PER_TIER,
+            streak: state.streak,
+            onFire: state.onFire
+        };
+    }
+
     function rampProgress(state) {
         if (!state) return 0;
         if (state.multiplier >= state.tuning.maxMultiplier) return 1;
@@ -156,6 +250,7 @@
         ARCADE_TUNING: ARCADE_TUNING,
         createArcadeState: createArcadeState,
         commitPhrase: commitPhrase,
+        upgradePhrase: upgradePhrase,
         isPerfect: isPerfect,
         rampProgress: rampProgress,
         gradeFor: gradeFor,
