@@ -949,7 +949,8 @@
             ev(events, 'arcadeRecord', { record: record });
             if (routeEvents) ev(events, 'arcade', { evt: evt });
             if (evt.rescuedOutcome === 'clear') {
-                ev(events, 'phraseCleared', { phraseId: ph.phraseId });
+                // perfect rides the paint event: the renderer gilds a full-anchor line.
+                ev(events, 'phraseCleared', { phraseId: ph.phraseId, perfect: !!evt.perfect });
             } else {
                 ev(events, 'phrasePartial', { phraseId: ph.phraseId });
             }
@@ -1004,10 +1005,12 @@
             }
             if (evt && routeEvents) ev(events, 'arcade', { evt: evt });
 
-            // V2 coloring at settle: a passed line greens the whole phrase; a missed
-            // line reds its key words only (non-key words stay neutral).
+            // V2 coloring at settle: a passed line greens the whole phrase; a PERFECT
+            // line (every anchor hit, the arcade's own definition) gilds it instead —
+            // the flag rides the event so the renderer can tell the two apart. A
+            // missed line reds its key words only (non-key words stay neutral).
             if (pst.lyricStatus === 'confirmed') {
-                ev(events, 'phraseCleared', { phraseId: ph.phraseId });
+                ev(events, 'phraseCleared', { phraseId: ph.phraseId, perfect: !!(evt && evt.perfect) });
             } else if (Object.keys(pst.anchorHits).length > 0) {
                 // Partial: some anchors landed (the lenient streak survives a partial),
                 // so paint amber, not the full red of a true miss — the visual then

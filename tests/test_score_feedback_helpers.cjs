@@ -105,4 +105,23 @@ assert.strictEqual(SF.tierUpLabel(0, 1), null, 'rise to 1x is not a tier-up (ini
 assert.strictEqual(SF.tierUpLabel(0.5, 1), null, 'rise to 1x from a fraction -> null');
 assert.strictEqual(SF.tierUpLabel(1, 3), '3x', 'jump 1 -> 3 -> "3x"');
 
+// --- arcadeVerdict: the flash verdict unified with the arcade's own outcome ---
+// The old lineVerdict ratio (V1 word tally) could say PERFECT on a line the
+// arcade didn't gild (and vice versa). The flash now derives from the SAME
+// arcade record that drives the gold paint: perfect = every anchor hit.
+assert.strictEqual(SF.arcadeVerdict({ outcome: 'clear', perfect: true }), 'perfect', 'perfect clear -> perfect');
+assert.strictEqual(SF.arcadeVerdict({ outcome: 'clear', perfect: false }), 'nice', 'ordinary clear -> nice');
+assert.strictEqual(SF.arcadeVerdict({ outcome: 'partial' }), 'partial', 'partial -> partial');
+assert.strictEqual(SF.arcadeVerdict({ outcome: 'miss' }), 'miss', 'miss -> miss');
+// Late rescues flash their UPGRADED outcome.
+assert.strictEqual(SF.arcadeVerdict({ outcome: 'rescue', rescuedOutcome: 'clear', perfect: true }), 'perfect',
+    'rescue to full-anchor clear -> perfect');
+assert.strictEqual(SF.arcadeVerdict({ outcome: 'rescue', rescuedOutcome: 'clear', perfect: false }), 'nice',
+    'rescue to ordinary clear -> nice');
+assert.strictEqual(SF.arcadeVerdict({ outcome: 'rescue', rescuedOutcome: 'partial' }), 'partial',
+    'rescue to partial -> partial');
+// Unknown/absent outcomes flash nothing.
+assert.strictEqual(SF.arcadeVerdict({}), null, 'unknown outcome -> null (no flash)');
+assert.strictEqual(SF.arcadeVerdict(null), null, 'null record -> null (no flash)');
+
 console.log('All score-feedback-helpers tests passed.');

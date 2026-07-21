@@ -1023,11 +1023,14 @@ class GameMode {
     // V2: paint every span of a cleared phrase green (whole-line-green on pass).
     // Shared by _commitNewlySettled (settle-time) and late-evidence reconciliation
     // (a missed line flips green a few seconds late when its batched words arrive).
-    _paintPhraseCleared(phraseId) {
+    _paintPhraseCleared(phraseId, perfect) {
         var sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(sel).forEach(function (span) {
             span.classList.remove('matched-partial', 'missed');
             span.classList.add('matched');
+            // PERFECT (every anchor landed, the arcade's definition): gild the
+            // phrase instead of plain green — the visual proof you cooked the line.
+            span.classList.toggle('matched-perfect', !!perfect);
         });
     }
 
@@ -1036,7 +1039,7 @@ class GameMode {
     _paintPhraseMissed(phraseId) {
         var _sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(_sel).forEach(function (span) {
-            span.classList.remove('matched', 'matched-partial', 'missed');
+            span.classList.remove('matched', 'matched-partial', 'matched-perfect', 'missed');
             if (span.classList.contains('key-word')) span.classList.add('missed');
         });
     }
@@ -1054,28 +1057,22 @@ class GameMode {
         });
     }
 
-    // Render a scored line: flash the per-line score. Extracted from the old _scoreLine
-    // DOM block; reads the event payload (e.lineIdx / e.matched / e.scoredTotal) so it
-    // never depends on this.activeLineIdx (which the session, not the controller, owns).
-    _renderLineScored(e) {
+    // Flash the per-line verdict next to a line. Driven by arcadeRecord events so the
+    // flash and the line paint derive from the SAME arcade outcome: PERFECT here is
+    // the anchor definition (every anchor hit) that also gilds the line — the old
+    // lineScored-driven flash used the V1 word-ratio and could disagree with the gold.
+    _flashLineVerdict(lineIdx, verdict) {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
-        var lineEl = lines[e.lineIdx];
-        if (lineEl) {
-            // Flash a worded per-line verdict (PERFECT / NICE / partial) instead of the
-            // bare +matched/total fraction. score-feedback-helpers maps the ratio to a
-            // verdict; player.js only paints the label + class.
-            var flash = document.createElement('div');
-            flash.className = 'line-score-flash';
-            var verdict = window.KaraokeeScoreFeedback
-                ? KaraokeeScoreFeedback.lineVerdict(e.matched, e.scoredTotal)
-                : 'partial';
-            var verdictLabel = { perfect: 'PERFECT', nice: 'NICE', partial: 'partial', miss: 'miss' };
-            flash.textContent = verdictLabel[verdict] || 'partial';
-            flash.classList.add('v-' + verdict);
-            flash.style.top = lineEl.offsetTop + 'px';
-            document.getElementById('lyrics-container').appendChild(flash);
-            setTimeout(function () { flash.remove(); }, 1300);
-        }
+        var lineEl = lines[lineIdx];
+        if (!lineEl || !verdict) return;
+        var flash = document.createElement('div');
+        flash.className = 'line-score-flash';
+        var verdictLabel = { perfect: 'PERFECT', nice: 'NICE', partial: 'partial', miss: 'miss' };
+        flash.textContent = verdictLabel[verdict] || 'partial';
+        flash.classList.add('v-' + verdict);
+        flash.style.top = lineEl.offsetTop + 'px';
+        document.getElementById('lyrics-container').appendChild(flash);
+        setTimeout(function () { flash.remove(); }, 1300);
     }
 
     // Reset a new active line's spans to grey. Extracted verbatim from the old
@@ -1118,16 +1115,25 @@ class GameMode {
         for (var i = 0; i < events.length; i++) {
             var e = events[i];
             switch (e.type) {
-                case 'lineScored': this._renderLineScored(e); break;
+                case 'lineScored': /* verdict flash moved to arcadeRecord (anchor-authoritative);
+                                      the V1 tally still feeds getScores/telemetry */ break;
                 case 'wordMatched':
                     this._logMatch(e.spokenWord, e.targetWord, e.method, e.editDistance, e.phoneticMatch, e.score, e.matched, e.windowPosition);
                     break;
                 case 'promotion': this._logPromotion(e.source, e.wordIndex, e.score); break;
-                case 'phraseCleared': this._paintPhraseCleared(e.phraseId); break;
+                case 'phraseCleared': this._paintPhraseCleared(e.phraseId, e.perfect); break;
                 case 'phraseMissed': this._paintPhraseMissed(e.phraseId); break;
                 case 'phrasePartial': this._paintPhrasePartial(e.phraseId); break;
                 case 'arcade': this._onArcadeEvent(e.evt); break;
-                case 'arcadeRecord': /* already in session.arcadeEvents; telemetry reads it at build time */ break;
+                case 'arcadeRecord': {
+                    // The record is already in session.arcadeEvents (telemetry reads it
+                    // at build time); here it drives the verdict flash — same source of
+                    // truth as the gold paint, including lateRescue upgrades.
+                    if (window.KaraokeeScoreFeedback && e.record) {
+                        this._flashLineVerdict(e.record.lineIdx, KaraokeeScoreFeedback.arcadeVerdict(e.record));
+                    }
+                    break;
+                }
                 case 'honestPct': { var el = document.getElementById('score-pct'); if (el && e.pct != null) el.textContent = e.pct + '%'; break; }
                 case 'transition': if (window._kDebug) this._logTransition(e.fromIdx, e.toIdx, e.trigger, e.fromText, e.matchedCount, e.total, e.missedWords, e.lineStartAudioTime, e.sourceCounts); break;
                 case 'resetSpans': this._resetLineSpans(e.lineIdx); break;

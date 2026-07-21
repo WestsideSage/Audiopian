@@ -992,4 +992,55 @@ function matchHotWordForTest(s, text, now) {
         'stopping mid-line does not commit the unfinished active line');
 })();
 
+// --- Perfect-line gold paint: phraseCleared carries the arcade `perfect` flag ---
+// The renderer paints a perfect line (ALL anchors hit, not just the required
+// subset) gold instead of plain green, so the flag must ride the commit-time and
+// rescue-time phraseCleared events. Live reconcile-path phraseCleared events stay
+// bare (perfect is only authoritative at commit).
+(function () {
+    function fourAnchorCfg() {
+        var L = [lyric(0, 'alpha bravo charlie delta'), lyric(3, 'closing words here')];
+        return { lyrics: L, allWordTimings: buildAllWordTimings(L),
+                 phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 8 }),
+                 difficulty: 'medium' };
+    }
+    // All four anchors hit -> the commit-time phraseCleared says perfect: true.
+    var s = session.createSession(fourAnchorCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'alpha bravo charlie delta', 'browser_sr');
+    session.tick(s, 1.0);
+    session.setActiveLine(s, 1, 3.0);
+    var out = session.tick(s, 4.6);                      // p0 settled (end 3 + 1.4) -> commit
+    var pc = out.filter(function (e) { return e.type === 'phraseCleared' && e.phraseId === 'p0'; });
+    assert.strictEqual(pc.length, 1, 'commit emits one phraseCleared for p0');
+    assert.strictEqual(pc[0].perfect, true, 'all anchors hit -> phraseCleared.perfect true');
+    // Only the required subset hit -> cleared but NOT perfect.
+    var s2 = session.createSession(fourAnchorCfg());
+    session.setActiveLine(s2, 0, 0.0);
+    session.ingestFinal(s2, 'alpha bravo', 'browser_sr');
+    session.tick(s2, 1.0);
+    session.setActiveLine(s2, 1, 3.0);
+    var out2 = session.tick(s2, 4.6);
+    var pc2 = out2.filter(function (e) { return e.type === 'phraseCleared' && e.phraseId === 'p0'; });
+    assert.strictEqual(pc2.length, 1, 'commit emits one phraseCleared for the ordinary clear');
+    assert.strictEqual(pc2[0].perfect, false, 'required-only clear -> phraseCleared.perfect false');
+})();
+// A lateRescue that lands ALL anchors emits its phraseCleared with perfect: true.
+(function () {
+    var L = [lyric(0, 'alpha bravo charlie'), lyric(3, 'closing words here')];
+    var s = session.createSession({ lyrics: L, allWordTimings: buildAllWordTimings(L),
+        phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 8 }),
+        difficulty: 'medium' });
+    session.setActiveLine(s, 0, 0.0);
+    session.tick(s, 1.0);                                 // silent through line 0
+    session.setActiveLine(s, 1, 3.0);
+    session.tick(s, 4.6);                                 // p0 commits as MISS
+    session.ingestFinal(s, 'alpha bravo charlie', 'browser_sr');   // late batch, all anchors
+    var out = session.tick(s, 5.0);                       // credits land -> lateRescue upgrade
+    var resc = out.filter(function (e) { return e.type === 'phraseCleared' && e.phraseId === 'p0'; });
+    assert.ok(resc.length >= 1, 'rescue emits phraseCleared for p0');
+    assert.strictEqual(resc[resc.length - 1].perfect, true,
+        'rescue to a full-anchor clear carries perfect: true');
+})();
+
 console.log('Scoring session tests passed.');
