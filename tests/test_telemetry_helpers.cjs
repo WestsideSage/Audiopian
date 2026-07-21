@@ -124,7 +124,23 @@ var base = {
     counts: { asr: 0, matches: 0, promotions: 0, transitions: 3, arcadeEvents: 4 }
 };
 var s = T.summarizeRun(base);
-assert.deepStrictEqual(s.phraseOutcomes, { cleared: 2, partial: 1, missed: 1, total: 4 }, 'outcome tally');
+assert.deepStrictEqual(s.phraseOutcomes, { cleared: 2, partial: 1, missed: 1, neutral: 0, total: 4 }, 'outcome tally');
+
+// --- neutral (0-anchor) phrases are excluded from the missed tally ---
+// A filler-only line (all adlibs/vocables -> anchorsRequired 0) is excluded from
+// scoring everywhere else (getHonestPct, arcade commit, analysis digest outcomes);
+// the summary must not report it as a failed line. Observed: the 20syl — Voices
+// morning run (2026-07-21) read missed=2 at 99% honest — both "misses" were
+// neutral vocable lines ("yo yo yo yeah yo"). Traces without the field (legacy
+// payload shapes) keep their old bucket.
+var neutralRun = Object.assign({}, base, { phraseTraces: [
+    Object.assign(trace('confirmed', ['browser_final']), { anchorsRequired: 2 }),
+    Object.assign(trace('missing', []), { anchorsRequired: 0 }),   // vocable-only line
+    Object.assign(trace('missing', []), { anchorsRequired: 3 })    // a real miss
+] });
+var ns = T.summarizeRun(neutralRun);
+assert.deepStrictEqual(ns.phraseOutcomes, { cleared: 1, partial: 0, missed: 1, neutral: 1, total: 3 },
+    'anchorsRequired<=0 phrases count as neutral, never missed');
 
 // --- clearsBySource: dominant source per cleared phrase, normalized to canonical buckets ---
 // phrase 1 -> whisper (2 whisper vs 1 browser); phrase 2 -> browser_sr (browser_final +

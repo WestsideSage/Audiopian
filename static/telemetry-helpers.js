@@ -215,10 +215,16 @@
         var traces = inputs.phraseTraces || [];
         var transitions = inputs.transitions || [];
 
-        var outcomes = { cleared: 0, partial: 0, missed: 0, total: traces.length };
+        var outcomes = { cleared: 0, partial: 0, missed: 0, neutral: 0, total: traces.length };
         var clearsBySource = { whisper: 0, browser_sr: 0, vad: 0 };
         traces.forEach(function (tr) {
-            if (tr.lyricStatus === 'confirmed') {
+            // 0-anchor (filler/vocable-only) phrases are excluded from scoring
+            // everywhere (getHonestPct, arcade commit, the analysis digest) — the
+            // summary must not report them as failed lines. Legacy traces without
+            // the field keep their old bucket.
+            if (tr.anchorsRequired != null && tr.anchorsRequired <= 0) {
+                outcomes.neutral++;
+            } else if (tr.lyricStatus === 'confirmed') {
                 outcomes.cleared++;
                 var src = dominantSource(tr.consumedTokens);
                 if (src && clearsBySource[src] != null) clearsBySource[src]++;

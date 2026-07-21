@@ -1135,7 +1135,13 @@ class GameMode {
                     break;
                 }
                 case 'honestPct': { var el = document.getElementById('score-pct'); if (el && e.pct != null) el.textContent = e.pct + '%'; break; }
-                case 'transition': if (window._kDebug) this._logTransition(e.fromIdx, e.toIdx, e.trigger, e.fromText, e.matchedCount, e.total, e.missedWords, e.lineStartAudioTime, e.sourceCounts); break;
+                case 'transition':
+                    // Always captured: _logTransition only writes telemetry (summary.sync
+                    // drift stats derive from it). Gating it on the debug HUD silently
+                    // blanked medianLineDriftMs on any run played without the D panel
+                    // (2 of the 5 runs in the 2026-07-21 morning corpus).
+                    this._logTransition(e.fromIdx, e.toIdx, e.trigger, e.fromText, e.matchedCount, e.total, e.missedWords, e.lineStartAudioTime, e.sourceCounts);
+                    break;
                 case 'resetSpans': this._resetLineSpans(e.lineIdx); break;
                 case 'wordSpans': this._updateWordSpans(); break;
             }
@@ -1358,6 +1364,10 @@ class GameMode {
             matches:     [],
             promotions:  [],   // VAD→ASR upgrade events (both browser SR and Whisper paths)
             transitions: [],
+            // Event-volume counters, bumped even when the compact profile skips the
+            // raw arrays — summary.counts must report true volumes in every profile
+            // (a compact run's counts read all-zero otherwise).
+            counters:    { asr: 0, matches: 0, promotions: 0 },
             phraseEngine: {
                 version: 1,
                 mode: 'shadow',
@@ -1377,6 +1387,7 @@ class GameMode {
      */
     _logAsr(type, text, wordTimestamps, source) {
         if (!this._telemetry) return;
+        this._telemetry.counters.asr++;
         if (this._telemetry.captureProfile === 'compact') return;
         try {
             var tempoClass = 'medium';
@@ -1406,6 +1417,7 @@ class GameMode {
      */
     _logPromotion(source, wordIndex, score) {
         if (!this._telemetry) return;
+        this._telemetry.counters.promotions++;
         if (this._telemetry.captureProfile === 'compact') return;
         try {
             this._telemetry.promotions.push({
@@ -1423,8 +1435,9 @@ class GameMode {
      */
     _logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
         if (!this._telemetry) return;
-        if (this._telemetry.captureProfile === 'compact') return;
         if (score <= 0) return;   // suppress noise — log only successful matches
+        this._telemetry.counters.matches++;   // counted pre-dedup: every real match event
+        if (this._telemetry.captureProfile === 'compact') return;
 
         // Smart filtering: only log first-time matches for words already confirmed matched.
         // Skip redundant re-checks for words already confirmed matched.
@@ -1615,10 +1628,13 @@ class GameMode {
         // start(), but read the session directly so telemetry is correct even if the alias
         // was reset).
         var arcadeEvents = (this._session && this._session.arcadeEvents) || this._arcadeEvents || [];
+        // Counters, not array lengths: the compact profile skips the raw arrays but
+        // the counts must still report true event volumes (recognizer-health denominators).
+        var eventCounters = this._telemetry.counters || { asr: 0, matches: 0, promotions: 0 };
         var counts = {
-            asr:         this._telemetry.asr.length,
-            matches:     this._telemetry.matches.length,
-            promotions:  this._telemetry.promotions.length,
+            asr:         eventCounters.asr,
+            matches:     eventCounters.matches,
+            promotions:  eventCounters.promotions,
             transitions: this._telemetry.transitions.length,
             arcadeEvents: arcadeEvents.length
         };
