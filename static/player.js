@@ -138,7 +138,8 @@ class GameMode {
             this._phrasePlan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
                 difficulty: this._phraseDifficulty,
                 audioDuration: playback ? (playback.duration() || null) : null,
-                clean: this._cleanMode
+                clean: this._cleanMode,
+                provider: this._isRealtimeWhisperProvider() ? 'openai_realtime' : 'browser_sr'
             });
             // The scoring session owns the per-run state machine (match -> reconcile ->
             // score -> commit). It builds its own phraseSession/arcadeState from the plan;
@@ -383,8 +384,8 @@ class GameMode {
                     finalText: finalText || null,
                     interim:   interim   || null,
                 });
-                self._logAsr(finalText ? 'final' : 'interim', finalText || interim, [], 'browser_sr');
             }
+            self._logAsr(finalText ? 'final' : 'interim', finalText || interim, [], 'browser_sr');
         };
 
         // Auto-restart so recognition doesn't stop on silence
@@ -1022,11 +1023,14 @@ class GameMode {
     // V2: paint every span of a cleared phrase green (whole-line-green on pass).
     // Shared by _commitNewlySettled (settle-time) and late-evidence reconciliation
     // (a missed line flips green a few seconds late when its batched words arrive).
-    _paintPhraseCleared(phraseId) {
+    _paintPhraseCleared(phraseId, perfect) {
         var sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(sel).forEach(function (span) {
             span.classList.remove('matched-partial', 'missed');
             span.classList.add('matched');
+            // PERFECT (every anchor landed, the arcade's definition): gild the
+            // phrase instead of plain green — the visual proof you cooked the line.
+            span.classList.toggle('matched-perfect', !!perfect);
         });
     }
 
@@ -1035,7 +1039,7 @@ class GameMode {
     _paintPhraseMissed(phraseId) {
         var _sel = '.word-span[data-phrase-id="' + phraseId + '"]';
         document.querySelectorAll(_sel).forEach(function (span) {
-            span.classList.remove('matched', 'matched-partial', 'missed');
+            span.classList.remove('matched', 'matched-partial', 'matched-perfect', 'missed');
             if (span.classList.contains('key-word')) span.classList.add('missed');
         });
     }
@@ -1053,28 +1057,22 @@ class GameMode {
         });
     }
 
-    // Render a scored line: flash the per-line score. Extracted from the old _scoreLine
-    // DOM block; reads the event payload (e.lineIdx / e.matched / e.scoredTotal) so it
-    // never depends on this.activeLineIdx (which the session, not the controller, owns).
-    _renderLineScored(e) {
+    // Flash the per-line verdict next to a line. Driven by arcadeRecord events so the
+    // flash and the line paint derive from the SAME arcade outcome: PERFECT here is
+    // the anchor definition (every anchor hit) that also gilds the line — the old
+    // lineScored-driven flash used the V1 word-ratio and could disagree with the gold.
+    _flashLineVerdict(lineIdx, verdict) {
         var lines = lyricsScroll.querySelectorAll('.lyric-line');
-        var lineEl = lines[e.lineIdx];
-        if (lineEl) {
-            // Flash a worded per-line verdict (PERFECT / NICE / partial) instead of the
-            // bare +matched/total fraction. score-feedback-helpers maps the ratio to a
-            // verdict; player.js only paints the label + class.
-            var flash = document.createElement('div');
-            flash.className = 'line-score-flash';
-            var verdict = window.KaraokeeScoreFeedback
-                ? KaraokeeScoreFeedback.lineVerdict(e.matched, e.scoredTotal)
-                : 'partial';
-            var verdictLabel = { perfect: 'PERFECT', nice: 'NICE', partial: 'partial', miss: 'miss' };
-            flash.textContent = verdictLabel[verdict] || 'partial';
-            flash.classList.add('v-' + verdict);
-            flash.style.top = lineEl.offsetTop + 'px';
-            document.getElementById('lyrics-container').appendChild(flash);
-            setTimeout(function () { flash.remove(); }, 1300);
-        }
+        var lineEl = lines[lineIdx];
+        if (!lineEl || !verdict) return;
+        var flash = document.createElement('div');
+        flash.className = 'line-score-flash';
+        var verdictLabel = { perfect: 'PERFECT', nice: 'NICE', partial: 'partial', miss: 'miss' };
+        flash.textContent = verdictLabel[verdict] || 'partial';
+        flash.classList.add('v-' + verdict);
+        flash.style.top = lineEl.offsetTop + 'px';
+        document.getElementById('lyrics-container').appendChild(flash);
+        setTimeout(function () { flash.remove(); }, 1300);
     }
 
     // Reset a new active line's spans to grey. Extracted verbatim from the old
@@ -1117,18 +1115,33 @@ class GameMode {
         for (var i = 0; i < events.length; i++) {
             var e = events[i];
             switch (e.type) {
-                case 'lineScored': this._renderLineScored(e); break;
+                case 'lineScored': /* verdict flash moved to arcadeRecord (anchor-authoritative);
+                                      the V1 tally still feeds getScores/telemetry */ break;
                 case 'wordMatched':
                     this._logMatch(e.spokenWord, e.targetWord, e.method, e.editDistance, e.phoneticMatch, e.score, e.matched, e.windowPosition);
                     break;
                 case 'promotion': this._logPromotion(e.source, e.wordIndex, e.score); break;
-                case 'phraseCleared': this._paintPhraseCleared(e.phraseId); break;
+                case 'phraseCleared': this._paintPhraseCleared(e.phraseId, e.perfect); break;
                 case 'phraseMissed': this._paintPhraseMissed(e.phraseId); break;
                 case 'phrasePartial': this._paintPhrasePartial(e.phraseId); break;
                 case 'arcade': this._onArcadeEvent(e.evt); break;
-                case 'arcadeRecord': /* already in session.arcadeEvents; telemetry reads it at build time */ break;
+                case 'arcadeRecord': {
+                    // The record is already in session.arcadeEvents (telemetry reads it
+                    // at build time); here it drives the verdict flash — same source of
+                    // truth as the gold paint, including lateRescue upgrades.
+                    if (window.KaraokeeScoreFeedback && e.record) {
+                        this._flashLineVerdict(e.record.lineIdx, KaraokeeScoreFeedback.arcadeVerdict(e.record));
+                    }
+                    break;
+                }
                 case 'honestPct': { var el = document.getElementById('score-pct'); if (el && e.pct != null) el.textContent = e.pct + '%'; break; }
-                case 'transition': if (window._kDebug) this._logTransition(e.fromIdx, e.toIdx, e.trigger, e.fromText, e.matchedCount, e.total, e.missedWords, e.lineStartAudioTime, e.sourceCounts); break;
+                case 'transition':
+                    // Always captured: _logTransition only writes telemetry (summary.sync
+                    // drift stats derive from it). Gating it on the debug HUD silently
+                    // blanked medianLineDriftMs on any run played without the D panel
+                    // (2 of the 5 runs in the 2026-07-21 morning corpus).
+                    this._logTransition(e.fromIdx, e.toIdx, e.trigger, e.fromText, e.matchedCount, e.total, e.missedWords, e.lineStartAudioTime, e.sourceCounts);
+                    break;
                 case 'resetSpans': this._resetLineSpans(e.lineIdx); break;
                 case 'wordSpans': this._updateWordSpans(); break;
             }
@@ -1254,13 +1267,19 @@ class GameMode {
             this._shownMult = st.multiplier;
         }
 
-        // Streak milestone callout at 10 / 25 / 50 (distinct from on-fire).
-        if (evt && window.KaraokeeScoreFeedback) {
-            var msLabel = KaraokeeScoreFeedback.milestoneForStreak(evt.streak);
+        // A corrected post-settlement outcome is a celebration, not a quiet score
+        // mutation: show an explicit LATE RESCUE callout. Ordinary streak milestones
+        // keep using the same presentation slot on non-rescue events.
+        if (evt) {
+            var isRescue = evt.outcome === 'rescue';
+            var msLabel = isRescue ? 'LATE RESCUE'
+                : (window.KaraokeeScoreFeedback
+                    ? KaraokeeScoreFeedback.milestoneForStreak(evt.streak) : null);
             if (msLabel) {
                 var msEl = document.getElementById('ahMilestone');
                 if (msEl) {
                     msEl.textContent = msLabel;
+                    msEl.classList.toggle('rescue', isRescue);
                     msEl.classList.remove('show');
                     void msEl.offsetWidth;
                     msEl.classList.add('show');
@@ -1320,13 +1339,18 @@ class GameMode {
 
     /**
      * Initialise the telemetry log for this session.
-     * Called from startGame() when debug mode is active.
+     * Called from startGame() for every run; the selected capture profile
+     * decides which optional diagnostics are retained.
      */
     _initTelemetry() {
         var sd = {};
         try { sd = JSON.parse(sessionStorage.getItem('songData') || '{}'); } catch (e) {}
         var title = (sd.artist && sd.title) ? sd.artist + ' — ' + sd.title : (document.title || 'unknown');
+        var captureProfile = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.normalizeTelemetryProfile(localStorage.getItem('karaokee_telemetry_profile'))
+            : 'compact';
         this._telemetry = {
+            captureProfile: captureProfile,
             meta: {
                 songTitle:        title,
                 songDurationMs:   playback && playback.duration() ? Math.round(playback.duration() * 1000) : null,
@@ -1340,6 +1364,10 @@ class GameMode {
             matches:     [],
             promotions:  [],   // VAD→ASR upgrade events (both browser SR and Whisper paths)
             transitions: [],
+            // Event-volume counters, bumped even when the compact profile skips the
+            // raw arrays — summary.counts must report true volumes in every profile
+            // (a compact run's counts read all-zero otherwise).
+            counters:    { asr: 0, matches: 0, promotions: 0 },
             phraseEngine: {
                 version: 1,
                 mode: 'shadow',
@@ -1359,6 +1387,8 @@ class GameMode {
      */
     _logAsr(type, text, wordTimestamps, source) {
         if (!this._telemetry) return;
+        this._telemetry.counters.asr++;
+        if (this._telemetry.captureProfile === 'compact') return;
         try {
             var tempoClass = 'medium';
             if (this.activeLineIdx >= 0 && this.allWordTimings[this.activeLineIdx]) {
@@ -1387,6 +1417,8 @@ class GameMode {
      */
     _logPromotion(source, wordIndex, score) {
         if (!this._telemetry) return;
+        this._telemetry.counters.promotions++;
+        if (this._telemetry.captureProfile === 'compact') return;
         try {
             this._telemetry.promotions.push({
                 ts:        parseFloat((performance.now() / 1000).toFixed(3)),
@@ -1403,8 +1435,9 @@ class GameMode {
      */
     _logMatch(spokenWord, targetWord, method, editDistance, phoneticMatch, score, matched, windowPosition) {
         if (!this._telemetry) return;
-        if (!window._kDebug) return;
         if (score <= 0) return;   // suppress noise — log only successful matches
+        this._telemetry.counters.matches++;   // counted pre-dedup: every real match event
+        if (this._telemetry.captureProfile === 'compact') return;
 
         // Smart filtering: only log first-time matches for words already confirmed matched.
         // Skip redundant re-checks for words already confirmed matched.
@@ -1448,17 +1481,6 @@ class GameMode {
             total += (timings[i].weight || 1.0);
         }
         return parseFloat(total.toFixed(2));
-    }
-
-    _computeLineWeightedMatched(lineIdx) {
-        var timings = (lineIdx >= 0 && lineIdx < this.allWordTimings.length)
-            ? this.allWordTimings[lineIdx] : [];
-        var matched = 0;
-        for (var i = 0; i < timings.length; i++) {
-            var score = this.matchedSet.get ? this.matchedSet.get(i) : (this.matchedSet.has(i) ? 1.0 : 0);
-            if (score > 0) matched += (timings[i].weight || 1.0) * score;
-        }
-        return parseFloat(matched.toFixed(2));
     }
 
     /**
@@ -1506,7 +1528,6 @@ class GameMode {
                 trigger:      trigger,
                 matchedWords:    matchedWords,
                 totalWords:      totalWords,
-                weightedMatched: this._computeLineWeightedMatched(fromIdx),
                 weightedTotal:   this._computeLineWeightedTotal(fromIdx),
                 missedWords:  missedWords || [],
                 timeSpentMs:  timeSpentMs,
@@ -1514,7 +1535,6 @@ class GameMode {
                 expectedTimeMs: expectedMs,
                 earlyMs:      earlyMs,
                 lateMs:       lateMs,
-                totalComparisons: this._lineComparisonCount,
                 sourceCounts: sourceCounts || { vad: 0, browser_sr: 0, whisper: 0, unknown: 0 },
             });
         } catch (e) { /* telemetry must never crash the game */ }
@@ -1527,6 +1547,8 @@ class GameMode {
     _buildTelemetryPayload(endReason) {
         if (!this._telemetry) return null;
         var meta = this._telemetry.meta;
+        var captureProfile = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.normalizeTelemetryProfile(this._telemetry.captureProfile) : 'compact';
         if (!meta.songDurationMs && playback && playback.duration()) {
             meta.songDurationMs = Math.round(playback.duration() * 1000);
         }
@@ -1558,9 +1580,10 @@ class GameMode {
         meta.whisperRealtimeLastError  = this._whisperRealtimeLastError   || '';
         meta.finalWordSourceCounts     = this._countWordSources(this.wordSourceMap);
 
-        // v2 meta additions
-        meta.schemaVersion = 2;
+        // v3: analysis-first by default; raw diagnostics are capture-profile gated.
+        meta.schemaVersion = 3;
         meta.gameVersion   = '2.0';
+        meta.telemetryProfile = captureProfile;
         meta.neuralVadActive = !!this._neuralVadActive;       // did Silero VAD init this run?
         meta.vadInitError    = this._vadInitError || null;    // why not, if it didn't
         meta.endedAt       = new Date().toISOString();
@@ -1570,9 +1593,16 @@ class GameMode {
         // so also honor the onEnded-set flag — a full playthrough is "completed" either way.
         meta.completed     = !!(this._reachedEnd || (_cDur && this._now() >= _cDur - 0.5));
 
-        // (Run-intent / fairness / notes feedback inputs were removed from the end screen;
-        // keep an empty benchmark so the telemetry shape is unchanged.)
-        var benchmark = { intent: '', fairness: '', notes: '' };
+        // D-HUD lets a tester label the next saved run without adding benchmark
+        // controls to the player-facing end screen. Unknown/stale values collapse
+        // to the backwards-compatible empty label.
+        var storedIntent = localStorage.getItem('karaokee_benchmark_intent') || '';
+        var benchmark = {
+            intent: window.KaraokeeTelemetry
+                ? KaraokeeTelemetry.normalizeBenchmarkIntent(storedIntent) : '',
+            fairness: '',
+            notes: ''
+        };
 
         var traces = [];
         if (this._phraseSession && window.KaraokeePhraseEngine) {
@@ -1598,10 +1628,13 @@ class GameMode {
         // start(), but read the session directly so telemetry is correct even if the alias
         // was reset).
         var arcadeEvents = (this._session && this._session.arcadeEvents) || this._arcadeEvents || [];
+        // Counters, not array lengths: the compact profile skips the raw arrays but
+        // the counts must still report true event volumes (recognizer-health denominators).
+        var eventCounters = this._telemetry.counters || { asr: 0, matches: 0, promotions: 0 };
         var counts = {
-            asr:         this._telemetry.asr.length,
-            matches:     this._telemetry.matches.length,
-            promotions:  this._telemetry.promotions.length,
+            asr:         eventCounters.asr,
+            matches:     eventCounters.matches,
+            promotions:  eventCounters.promotions,
             transitions: this._telemetry.transitions.length,
             arcadeEvents: arcadeEvents.length
         };
@@ -1619,6 +1652,9 @@ class GameMode {
             counts: counts
         }) : null;
 
+        var phrasePlan = this._telemetry.phraseEngine ? this._telemetry.phraseEngine.plan : null;
+        var analysis = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.buildAnalysisDigest(traces) : null;
         var payload = {
             meta: meta,
             summary: summary,
@@ -1634,17 +1670,24 @@ class GameMode {
                 mode: 'headline',
                 difficulty: difficulty,
                 benchmark: benchmark,
-                plan: this._telemetry.phraseEngine ? this._telemetry.phraseEngine.plan : null
+                planSummary: {
+                    version: phrasePlan ? phrasePlan.version : null,
+                    phraseCount: phrasePlan && phrasePlan.phrases ? phrasePlan.phrases.length : 0
+                }
             },
+            analysis: analysis,
             transitions: this._telemetry.transitions
         };
 
-        // Heavy data only under debug (press D).
-        if (window._kDebug) {
-            payload.phraseEngine.traces = traces;
-            payload.asr = this._telemetry.asr;
-            payload.matches = this._telemetry.matches;
-            payload.promotions = this._telemetry.promotions;
+        var diagnostics = window.KaraokeeTelemetry ? KaraokeeTelemetry.selectDiagnostics(captureProfile, {
+            asr: this._telemetry.asr,
+            matches: this._telemetry.matches,
+            promotions: this._telemetry.promotions,
+            phrasePlan: phrasePlan,
+            phraseTraces: traces
+        }) : null;
+        if (diagnostics) {
+            payload.diagnostics = diagnostics;
         }
         return payload;
     }
@@ -1744,6 +1787,25 @@ class GameMode {
         const wStart  = this.lineStartWordCount;
 
         let html = '<div class="dbg-header">GAME DEBUG &mdash; press D to hide</div>';
+        const intent = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.normalizeBenchmarkIntent(localStorage.getItem('karaokee_benchmark_intent')) : '';
+        const intentOptions = [
+            ['', 'untagged'],
+            ['good_expert_run', 'good expert run'],
+            ['humming_cheese', 'humming cheese'],
+            ['silent_section_test', 'silent section'],
+            ['ui_test', 'UI test (skip analysis)']
+        ].map(([value, label]) => `<option value="${value}"${intent === value ? ' selected' : ''}>${label}</option>`).join('');
+        html += `<div class="dbg-row"><label><span class="dbg-label">Intent</span> <select class="dbg-intent" onchange="localStorage.setItem('karaokee_benchmark_intent', this.value)">${intentOptions}</select></label></div>`;
+        const telemetryProfile = window.KaraokeeTelemetry
+            ? KaraokeeTelemetry.normalizeTelemetryProfile(localStorage.getItem('karaokee_telemetry_profile')) : 'compact';
+        const profileOptions = [
+            ['compact', 'compact analysis (recommended)'],
+            ['recognition', 'recognition diagnostics'],
+            ['full', 'full engine diagnostics']
+        ].map(([value, label]) => `<option value="${value}"${telemetryProfile === value ? ' selected' : ''}>${label}</option>`).join('');
+        const activeProfile = this._telemetry ? this._telemetry.captureProfile : 'not started';
+        html += `<div class="dbg-row"><label><span class="dbg-label">Capture</span> <select class="dbg-profile" onchange="localStorage.setItem('karaokee_telemetry_profile', this.value)">${profileOptions}</select></label> <span class="dbg-label">next run · active:${activeProfile}</span></div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Line  </span>#${lineNum}: ${lineText}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Words </span>${wordSpans || '—'}</div>`;
         html += `<div class="dbg-row"><span class="dbg-label">Final </span><span class="dbg-final">&hellip;${tail}</span></div>`;
@@ -2368,7 +2430,8 @@ function renderDifficultyPreview(d) {
         plan = KaraokeePhraseEngine.buildPhrasePlan(lyrics, {
             difficulty: d,
             audioDuration: playback ? (playback.duration() || null) : null,
-            clean: localStorage.getItem('cleanMode') === '1'
+            clean: localStorage.getItem('cleanMode') === '1',
+            provider: gameMode._isRealtimeWhisperProvider() ? 'openai_realtime' : 'browser_sr'
         });
     } catch (e) { box.style.display = 'none'; return; }
 

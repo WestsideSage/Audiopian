@@ -64,7 +64,7 @@
         return prev[n];
     }
 
-    function doubleMetaphone(word) {
+    function doubleMetaphoneFull(word) {
         if (!word || typeof word !== 'string') return ['', ''];
         word = word.toUpperCase().replace(/[^A-Z]/g, '');
         if (!word) return ['', ''];
@@ -287,7 +287,14 @@
             }
         }
 
-        return [p.substring(0, 4), s.substring(0, 4)];
+        return [p, s];
+    }
+
+    // Preserve the long-standing four-character scorer fast path exactly. The
+    // lattice fallback consumes the full code through the separate export below.
+    function doubleMetaphone(word) {
+        var full = doubleMetaphoneFull(word);
+        return [full[0].substring(0, 4), full[1].substring(0, 4)];
     }
 
     root.doubleMetaphone = doubleMetaphone;
@@ -579,6 +586,7 @@
 
     return {
         doubleMetaphone: doubleMetaphone,
+        doubleMetaphoneFull: doubleMetaphoneFull,
         wordsMatch: wordsMatch,
         wordsMatchScore: wordsMatchScore,
         normalizeWord: normalizeWord,

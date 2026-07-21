@@ -83,6 +83,24 @@
     }
 
     /**
+     * Verdict for the per-line flash, derived from the SAME arcade record that
+     * drives the gold paint — so the flash and the line color can never disagree
+     * (the old lineVerdict ratio came from the V1 word tally and could). Rescue
+     * records flash their UPGRADED outcome. Unknown/absent outcomes return null:
+     * nothing to flash.
+     * @param {{outcome: string, perfect: boolean, rescuedOutcome: string}|null} record
+     * @returns {'perfect'|'nice'|'partial'|'miss'|null}
+     */
+    function arcadeVerdict(record) {
+        if (!record) return null;
+        var outcome = record.outcome === 'rescue' ? record.rescuedOutcome : record.outcome;
+        if (outcome === 'clear') return record.perfect ? 'perfect' : 'nice';
+        if (outcome === 'partial') return 'partial';
+        if (outcome === 'miss') return 'miss';
+        return null;
+    }
+
+    /**
      * Streak callout label for the milestone streak lengths (10/25/50), else null.
      * @param {number} streak
      * @returns {string|null}
@@ -107,6 +125,7 @@
         countUpValue: countUpValue,
         countUpDurationMs: countUpDurationMs,
         lineVerdict: lineVerdict,
+        arcadeVerdict: arcadeVerdict,
         milestoneForStreak: milestoneForStreak,
         tierUpLabel: tierUpLabel
     };

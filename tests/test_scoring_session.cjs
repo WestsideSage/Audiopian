@@ -22,7 +22,7 @@ function load(name, deps) {
         require: function (spec) {
             var m = { './match-helpers.js': mh, './sync-helpers.js': sh,
                       './scoring.js': scoring, './phrase-engine.js': phrase,
-                      './scoring-arcade.js': arcade }[spec];
+                      './scoring-arcade.js': arcade, './lattice-align.js': lattice }[spec];
             if (!m) throw new Error('Unexpected require: ' + spec);
             return m;
         }, globalThis: globalThis
@@ -31,6 +31,7 @@ function load(name, deps) {
 var mh = loadBrowserCommonJs(path.join(S, 'match-helpers.js'));
 var sh = loadBrowserCommonJs(path.join(S, 'sync-helpers.js'));
 var scoring = load('scoring.js');
+var lattice = load('lattice-align.js');
 var phrase = load('phrase-engine.js');
 var arcade = loadBrowserCommonJs(path.join(S, 'scoring-arcade.js'));
 var session = load('scoring-session.js');
@@ -149,6 +150,26 @@ function matchHotWordForTest(s, text, now) {
     assert.strictEqual(s.matchedSet.size, 3, 'all three present words matched into matchedSet');
     var matched = out.filter(function (e) { return e.type === 'wordMatched' && e.matched === true; });
     assert.ok(matched.length >= 3, 'emits a wordMatched for each present word');
+})();
+
+// Score anchors, lyric paint, and matches[] telemetry share the phrase-engine
+// matcher. The same phrase-equivalence decision must appear on both surfaces.
+(function () {
+    var L = [lyric(0, 'alright people listen'), lyric(4, 'tail words here')];
+    var cfg = { lyrics: L, allWordTimings: buildAllWordTimings(L),
+                phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'easy', audioDuration: 8 }),
+                difficulty: 'easy' };
+    var s = session.createSession(cfg);
+    session.setActiveLine(s, 0, 0);
+    session.ingestFinal(s, 'all right', 'browser_sr');
+    var out = session.tick(s, 2);
+    var ph = cfg.phrasePlan.phrases[0];
+    var anchor = ph.anchors.find(function (a) { return a.word === 'alright'; });
+    assert.ok(s.phraseSession.states[ph.phraseId].anchorHits[anchor.anchorIdx],
+        'canonical matcher credits the scoring anchor');
+    assert.ok(s.matchedSet.has(anchor.wordIdx), 'the paint read model credits the same displayed word');
+    assert.ok(out.some(function (e) { return e.type === 'wordMatched' && e.method === 'phrase'; }),
+        'matches telemetry reports the canonical phrase-equivalence method');
 })();
 
 // Whisper final path: accumulates into whisperBuffer and matches via collectMatchesWhisper.
@@ -444,6 +465,63 @@ function matchHotWordForTest(s, text, now) {
         'a missed phrase emits phraseMissed');
     assert.strictEqual(events.filter(function (e) { return e.type === 'phraseCleared'; }).length, 0,
         'a missed phrase does NOT emit phraseCleared');
+})();
+
+// A recognizer final arriving shortly after a committed miss upgrades the arcade
+// outcome instead of leaving the singer with a false streak break. The rescue is a
+// first-class HUD + telemetry event and the phrase repaint follows the final judgment.
+(function () {
+    var s = session.createSession(twoLineCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.setEnergy(s, true);
+    session.tick(s, 1.0);                          // in-window flow, but no lyric hits
+    session.setEnergy(s, false);
+    var missEvents = session.tick(s, 3.5);         // p0 settles and commits MISS
+    assert.ok(missEvents.some(function (e) {
+        return e.type === 'arcade' && e.evt.phraseId === 'p0' && e.evt.outcome === 'miss';
+    }), 'precondition: p0 committed as a miss');
+
+    session.ingestFinal(s, 'first line words', 'browser_sr');
+    var rescued = session.tick(s, 4.0);            // 0.5s after commit, inside rescue window
+    var rescueHud = rescued.find(function (e) {
+        return e.type === 'arcade' && e.evt.phraseId === 'p0' && e.evt.outcome === 'rescue';
+    });
+    var rescueRecord = rescued.find(function (e) {
+        return e.type === 'arcadeRecord' && e.record.kind === 'lateRescue';
+    });
+    assert.ok(rescueHud, 'late final emits a LATE RESCUE arcade event');
+    assert.strictEqual(rescueHud.evt.previousOutcome, 'miss');
+    assert.strictEqual(rescueHud.evt.rescuedOutcome, 'clear');
+    assert.ok(rescueRecord, 'late rescue is appended to arcade telemetry events');
+    assert.strictEqual(rescueRecord.record.phraseId, 'p0');
+    assert.ok(rescued.some(function (e) { return e.type === 'phraseCleared' && e.phraseId === 'p0'; }),
+        'the rescued phrase repaints to its corrected clear outcome');
+    assert.strictEqual(s.arcadeEvents.filter(function (e) { return e.kind === 'lateRescue'; }).length, 1,
+        'telemetry stores exactly one rescue record');
+})();
+
+// The rescue window is bounded but long enough for the validated browser-SR batch
+// lag in Bands (line 32 landed 11.6s after its original arcade settlement).
+(function () {
+    function rescueAt(nowSec) {
+        var s = session.createSession(twoLineCfg());
+        session.setActiveLine(s, 0, 0.0);
+        session.setEnergy(s, true);
+        session.tick(s, 1.0);
+        session.setEnergy(s, false);
+        session.tick(s, 3.5);
+        session.ingestFinal(s, 'first line words', 'browser_sr');
+        return session.tick(s, nowSec);
+    }
+    var within = rescueAt(15.0);                    // 11.5s after commit
+    assert.ok(within.some(function (e) {
+        return e.type === 'arcade' && e.evt.outcome === 'rescue';
+    }), 'validated 11.6s browser-SR batching remains rescuable');
+
+    var expired = rescueAt(15.6);                   // 12.1s after commit
+    assert.strictEqual(expired.filter(function (e) {
+        return e.type === 'arcade' && e.evt.outcome === 'rescue';
+    }).length, 0, 'late evidence beyond the bounded rescue window does not mutate the arcade');
 })();
 
 // A settled phrase with SOME anchors hit but not confirmed commits as a PARTIAL and emits
@@ -912,6 +990,57 @@ function matchHotWordForTest(s, text, now) {
     var committed = s.arcadeEvents.map(function (r) { return r.phraseId; });
     assert.strictEqual(committed.indexOf('p0'), -1,
         'stopping mid-line does not commit the unfinished active line');
+})();
+
+// --- Perfect-line gold paint: phraseCleared carries the arcade `perfect` flag ---
+// The renderer paints a perfect line (ALL anchors hit, not just the required
+// subset) gold instead of plain green, so the flag must ride the commit-time and
+// rescue-time phraseCleared events. Live reconcile-path phraseCleared events stay
+// bare (perfect is only authoritative at commit).
+(function () {
+    function fourAnchorCfg() {
+        var L = [lyric(0, 'alpha bravo charlie delta'), lyric(3, 'closing words here')];
+        return { lyrics: L, allWordTimings: buildAllWordTimings(L),
+                 phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 8 }),
+                 difficulty: 'medium' };
+    }
+    // All four anchors hit -> the commit-time phraseCleared says perfect: true.
+    var s = session.createSession(fourAnchorCfg());
+    session.setActiveLine(s, 0, 0.0);
+    session.ingestFinal(s, 'alpha bravo charlie delta', 'browser_sr');
+    session.tick(s, 1.0);
+    session.setActiveLine(s, 1, 3.0);
+    var out = session.tick(s, 4.6);                      // p0 settled (end 3 + 1.4) -> commit
+    var pc = out.filter(function (e) { return e.type === 'phraseCleared' && e.phraseId === 'p0'; });
+    assert.strictEqual(pc.length, 1, 'commit emits one phraseCleared for p0');
+    assert.strictEqual(pc[0].perfect, true, 'all anchors hit -> phraseCleared.perfect true');
+    // Only the required subset hit -> cleared but NOT perfect.
+    var s2 = session.createSession(fourAnchorCfg());
+    session.setActiveLine(s2, 0, 0.0);
+    session.ingestFinal(s2, 'alpha bravo', 'browser_sr');
+    session.tick(s2, 1.0);
+    session.setActiveLine(s2, 1, 3.0);
+    var out2 = session.tick(s2, 4.6);
+    var pc2 = out2.filter(function (e) { return e.type === 'phraseCleared' && e.phraseId === 'p0'; });
+    assert.strictEqual(pc2.length, 1, 'commit emits one phraseCleared for the ordinary clear');
+    assert.strictEqual(pc2[0].perfect, false, 'required-only clear -> phraseCleared.perfect false');
+})();
+// A lateRescue that lands ALL anchors emits its phraseCleared with perfect: true.
+(function () {
+    var L = [lyric(0, 'alpha bravo charlie'), lyric(3, 'closing words here')];
+    var s = session.createSession({ lyrics: L, allWordTimings: buildAllWordTimings(L),
+        phrasePlan: phrase.buildPhrasePlan(L, { difficulty: 'medium', audioDuration: 8 }),
+        difficulty: 'medium' });
+    session.setActiveLine(s, 0, 0.0);
+    session.tick(s, 1.0);                                 // silent through line 0
+    session.setActiveLine(s, 1, 3.0);
+    session.tick(s, 4.6);                                 // p0 commits as MISS
+    session.ingestFinal(s, 'alpha bravo charlie', 'browser_sr');   // late batch, all anchors
+    var out = session.tick(s, 5.0);                       // credits land -> lateRescue upgrade
+    var resc = out.filter(function (e) { return e.type === 'phraseCleared' && e.phraseId === 'p0'; });
+    assert.ok(resc.length >= 1, 'rescue emits phraseCleared for p0');
+    assert.strictEqual(resc[resc.length - 1].perfect, true,
+        'rescue to a full-anchor clear carries perfect: true');
 })();
 
 console.log('Scoring session tests passed.');

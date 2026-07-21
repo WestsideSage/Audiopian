@@ -61,7 +61,14 @@
 
     /* status (semantic, constant app-wide) */
     --matched:      #34e89e;
-    --partial:      #ffcf5c;
+    /* Partial sits between clear-green and miss-red. ORANGE, not amber: the
+       PERFECT gold ramp owns the yellow family now, and the two must be
+       tellable apart at a glance mid-song. */
+    --partial:      #ff9d4d;
+    /* PERFECT-line gold ramp (dark: bright golds against the dark stage) */
+    --perfect-1:    #d9a520;
+    --perfect-2:    #ffd75e;
+    --perfect-3:    #fff3c2;
     --missed:       #ff5d73;
     --key:          var(--p);
 
@@ -161,7 +168,12 @@
     /* status inks deepened: matched green / partial amber / missed red
        must read instantly on white from across the room. */
     --matched:      #0a9e66;
-    --partial:      #c07f00;
+    /* Orange, not amber — the gold ramp owns yellow (see dark-theme note). */
+    --partial:      #c25e00;
+    /* PERFECT-line gold ramp (light: deeper ambers so the gradient doesn't wash out) */
+    --perfect-1:    #8a6400;
+    --perfect-2:    #c99a12;
+    --perfect-3:    #e8c968;
     --missed:       #e0334a;
     --key:          #0a8aa8;
 
@@ -1034,6 +1046,31 @@ body.player { display: block; padding: 0; }
     100% { transform: scale(1); }
 }
 
+/* PERFECT — every anchor on the line landed (the arcade's own definition), one
+   tier above the green clear: prismatic gold gradient text with a slow shimmer
+   sweep. text-shadow must stay off (it would silhouette the transparent
+   background-clip glyphs); the glow comes from drop-shadow, which follows the
+   rendered gradient instead. */
+.word-span.matched.matched-perfect {
+    background: linear-gradient(100deg,
+        var(--perfect-1) 0%, var(--perfect-2) 22%, var(--perfect-3) 46%,
+        var(--perfect-2) 68%, var(--perfect-1) 100%);
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: none;
+    filter: drop-shadow(0 0 9px color-mix(in srgb, var(--perfect-2) 45%, transparent));
+    animation: wordPop .3s var(--ease-spring) both, perfectShimmer 2.6s linear infinite;
+}
+@keyframes perfectShimmer {
+    from { background-position: 0% 0; }
+    to   { background-position: -220% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .word-span.matched.matched-perfect { animation: wordPop .3s var(--ease-spring) both; }
+}
+
 .word-span.matched-partial {
     color: var(--partial); font-weight: 600;
     text-shadow: 0 0 12px color-mix(in srgb, var(--partial) 45%, transparent);
@@ -1095,7 +1132,14 @@ body.insanity #lyrics-scroll .lyric-line.active {
     pointer-events: none;
     animation: fadeOut 1.2s ease forwards;
 }
-.line-score-flash.v-perfect { color: var(--matched); text-shadow: 0 0 14px color-mix(in srgb, var(--matched) 60%, transparent); }
+/* PERFECT flash matches the gilded line: same gold ramp, gradient through the text. */
+.line-score-flash.v-perfect {
+    background: linear-gradient(100deg, var(--perfect-1), var(--perfect-2) 45%, var(--perfect-3) 75%, var(--perfect-2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 10px color-mix(in srgb, var(--perfect-2) 55%, transparent));
+}
 .line-score-flash.v-nice    { color: var(--p-ink); }
 .line-score-flash.v-partial { color: var(--partial); }
 .line-score-flash.v-miss    { color: var(--missed); }
@@ -1222,11 +1266,26 @@ body.arcade-onfire .sp-popup { color: var(--fire-c); text-shadow: 0 0 14px rgba(
     opacity: 0; pointer-events: none;
 }
 .sp-milestone.show { animation: spMilestone 1.1s var(--ease-out) forwards; }
+.sp-milestone.rescue {
+    padding: 6px 12px;
+    border: 1px solid color-mix(in srgb, var(--matched) 60%, transparent);
+    border-radius: var(--r-pill);
+    background: color-mix(in srgb, var(--matched) 15%, var(--surface-2));
+    -webkit-text-fill-color: var(--matched); color: var(--matched);
+    box-shadow: 0 0 22px color-mix(in srgb, var(--matched) 35%, transparent);
+}
+.sp-milestone.rescue.show { animation: lateRescue 1.45s var(--ease-spring) forwards; }
 @keyframes spMilestone {
     0%   { opacity: 0; transform: translateY(8px) scale(.8); }
     20%  { opacity: 1; transform: translateY(0) scale(1.12); }
     80%  { opacity: 1; transform: translateY(0) scale(1); }
     100% { opacity: 0; transform: translateY(-6px) scale(1); }
+}
+@keyframes lateRescue {
+    0%   { opacity: 0; transform: translateY(10px) scale(.72) rotate(-2deg); }
+    22%  { opacity: 1; transform: translateY(0) scale(1.16) rotate(1deg); }
+    72%  { opacity: 1; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-8px) scale(1.03); }
 }
 
 /* -- ON FIRE — the spectacle players chase. Pure CSS (self-animating), so

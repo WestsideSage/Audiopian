@@ -1,13 +1,18 @@
 (function(root, factory) {
     if (typeof module !== 'undefined' && module.exports) {
-        module.exports = factory(require('./scoring.js'), require('./match-helpers.js'), root || globalThis);
+        module.exports = factory(require('./scoring.js'), require('./match-helpers.js'),
+                                 require('./lattice-align.js'), root || globalThis);
     } else {
-        root.KaraokeePhraseEngine = factory(root.KaraokeeScoring, root, root);
+        root.KaraokeePhraseEngine = factory(root.KaraokeeScoring, root,
+                                            root.KaraokeeLatticeAlign, root);
     }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function(scoring, matchHelpers, root) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function(scoring, matchHelpers, lattice, root) {
     var classifyWord = matchHelpers.classifyWord || root.classifyWord;
     var WORD_WEIGHTS = matchHelpers.WORD_WEIGHTS || root.WORD_WEIGHTS || { core: 1.0, function: 0.5, adlib: 0.25 };
     var ADLIB_WORDS = matchHelpers.ADLIB_WORDS || root.ADLIB_WORDS;
+    var multiWordContractionMatch = matchHelpers.multiWordContractionMatch || root.multiWordContractionMatch;
+    var phraseMatch = matchHelpers.phraseMatch || root.phraseMatch;
+    var alignPhonemeLattice = lattice && lattice.alignPhonemeLattice;
 
     // Lazy profanity resolver (load-order robust): require() in Node, window global in browser.
     function _profanity() {
@@ -20,13 +25,13 @@
     function _isNeverScore(w) { var p = _profanity(); return !!(p && p.isNeverScore && p.isNeverScore(w)); }
 
     var DIFFICULTY = {
-        easy:   { requiredAnchorRatio: 0.20, timingToleranceMs: 1400, settlementMs: 1800, minFlowCoverage: 0.20 },
-        medium: { requiredAnchorRatio: 0.45, timingToleranceMs: 1000, settlementMs: 1400, minFlowCoverage: 0.45 },
-        hard:   { requiredAnchorRatio: 0.65, timingToleranceMs: 750,  settlementMs: 1100, minFlowCoverage: 0.65 },
-        expert: { requiredAnchorRatio: 0.80, timingToleranceMs: 500,  settlementMs: 900,  minFlowCoverage: 0.80 },
+        easy:   { requiredAnchorRatio: 0.20, timingToleranceMs: 1400, settlementMs: 1800 },
+        medium: { requiredAnchorRatio: 0.45, timingToleranceMs: 1000, settlementMs: 1400 },
+        hard:   { requiredAnchorRatio: 0.65, timingToleranceMs: 750,  settlementMs: 1100 },
+        expert: { requiredAnchorRatio: 0.80, timingToleranceMs: 500,  settlementMs: 900 },
         // Insane: a 5th tier, strictly harder than expert (more required key words, tighter
         // timing). Paired with the collapsed-lyrics display (player.js gates on 'insane').
-        insane: { requiredAnchorRatio: 0.90, timingToleranceMs: 400,  settlementMs: 800,  minFlowCoverage: 0.90 }
+        insane: { requiredAnchorRatio: 0.90, timingToleranceMs: 400,  settlementMs: 800 }
     };
     var REPEATED_FILLER = {
         yeah: true, uh: true, oh: true, ay: true, aye: true, la: true,
@@ -56,6 +61,10 @@
     // finals legitimately batch 13-17s of lines. The unique-anchor catch-up pass
     // also keeps the full look-back — uniqueness already removes the ambiguity.
     var RECONCILE_INTERIM_LOOKBACK_SEC = 8;
+    // The general lattice is more permissive than token matching, so it gets a
+    // tighter rescue horizon. This blocks "hum now, speak the answer much later"
+    // while still covering ordinary settle/final batching around a line boundary.
+    var LATTICE_LOOKBACK_SEC = 4;
     // Fast-tempo recognition allowance: on high-WPS (>= FAST_WPS_THRESHOLD) lines the
     // browser recognizer demonstrably drops words -- real telemetry (a dense Roots rap)
     // showed ~3 of every 4 words dropped on back-to-back bars while VAD confirmed the
@@ -64,7 +73,14 @@
     // lines toward ~a quarter of the anchors, FLOORED at FAST_RECOGNIZED_FLOOR genuinely-
     // RECOGNIZED anchors. anchorHits only come from real recognition/reconcile (never bare
     // VAD energy), so humming/cheese (0 recognized) still fails the floor.
-    var FAST_WPS_THRESHOLD = 4.0;
+    // 4.0 -> 3.5 (2026-07-21): the five-run expert morning corpus showed the stuck
+    // VOICED partials cluster just under the old cliff (Roots 3.7/3.88/3.9/3.96,
+    // Klick Clack 3.52-3.95, Shoulder Lean 3.55/3.81 wps) with hits >= the eased
+    // bar -- same recognizer collapse, no relief. A corpus replay of every run with
+    // per-phrase data found 21 voiced partial->clear flips and ZERO miss->clear
+    // flips (a miss has 0 recognized anchors, so the floor is unreachable by
+    // silence/humming regardless of threshold).
+    var FAST_WPS_THRESHOLD = 3.5;
     // Back-to-back lines with minimal pausing: a line whose window is this short is
     // gone before the async recognizer can emit a final for it, so it gets the same
     // allowance as a high-WPS line even at moderate words/sec.
@@ -88,8 +104,7 @@
         return {
             requiredAnchorRatio: profile.requiredAnchorRatio,
             timingToleranceMs: profile.timingToleranceMs,
-            settlementMs: profile.settlementMs,
-            minFlowCoverage: profile.minFlowCoverage
+            settlementMs: profile.settlementMs
         };
     }
 
@@ -224,7 +239,13 @@
                 var chunkDur = chunk.endSec - chunk.startSec;
                 var chunkWps = chunk.words.length / Math.max(0.001, chunkDur);
                 if (anchorsRequired > 0 && (chunkWps >= FAST_WPS_THRESHOLD || chunkDur <= FAST_WINDOW_SEC)) {
-                    var fastBar = Math.max(FAST_RECOGNIZED_FLOOR, Math.ceil(anchors.length * 0.25));
+                    var fastFloor = FAST_RECOGNIZED_FLOOR;
+                    if (options.provider === 'openai_realtime' &&
+                            (difficultyName === 'expert' || difficultyName === 'insane') &&
+                            anchors.length >= 4) {
+                        fastFloor = 2;
+                    }
+                    var fastBar = Math.max(fastFloor, Math.ceil(anchors.length * 0.25));
                     anchorsRequired = Math.min(anchorsRequired, fastBar);
                 }
                 phrases.push({
@@ -417,37 +438,68 @@
         });
     }
 
+    // Canonical token matcher used by both phrase scoring and the lenient word-paint
+    // pass. Keeping phrase equivalence, contractions, compounds and ordinary word
+    // similarity here prevents display/telemetry from disagreeing with score anchors.
+    var COMPOUND_MERGE_MIN = 0.9;
+    function matchWordSequence(spokenWords, spokenIdx, targetWords, targetIdx, targetPhonetic) {
+        spokenWords = spokenWords || [];
+        targetWords = targetWords || [];
+        var target = targetWords[targetIdx];
+        if (!target || spokenIdx >= spokenWords.length) return null;
+
+        var contractionSpan = multiWordContractionMatch
+            ? multiWordContractionMatch(spokenWords, spokenIdx, target) : 0;
+        if (contractionSpan > 0) {
+            return { score: 1, method: 'contraction', spokenConsumed: contractionSpan, targetConsumed: 1 };
+        }
+        var equivalent = phraseMatch
+            ? phraseMatch(spokenWords, spokenIdx, targetWords, targetIdx) : null;
+        if (equivalent) {
+            return { score: 1, method: 'phrase', spokenConsumed: equivalent.spokenConsumed,
+                targetConsumed: equivalent.targetConsumed };
+        }
+
+        var single = scoring.wordsMatchScore(spokenWords[spokenIdx], target, targetPhonetic);
+        if (single && single.score > 0) {
+            return { score: single.score, method: single.method, spokenConsumed: 1, targetConsumed: 1 };
+        }
+        if (spokenIdx + 1 < spokenWords.length && target.length > spokenWords[spokenIdx].length) {
+            var merged = scoring.wordsMatchScore(
+                spokenWords[spokenIdx] + spokenWords[spokenIdx + 1], target, targetPhonetic);
+            if (merged && merged.score >= COMPOUND_MERGE_MIN) {
+                return { score: merged.score, method: 'compound', spokenConsumed: 2, targetConsumed: 1 };
+            }
+        }
+        return single ? { score: single.score, method: single.method, spokenConsumed: 1, targetConsumed: 1 } : null;
+    }
+
     // Compound-word bridge: a single lyric token (e.g. "throwdown") that the
     // recognizer splits into two ("throw down") would never match its anchor. When
     // the single token doesn't match, try it merged with the NEXT token and accept
     // ONLY a near-exact hit (>= COMPOUND_MERGE_MIN) on a LONGER (compound) anchor --
     // so unrelated adjacent words can't manufacture a credit. Returns the match
     // result plus how many tokens it consumed (1 normally, 2 on a compound merge).
-    var COMPOUND_MERGE_MIN = 0.9;
     function anchorMatchResult(token, nextToken, anchor) {
-        var single = scoring.wordsMatchScore(token.word, anchor.word, anchor.phonetic);
-        if (single && single.score >= 0.75) return { result: single, span: 1 };
-        if (nextToken && token.word && nextToken.word && anchor.word &&
-            anchor.word.length > token.word.length) {
-            var merged = scoring.wordsMatchScore(token.word + nextToken.word, anchor.word, anchor.phonetic);
-            if (merged && merged.score >= COMPOUND_MERGE_MIN) {
-                return { result: { score: merged.score, method: 'compound' }, span: 2 };
-            }
-        }
-        return { result: single || { score: 0, method: null }, span: 1 };
+        var spoken = nextToken ? [token.word, nextToken.word] : [token.word];
+        var match = matchWordSequence(spoken, 0, [anchor.word], 0, anchor.phonetic);
+        return {
+            result: match ? { score: match.score, method: match.method } : { score: 0, method: null },
+            span: match ? match.spokenConsumed : 1
+        };
     }
 
     function candidateFor(session, evidence, token, nextToken, state, anchor) {
         var tokenId = evidence.id + ':' + token.idx;
         if (session.consumedTokenIds[tokenId]) {
-            return { rejected: true, reason: 'already_consumed' };
+            return { rejected: true, reason: 'token_consumed' };
         }
         if (state.anchorHits[anchor.anchorIdx]) {
-            return { rejected: true, reason: 'already_consumed' };
+            return { rejected: true, reason: 'anchor_already_hit' };
         }
-        // Generic filler tokens are normally rejected as evidence — but if the anchor
-        // itself is a filler-only fallback ("uh uh" lines), we need to accept them.
-        if ((REPEATED_FILLER[token.word] || isAdlibWord(token.word)) && !anchor.fillerOnly) {
+        // Generic filler/ad-lib tokens never satisfy anchors; filler-only lines have
+        // no anchors and remain neutral instead of manufacturing a score target.
+        if (REPEATED_FILLER[token.word] || isAdlibWord(token.word)) {
             return { rejected: true, reason: 'generic_word' };
         }
         if (!isInsideReviewWindow(session, state.phrase, evidence, token)) {
@@ -489,7 +541,6 @@
         var accepted = [];
         var states = activePhraseStates(session, evidence);
         tokens.forEach(function(token, ti) {
-            if (session.consumedTokenIds[evidence.id + ':' + token.idx]) return; // merged into a prior compound
             var nextTok = (ti + 1 < tokens.length && !session.consumedTokenIds[evidence.id + ':' + tokens[ti + 1].idx]) ? tokens[ti + 1] : null;
             var candidates = [];
             states.forEach(function(state) {
@@ -630,7 +681,7 @@
                 for (var ai = 0; ai < anchors.length; ai++) {
                     var anchor = anchors[ai];
                     if (state.anchorHits[anchor.anchorIdx]) continue;
-                    if (isFiller && !anchor.fillerOnly) continue;
+                    if (isFiller) continue;
                     var m = anchorMatchResult(token, nextTok, anchor);
                     if (m.result && m.result.score >= 0.75) {
                         creditedAnchor = anchor;
@@ -726,6 +777,74 @@
                         updatePhraseResult(session, ustate);
                         break;
                     }
+                }
+            }
+        }
+
+        // General fallback for ASR word-segmentation drift. The fast token matcher
+        // above stays first; the lattice only sees still-unhit anchors and must pass
+        // both its whole-line and per-anchor phoneme guards. Flow eligibility is
+        // inherited from flowCandidates, so this never bypasses the cheese gate.
+        if (alignPhonemeLattice && flowCandidates.length > 0) {
+            for (var lci = 0; lci < flowCandidates.length; lci++) {
+                var lphrase = flowCandidates[lci];
+                var lstate = session.states[lphrase.phraseId];
+                if (nowSec - lphrase.endSec > LATTICE_LOOKBACK_SEC) continue;
+                var unhit = (lphrase.anchors || []).filter(function(anchor) {
+                    return !lstate.anchorHits[anchor.anchorIdx];
+                });
+                if (unhit.length === 0) continue;
+                var lresult = alignPhonemeLattice({
+                    lyricWords: lphrase.words || [],
+                    spokenWords: tokens.map(function(token) { return token.word; }),
+                    anchors: unhit
+                });
+                if (!lresult.accepted || !lresult.credits.length) continue;
+
+                for (var lri = 0; lri < lresult.credits.length; lri++) {
+                    var credit = lresult.credits[lri];
+                    var lanchor = null;
+                    for (var lai = 0; lai < unhit.length; lai++) {
+                        if (unhit[lai].anchorIdx === credit.anchorIdx) { lanchor = unhit[lai]; break; }
+                    }
+                    if (!lanchor || lstate.anchorHits[lanchor.anchorIdx]) continue;
+                    var supporting = (credit.tokenIndices || []).map(function(tokenPos) {
+                        return tokens[tokenPos];
+                    }).filter(function(token) {
+                        return token && !session.consumedTokenIds[evidence.id + ':' + token.idx];
+                    });
+                    if (supporting.length === 0) continue;
+
+                    supporting.forEach(function(token) {
+                        session.consumedTokenIds[evidence.id + ':' + token.idx] = true;
+                    });
+                    lstate.anchorHits[lanchor.anchorIdx] = {
+                        word: lanchor.word,
+                        source: source + '_lattice',
+                        evidenceId: evidence.id,
+                        score: 0.85,
+                        method: 'lattice'
+                    };
+                    pushBounded(lstate, 'evidence', {
+                        evidenceId: evidence.id,
+                        source: source + '_lattice',
+                        text: evidence.text || '',
+                        score: 0.85,
+                        method: 'lattice',
+                        lineScore: lresult.lineScore
+                    }, MAX_EVIDENCE_PER_PHRASE);
+                    supporting.forEach(function(token) {
+                        pushBounded(lstate, 'consumedTokens', {
+                            evidenceId: evidence.id,
+                            tokenIdx: token.idx,
+                            word: token.word,
+                            anchor: lanchor.word,
+                            source: source + '_lattice',
+                            timeSec: tokenTime(evidence, token),
+                            score: 0.85
+                        }, MAX_TOKENS_PER_PHRASE);
+                    });
+                    updatePhraseResult(session, lstate);
                 }
             }
         }
@@ -890,6 +1009,7 @@
 
     return {
         buildPhrasePlan: buildPhrasePlan,
+        matchWordSequence: matchWordSequence,
         splitLyricWordsWithParens: splitLyricWordsWithParens,
         getDifficultyProfile: getDifficultyProfile,
         selectAnchors: selectAnchors,

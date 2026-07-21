@@ -26,10 +26,17 @@ var scoring = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'scoring.
     },
     globalThis: globalThis
 });
+var lattice = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'lattice-align.js'), {
+    require: function(specifier) {
+        if (specifier === './scoring.js') return scoring;
+        throw new Error('Unexpected require: ' + specifier);
+    }
+});
 var phraseEngine = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'phrase-engine.js'), {
     require: function(specifier) {
         if (specifier === './scoring.js') return scoring;
         if (specifier === './match-helpers.js') return matchHelpers;
+        if (specifier === './lattice-align.js') return lattice;
         throw new Error('Unexpected require: ' + specifier);
     },
     globalThis: globalThis

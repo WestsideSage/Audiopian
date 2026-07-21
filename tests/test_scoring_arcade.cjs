@@ -151,4 +151,31 @@ assert.strictEqual(arcade.gradeFor(98, 'insane'), 'S', 'insane reaches S at 98')
     return rr;
 }, 5);
 
+// --- 15. Late rescue replays the committed sequence with the corrected outcome ---
+(function () {
+    var rescued = arcade.createArcadeState('medium');
+    arcade.commitPhrase(rescued, clear('before', 1, 2, 1));
+    arcade.commitPhrase(rescued, clear('late', 2, 3, 0));
+    arcade.commitPhrase(rescued, clear('after', 1, 2, 1));
+
+    var expected = arcade.createArcadeState('medium');
+    arcade.commitPhrase(expected, clear('before', 1, 2, 1));
+    arcade.commitPhrase(expected, clear('late', 2, 3, 2));
+    arcade.commitPhrase(expected, clear('after', 1, 2, 1));
+
+    var oldPoints = rescued.points;
+    var upgrade = arcade.upgradePhrase(rescued, 'late', { anchorsHit: 2 });
+    assert.ok(upgrade, 'an improved committed phrase emits a rescue event');
+    assert.strictEqual(upgrade.outcome, 'rescue');
+    assert.strictEqual(upgrade.previousOutcome, 'miss');
+    assert.strictEqual(upgrade.rescuedOutcome, 'clear');
+    assert.strictEqual(upgrade.pointsAwarded, expected.points - oldPoints,
+        'rescue awards the exact replayed points delta');
+    ['points', 'multiplier', 'ramp', 'streak', 'longestStreak', 'maxMultiplier',
+        'perfects', 'clears', 'onFire'].forEach(function (field) {
+        assert.strictEqual(rescued[field], expected[field],
+            'rescued sequence matches a correct-at-settle sequence for ' + field);
+    });
+})();
+
 console.log('test_scoring_arcade.cjs: all assertions passed');

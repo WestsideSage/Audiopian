@@ -595,3 +595,35 @@ def test_telemetry_writes_file(client):
         d = os.path.dirname(full)
         if os.path.isdir(d) and not os.listdir(d):
             os.rmdir(d)
+
+
+def test_telemetry_v3_writes_compact_json(client):
+    payload = {
+        "meta": {
+            "schemaVersion": 3,
+            "telemetryProfile": "compact",
+            "songTitle": "Beyoncé — Halo",
+            "startedAt": "2099-01-03T03:04:05.000Z",
+            "endedAt": "2099-01-03T03:09:00.000Z",
+        },
+        "summary": {"scores": {"honestLyricPct": 73}},
+        "analysis": {"phrases": [{"phraseId": "p0", "outcome": "clear"}]},
+    }
+    resp = client.post("/telemetry", json=payload)
+    assert resp.status_code == 200
+    data = resp.get_json()
+    from app import _HERE
+    full = os.path.join(_HERE, data["path"])
+    try:
+        with open(full, encoding="utf-8") as f:
+            raw = f.read()
+        assert "\n" not in raw
+        assert '"schemaVersion":3' in raw
+        assert "Beyoncé — Halo" in raw
+        assert json.loads(raw) == payload
+    finally:
+        if os.path.exists(full):
+            os.remove(full)
+        d = os.path.dirname(full)
+        if os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)

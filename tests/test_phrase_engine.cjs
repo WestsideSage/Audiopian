@@ -24,10 +24,17 @@ var scoring = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'scoring.
     },
     globalThis: globalThis
 });
+var lattice = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'lattice-align.js'), {
+    require: function(specifier) {
+        if (specifier === './scoring.js') return scoring;
+        throw new Error('Unexpected require: ' + specifier);
+    }
+});
 var phraseEngine = loadBrowserCommonJs(path.join(__dirname, '..', 'static', 'phrase-engine.js'), {
     require: function(specifier) {
         if (specifier === './scoring.js') return scoring;
         if (specifier === './match-helpers.js') return matchHelpers;
+        if (specifier === './lattice-align.js') return lattice;
         if (specifier === './profanity.js') return profanity;
         throw new Error('Unexpected require: ' + specifier);
     },
@@ -55,6 +62,8 @@ assert.strictEqual(plan.phrases[2].anchors.length, 0, 'filler-only lines get no 
 assert.strictEqual(plan.phrases[2].anchorsRequired, 0, 'filler-only lines require no anchors');
 assert.ok(plan.phrases[0].anchors.every(function(anchor) { return !anchor.fillerOnly; }), 'normal anchors are not marked fillerOnly');
 assert.ok(plan.difficulty.requiredAnchorRatio > 0.5, 'hard profile requires meaningful anchor coverage');
+assert.ok(!Object.prototype.hasOwnProperty.call(plan.difficulty, 'minFlowCoverage'),
+    'phrase plan no longer exports the unused minFlowCoverage field');
 
 // Insane difficulty: a 5th tier strictly harder than expert.
 (function () {
@@ -201,6 +210,48 @@ phraseEngine.addEvidence(negSession, {
 });
 assert.ok(!negSession.states[compPhrase.phraseId].anchorHits[throwdownAnchor.anchorIdx],
     'unrelated adjacent words do not merge into a false compound credit');
+
+// The phrase engine is the canonical matcher for both score anchors and lyric
+// paint. A spoken multi-word equivalent must therefore hit the anchor too, not
+// merely turn the old paint stack green (the historical "alright" divergence).
+(function () {
+    var equivPlan = phraseEngine.buildPhrasePlan([
+        { time: 0, text: 'alright people listen' },
+        { time: 4, text: 'tail words here' }
+    ], { difficulty: 'easy', audioDuration: 8 });
+    var equivPhrase = equivPlan.phrases[0];
+    var alright = equivPhrase.anchors.find(function (a) { return a.word === 'alright'; });
+    assert.ok(alright, 'precondition: alright is a scoring anchor');
+    var equivSession = phraseEngine.createPhraseSession(equivPlan);
+    phraseEngine.addEvidence(equivSession, {
+        id: 'phrase-equiv', source: 'browser_final', text: 'all right', words: [],
+        receivedAtSec: 2, audioTimeSec: 2
+    });
+    assert.ok(equivSession.states[equivPhrase.phraseId].anchorHits[alright.anchorIdx],
+        'spoken "all right" credits the "alright" anchor through the canonical matcher');
+})();
+
+// Rejection diagnostics distinguish an evidence token already spent elsewhere
+// from a fresh token aimed at an anchor that is already satisfied.
+(function () {
+    var rejectPlan = phraseEngine.buildPhrasePlan([
+        { time: 0, text: 'mountain river stone' },
+        { time: 4, text: 'tail words here' }
+    ], { difficulty: 'easy', audioDuration: 8 });
+    var rejectSession = phraseEngine.createPhraseSession(rejectPlan);
+    var first = { id: 'reject-token', source: 'browser_final', text: 'mountain', words: [],
+        receivedAtSec: 1, audioTimeSec: 1 };
+    phraseEngine.addEvidence(rejectSession, first);
+    phraseEngine.addEvidence(rejectSession, first);
+    phraseEngine.addEvidence(rejectSession, {
+        id: 'reject-anchor', source: 'browser_final', text: 'mountain', words: [],
+        receivedAtSec: 1.2, audioTimeSec: 1.2
+    });
+    var reasons = phraseEngine.getPhraseTrace(rejectSession)[0].rejectedCandidates.map(function (r) { return r.reason; });
+    assert.ok(reasons.indexOf('token_consumed') >= 0, 'reused evidence reports token_consumed');
+    assert.ok(reasons.indexOf('anchor_already_hit') >= 0, 'fresh evidence for a hit anchor reports anchor_already_hit');
+    assert.strictEqual(reasons.indexOf('already_consumed'), -1, 'ambiguous legacy rejection label is gone');
+})();
 
 var longLyrics = [];
 for (var i = 0; i < 180; i++) {
@@ -556,6 +607,20 @@ var fastFew = phraseEngine.buildPhrasePlan([
 var ff = fastFew.phrases.find(function (p) { return p.lineIdx === 0; });
 assert.ok(ff.anchors.length >= 2 && ff.anchors.length <= 4, 'precondition: a dense line with a few anchors');
 assert.strictEqual(ff.anchorsRequired, 1, 'a dense few-anchor line requires just 1 recognized anchor');
+// Realtime Whisper is materially more complete than browser SR. On Expert/Insane
+// lines with at least four anchors it keeps a two-word anti-cheese floor; browser
+// SR retains the one-word relief proven necessary by the Roots run.
+var providerLyrics = [
+    { time: 0, text: 'darkness preach gospel thunder' },
+    { time: 0.8, text: 'tail words here now please' }
+];
+var browserFast = phraseEngine.buildPhrasePlan(providerLyrics,
+    { difficulty: 'expert', provider: 'browser_sr', audioDuration: 8 }).phrases[0];
+var realtimeFast = phraseEngine.buildPhrasePlan(providerLyrics,
+    { difficulty: 'expert', provider: 'openai_realtime', audioDuration: 8 }).phrases[0];
+assert.ok(realtimeFast.anchors.length >= 4, 'precondition: provider-aware line has at least four anchors');
+assert.strictEqual(browserFast.anchorsRequired, 1, 'browser SR keeps the Roots-proven one-anchor fast floor');
+assert.strictEqual(realtimeFast.anchorsRequired, 2, 'realtime Whisper fast Expert line requires two recognized anchors');
 // Short back-to-back lines (minimal pausing) get the allowance even at moderate
 // WPS -- the recognizer can't emit a final inside a sub-1.2s window.
 var shortP = phraseEngine.buildPhrasePlan([
@@ -570,6 +635,28 @@ var normP = phraseEngine.buildPhrasePlan([
 ], { difficulty: 'expert', audioDuration: 30 });
 assert.ok(normP.phrases[0].anchorsRequired > 2,
     'a normal-tempo expert line keeps its full (higher) bar (buff is fast-only)');
+// The 3.5-4.0 wps band gets the allowance too. The 2026-07-21 five-run morning
+// corpus showed the stuck voiced partials cluster just under the old 4.0 cliff
+// (Roots 3.7-3.96, Klick Clack 3.5-3.95, Shoulder Lean 3.55-3.81) with hits at or
+// above the eased bar -- same recognizer collapse, no easing. Misses cannot flip:
+// the bar still requires >=1 genuinely-recognized anchor.
+var bandP = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'darkness heartless regardless preacher gospel monster crooked' }, // 7 words / 1.9s = 3.68 wps
+    { time: 1.9, text: 'tail words here now please' }
+], { difficulty: 'expert', audioDuration: 30 });
+var bandLine = bandP.phrases.find(function (p) { return p.lineIdx === 0; });
+assert.ok(bandLine.anchors.length >= 5, 'precondition: band line is anchor-rich');
+assert.strictEqual(bandLine.anchorsRequired, Math.max(1, Math.ceil(bandLine.anchors.length * 0.25)),
+    'a 3.5-4.0 wps line gets the fast-recognition allowance (2026-07-21 corpus)');
+// Just BELOW the band the full expert bar holds -- the easing stays fast-only.
+var subBandP = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'darkness heartless regardless preacher gospel monster' },        // 6 words / 1.9s = 3.16 wps
+    { time: 1.9, text: 'tail words here now please' }
+], { difficulty: 'expert', audioDuration: 30 });
+var subBandLine = subBandP.phrases.find(function (p) { return p.lineIdx === 0; });
+assert.ok(subBandLine.anchors.length >= 5, 'precondition: sub-band line is anchor-rich');
+assert.strictEqual(subBandLine.anchorsRequired, Math.ceil(subBandLine.anchors.length * 0.8),
+    'below 3.5 wps the full expert anchor ratio still applies');
 console.log('Fast-tempo cheese-floored bar: passed.');
 
 // --- Review fix: interim reconcile look-back is capped (cross-repeat steal guard) ---
@@ -693,6 +780,95 @@ console.log('Fast-tempo cheese-floored bar: passed.');
         'alive sensor + silent line 0 -> per-line flow gate still blocks');
     assert.ok(aliveTr[1].anchorsHit > 0, 'the vocalized line 1 still credits');
     console.log('Sensor-health fail-open: passed.');
+})();
+
+// Phoneme-lattice fallback runs only after the word matcher, recovering an unhit
+// anchor from a whole-line-supported ASR substitution and recording its evidence.
+(function () {
+    var L = [
+        { time: 0, text: 'shiny gold' },
+        { time: 3, text: 'tail words here' }
+    ];
+    var p = phraseEngine.buildPhrasePlan(L, { difficulty: 'expert', audioDuration: 6 });
+    var s = phraseEngine.createPhraseSession(p);
+    phraseEngine.addEvidence(s, {
+        id: 'lat-vad', source: 'vad', text: '', words: [], receivedAtSec: 1, audioTimeSec: 1
+    });
+    phraseEngine.reconcileLateEvidence(s, {
+        id: 'lat-final', source: 'browser_final', text: 'shiny goat', words: [],
+        receivedAtSec: 3.4, audioTimeSec: 3.4
+    }, 3.4, { requireInWindowFlow: true });
+    var state = s.states.p0;
+    assert.ok(state.anchorHits[1], 'gold anchor is recovered from shiny goat');
+    assert.strictEqual(state.anchorHits[1].method, 'lattice');
+    assert.strictEqual(state.anchorHits[1].score, 0.85);
+    assert.ok(state.consumedTokens.some(function (token) {
+        return token.source === 'browser_final_lattice' && token.word === 'goat';
+    }), 'lattice records and consumes the supporting ASR token');
+})();
+
+// Cheese gates: a later burst cannot lattice-credit a line that had no in-window
+// flow, and humming during a line cannot bank eligibility for a much later phrase.
+(function () {
+    var L = [
+        { time: 0, text: 'shiny gold' },
+        { time: 3, text: 'velvet morning' },
+        { time: 6, text: 'quiet tail words' }
+    ];
+    function make() {
+        return phraseEngine.createPhraseSession(
+            phraseEngine.buildPhrasePlan(L, { difficulty: 'expert', audioDuration: 10 }));
+    }
+
+    var silent = make();
+    phraseEngine.addEvidence(silent, {
+        id: 'silent-vad-later', source: 'vad', text: '', words: [], receivedAtSec: 4, audioTimeSec: 4
+    });
+    phraseEngine.reconcileLateEvidence(silent, {
+        id: 'silent-burst', source: 'browser_final', text: 'shiny goat', words: [],
+        receivedAtSec: 6.5, audioTimeSec: 6.5
+    }, 6.5, { requireInWindowFlow: true });
+    assert.strictEqual(Object.keys(silent.states.p0.anchorHits).length, 0,
+        'silent line gains zero lattice anchors from a later burst');
+
+    var hum = make();
+    phraseEngine.addEvidence(hum, {
+        id: 'hum-flow', source: 'vad', text: '', words: [], receivedAtSec: 1, audioTimeSec: 1
+    });
+    phraseEngine.reconcileLateEvidence(hum, {
+        id: 'hum-burst', source: 'browser_final', text: 'shiny goat', words: [],
+        receivedAtSec: 9, audioTimeSec: 9
+    }, 9, { requireInWindowFlow: true });
+    assert.strictEqual(hum.states.p0.cleared, false,
+        'hum plus a much later matching burst does not gain a lattice clear');
+})();
+
+(function () {
+    var L = [
+        { time: 0, text: 'shiny gold' },
+        { time: 3, text: 'shiny gold' },
+        { time: 6, text: 'tail words here' }
+    ];
+    var s = phraseEngine.createPhraseSession(
+        phraseEngine.buildPhrasePlan(L, { difficulty: 'expert', audioDuration: 9 }));
+    [1, 4].forEach(function (time) {
+        phraseEngine.addEvidence(s, {
+            id: 'reuse-vad-' + time, source: 'vad', text: '', words: [],
+            receivedAtSec: time, audioTimeSec: time
+        });
+    });
+    phraseEngine.reconcileLateEvidence(s, {
+        id: 'reuse-final', source: 'browser_final', text: 'shiny goat', words: [],
+        receivedAtSec: 6.5, audioTimeSec: 6.5
+    }, 6.5, { requireInWindowFlow: true });
+    var latticeHits = Object.keys(s.states).reduce(function (count, phraseId) {
+        var hits = s.states[phraseId].anchorHits || {};
+        return count + Object.keys(hits).filter(function (idx) {
+            return hits[idx].method === 'lattice';
+        }).length;
+    }, 0);
+    assert.strictEqual(latticeHits, 1,
+        'one aligned ASR token span cannot lattice-credit two phrases');
 })();
 
 console.log('Phrase engine tests passed.');

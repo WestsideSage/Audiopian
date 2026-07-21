@@ -18,8 +18,11 @@ var scoring = loadBrowserCommonJs(path.join(S, 'scoring.js'), {
     require: function (s) { if (s === './match-helpers.js') return matchHelpers; if (s === './sync-helpers.js') return syncHelpers; throw new Error(s); },
     globalThis: globalThis
 });
+var lattice = loadBrowserCommonJs(path.join(S, 'lattice-align.js'), {
+    require: function (s) { if (s === './scoring.js') return scoring; throw new Error(s); }
+});
 var phraseEngine = loadBrowserCommonJs(path.join(S, 'phrase-engine.js'), {
-    require: function (s) { if (s === './scoring.js') return scoring; if (s === './match-helpers.js') return matchHelpers; throw new Error(s); },
+    require: function (s) { if (s === './scoring.js') return scoring; if (s === './match-helpers.js') return matchHelpers; if (s === './lattice-align.js') return lattice; throw new Error(s); },
     globalThis: globalThis
 });
 var paint = loadBrowserCommonJs(path.join(S, 'lyric-paint-helpers.js'));
