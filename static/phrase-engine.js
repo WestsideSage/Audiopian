@@ -73,7 +73,14 @@
     // lines toward ~a quarter of the anchors, FLOORED at FAST_RECOGNIZED_FLOOR genuinely-
     // RECOGNIZED anchors. anchorHits only come from real recognition/reconcile (never bare
     // VAD energy), so humming/cheese (0 recognized) still fails the floor.
-    var FAST_WPS_THRESHOLD = 4.0;
+    // 4.0 -> 3.5 (2026-07-21): the five-run expert morning corpus showed the stuck
+    // VOICED partials cluster just under the old cliff (Roots 3.7/3.88/3.9/3.96,
+    // Klick Clack 3.52-3.95, Shoulder Lean 3.55/3.81 wps) with hits >= the eased
+    // bar -- same recognizer collapse, no relief. A corpus replay of every run with
+    // per-phrase data found 21 voiced partial->clear flips and ZERO miss->clear
+    // flips (a miss has 0 recognized anchors, so the floor is unreachable by
+    // silence/humming regardless of threshold).
+    var FAST_WPS_THRESHOLD = 3.5;
     // Back-to-back lines with minimal pausing: a line whose window is this short is
     // gone before the async recognizer can emit a final for it, so it gets the same
     // allowance as a high-WPS line even at moderate words/sec.

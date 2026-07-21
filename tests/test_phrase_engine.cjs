@@ -635,6 +635,28 @@ var normP = phraseEngine.buildPhrasePlan([
 ], { difficulty: 'expert', audioDuration: 30 });
 assert.ok(normP.phrases[0].anchorsRequired > 2,
     'a normal-tempo expert line keeps its full (higher) bar (buff is fast-only)');
+// The 3.5-4.0 wps band gets the allowance too. The 2026-07-21 five-run morning
+// corpus showed the stuck voiced partials cluster just under the old 4.0 cliff
+// (Roots 3.7-3.96, Klick Clack 3.5-3.95, Shoulder Lean 3.55-3.81) with hits at or
+// above the eased bar -- same recognizer collapse, no easing. Misses cannot flip:
+// the bar still requires >=1 genuinely-recognized anchor.
+var bandP = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'darkness heartless regardless preacher gospel monster crooked' }, // 7 words / 1.9s = 3.68 wps
+    { time: 1.9, text: 'tail words here now please' }
+], { difficulty: 'expert', audioDuration: 30 });
+var bandLine = bandP.phrases.find(function (p) { return p.lineIdx === 0; });
+assert.ok(bandLine.anchors.length >= 5, 'precondition: band line is anchor-rich');
+assert.strictEqual(bandLine.anchorsRequired, Math.max(1, Math.ceil(bandLine.anchors.length * 0.25)),
+    'a 3.5-4.0 wps line gets the fast-recognition allowance (2026-07-21 corpus)');
+// Just BELOW the band the full expert bar holds -- the easing stays fast-only.
+var subBandP = phraseEngine.buildPhrasePlan([
+    { time: 0, text: 'darkness heartless regardless preacher gospel monster' },        // 6 words / 1.9s = 3.16 wps
+    { time: 1.9, text: 'tail words here now please' }
+], { difficulty: 'expert', audioDuration: 30 });
+var subBandLine = subBandP.phrases.find(function (p) { return p.lineIdx === 0; });
+assert.ok(subBandLine.anchors.length >= 5, 'precondition: sub-band line is anchor-rich');
+assert.strictEqual(subBandLine.anchorsRequired, Math.ceil(subBandLine.anchors.length * 0.8),
+    'below 3.5 wps the full expert anchor ratio still applies');
 console.log('Fast-tempo cheese-floored bar: passed.');
 
 // --- Review fix: interim reconcile look-back is capped (cross-repeat steal guard) ---
