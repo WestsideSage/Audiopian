@@ -37,3 +37,7 @@ workers/resolve/.dev.vars
 Thumbs.db
 desktop.ini
 *.tmp
+
+.dev.vars*
+!.dev.vars.example
+!.env.example
